@@ -19,7 +19,7 @@ def isolate(source,destination,workspace,cancel,progress):
         if not python.exists():venv.EnvBuilder(with_pip=True).create(root)
         # Keep optional model dependencies out of the main application runtime.
         run([str(python),'-m','pip','install','torch==2.5.1','torchaudio==2.5.1','--index-url','https://download.pytorch.org/whl/cpu'],cancel)
-        run([str(python),'-m','pip','install','numpy<2','demucs==4.0.1'],cancel)
+        run([str(python),'-m','pip','install','numpy<2','demucs==4.0.1','soundfile==0.13.1'],cancel)
         marker.write_text('demucs4 torch2.5.1',encoding='ascii')
     progress('本地分离人声与背景音乐；首次运行需要下载模型，处理可能较慢。')
     output=Path(workspace)/'separation'

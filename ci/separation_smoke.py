@@ -6,7 +6,15 @@ import numpy as np
 from scipy.io import wavfile
 from voice_clean import process_wav
 with tempfile.TemporaryDirectory() as d:
-    root=Path(d);r=24000;t=np.arange(r*2)/r
+    root=Path(d)
+    import app as ui
+    ui.DATA=root;ui.STATE=root/'test_queue.json'
+    window=ui.tk.Tk();window.withdraw()
+    application=ui.App(window);application.sound_settings();window.update_idletasks()
+    assert any(isinstance(child,ui.tk.Toplevel) for child in window.winfo_children())
+    window.destroy()
+    print('WINDOWS_SOUND_SETTINGS_UI_PASS')
+    r=24000;t=np.arange(r*2)/r
     x=(.1*np.sin(2*np.pi*180*t)+.015*np.sin(2*np.pi*600*t)).astype('float32')
     wavfile.write(root/'original.wav',r,x)
     report=process_wav(root/'original.wav',root/'enhanced.wav',{'audio_profile':'v11','audio_separate':True},threading.Event(),print)
