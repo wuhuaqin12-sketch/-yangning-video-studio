@@ -36,7 +36,7 @@ jobs:
           python-version: '3.12'
       - name: Set isolated installation directory
         shell: pwsh
-        run: '"YANGNING_INSTALL_ROOT=$env:RUNNER_TEMP\YangNingStudioInstallTest" >> $env:GITHUB_ENV'
+        run: '"YANGNING_INSTALL_ROOT=$env:RUNNER_TEMP\YangNingStudio安装测试" >> $env:GITHUB_ENV'
       - run: choco install ffmpeg --no-progress -y
       - run: python ci/fetch_fonts.py
       - run: python program/install_desktop.py --quiet
@@ -49,6 +49,8 @@ jobs:
           if ($data.version -ne $expected) { throw 'Wrong installed version' }
           if (!(Test-Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/pythonw.exe'))) { throw 'Missing runtime' }
           if (!(Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) '杨宁视频工作室.lnk'))) { throw 'Missing shortcut' }
+          $config=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'update_config.json') | ConvertFrom-Json
+          if ($config.manifest_url -ne 'https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json') { throw 'Missing built-in update URL' }
           & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -c "import tkinter,numpy,scipy,PIL; print('Windows installation verified')"
   release:
     needs: [test, windows-install]

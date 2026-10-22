@@ -23,30 +23,16 @@ def install():
     subprocess.run([sys.executable,str(target/'program'/'bootstrap.py'),'--setup-only'],env=env,check=True)
     # Keep this stable launcher backward compatible across app updates.
     shutil.copyfile(target/'program'/'desktop_launch.py',root/'desktop_launch.py')
+    from windows_shortcut import create_shortcuts
+    create_shortcuts(root/'runtime'/'Scripts'/'pythonw.exe',root/'desktop_launch.py',root)
     activate(root,APP_VERSION)
     release=json.loads((source/'release.json').read_text())
     if release.get('update_manifest_url') and not (root/'update_config.json').exists():
         save_config(release['update_manifest_url'],root)
-    # Paths go through environment variables, never interpolate them into PowerShell code.
-    env.update(YN_ROOT=str(root),YN_PYTHON=str(root/'runtime'/'Scripts'/'pythonw.exe'))
-    script="""$ErrorActionPreference='Stop'; $shell=New-Object -ComObject WScript.Shell
-$dirs=@([Environment]::GetFolderPath('Desktop'),(Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'))
-foreach($dir in $dirs) {
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  $s=$shell.CreateShortcut((Join-Path $dir '杨宁视频工作室.lnk'))
-  $s.TargetPath=$env:YN_PYTHON
-  $s.Arguments='"'+(Join-Path $env:YN_ROOT 'desktop_launch.py')+'"'
-  $s.WorkingDirectory=$env:YN_ROOT
-  $s.Description='杨宁视频工作室'
-  $s.Save()
-}"""
-    import base64
-    encoded=base64.b64encode(script.encode('utf-16-le')).decode('ascii')
-    subprocess.run(['powershell.exe','-NoProfile','-EncodedCommand',encoded],env=env,check=True)
     print('安装完成：以后请双击桌面的“杨宁视频工作室”。')
     if '--quiet' in sys.argv:return
     import ctypes
-    ctypes.windll.user32.MessageBoxW(None,'安装完成。以后请双击桌面上的“杨宁视频工作室”。\n自动更新需在软件中配置发布地址。','安装完成',64)
+    ctypes.windll.user32.MessageBoxW(None,'安装完成。以后请双击桌面上的“杨宁视频工作室”。\n已内置更新地址，发布新版后会提示更新。','安装完成',64)
 
 if __name__=='__main__':
     try:install()
