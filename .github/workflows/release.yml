@@ -21,7 +21,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
-      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test
+      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test
         working-directory: program
   windows-install:
     runs-on: windows-latest
@@ -52,6 +52,9 @@ jobs:
           $config=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'update_config.json') | ConvertFrom-Json
           if ($config.manifest_url -ne 'https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json') { throw 'Missing built-in update URL' }
           & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -c "import tkinter,numpy,scipy,PIL; print('Windows installation verified')"
+      - name: Verify real CPU voice separation and denoise on Windows
+        shell: pwsh
+        run: '& (Join-Path $env:YANGNING_INSTALL_ROOT "runtime/Scripts/python.exe") ci/separation_smoke.py'
   release:
     needs: [test, windows-install]
     runs-on: ubuntu-latest

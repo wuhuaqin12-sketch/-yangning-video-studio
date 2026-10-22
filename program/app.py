@@ -18,9 +18,15 @@ class App:
         self.root=root;root.title('杨宁视频工作室 · 生成预览 · '+VERSION)
         root.geometry('1000x740');root.minsize(840,660)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
-        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',alignment='auto',font='',font_percent='5.6')
+        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',alignment='auto',audio_profile='off',font='',font_percent='5.6')
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.auto_cut=tk.BooleanVar(value=True)
+        self.v['audio_separate']=tk.BooleanVar(value=False)
+        try:
+            sound=json.loads((DATA/'sound_preferences.json').read_text(encoding='utf8'))
+            if sound.get('audio_profile') in ('off','v11'):self.v['audio_profile'].set(sound['audio_profile'])
+            self.v['audio_separate'].set(sound.get('audio_separate') is True)
+        except (OSError,ValueError):pass
         try:self.pending_style=json.loads((DATA/'style_no_denoise.json').read_text(encoding='utf8'))
         except (OSError,ValueError):self.pending_style={}
         for k,value in dict(trim=True,mute=False,denoise=False,separate=False,burn=False).items():self.v[k]=tk.BooleanVar(value=value)
@@ -51,7 +57,7 @@ class App:
 
         ttk.Label(pane,text='不额外调速。剪掉的空白会同步调整画面和字幕；多余词先试听再决定。').pack(anchor='w',pady=(8,4))
         line=ttk.Frame(pane);line.pack(fill='x',pady=4)
-        ttk.Label(line,text='保留原声，不做降噪或人声分离；其他选项在“更多设置”').pack(side='left')
+        ttk.Button(line,text='声音处理 / 降噪试听',command=self.sound_settings).pack(side='left')
         ttk.Button(line,text='更多设置 / 批量',command=self.advanced).pack(side='right')
         ttk.Label(pane,text='不会自动删词或擦画面字幕。可先选一小段试听，再决定修改。').pack(anchor='w',pady=(0,8))
         line=ttk.Frame(pane);line.pack(fill='x',pady=6)
@@ -94,6 +100,41 @@ class App:
             except Cancelled:self.events.put(('state',job['id'],'已停止',dict(error='用户停止了任务')))
             except Exception as e:self.events.put(('state',job['id'],'失败',dict(error=str(e))))
         self.worker(work)
+    def sound_settings(self):
+        if self.busy:return
+        win=tk.Toplevel(self.root);win.title('声音处理');win.geometry('620x420')
+        box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
+        ttk.Radiobutton(box,text='关闭降噪',variable=self.v['audio_profile'],value='off').pack(anchor='w',pady=4)
+        ttk.Radiobutton(box,text='启用温和降噪（底噪、沙沙声、短促点击声）',variable=self.v['audio_profile'],value='v11').pack(anchor='w',pady=4)
+        ttk.Checkbutton(box,text='分离人声与背景音乐（独立可选）',variable=self.v['audio_separate']).pack(anchor='w',pady=8)
+        ttk.Label(box,text='人声分离首次需要联网下载较大运行环境和模型，仅支持 Python 3.10–3.12；以后在本机处理。',wraplength=570).pack(anchor='w',pady=4)
+        ttk.Label(box,text='设置用于新任务。保留原文件和原声；不自动删词、不主动改变音调。杂声与人声重叠时可能残留或影响音质，请对比试听。',wraplength=570).pack(anchor='w',pady=4)
+        def listen():
+            if self.busy:return
+            job={k:v.get() for k,v in self.v.items()}
+            if not Path(job.get('video','')).is_file():messagebox.showinfo('选择视频','请先选择视频。',parent=win);return
+            job.update(id=uuid.uuid4().hex,name=Path(job['video']).stem,clean_project=True,auto_cut=self.auto_cut.get(),status='待处理')
+            self.jobs.append(job);self.refresh();self.table.selection_set(job['id']);win.destroy()
+            def work():
+                try:
+                    if job.get('audio'):
+                        folder=execute(job,self.stop,self.events.put,export=False)
+                        if folder:self.events.put(('sound_ready',False))
+                    else:
+                        from clean_project import prepare
+                        folder=prepare(job,self.stop,self.progress,make_previews=False)
+                        if self.pending_style:
+                            from clean_project import load,save
+                            m=load(folder);m['style']=dict(self.pending_style);save(Path(folder)/'clean_project.json',m)
+                        self.events.put(('state',job['id'],'待试听',dict(analysis=folder)))
+                        self.events.put(('sound_ready',True))
+                except Cancelled:self.events.put(('state',job['id'],'已停止',dict(error='用户停止了任务')))
+                except Exception as e:self.events.put(('state',job['id'],'失败',dict(error=str(e))))
+            self.worker(work)
+        ttk.Button(box,text='生成原声 / 处理后试听',command=listen).pack(anchor='w',pady=10)
+        def save_sound():
+            (DATA/'sound_preferences.json').write_text(json.dumps({k:self.v[k].get() for k in ('audio_profile','audio_separate')}),encoding='utf8');win.destroy()
+        ttk.Button(box,text='保存设置，返回制作',command=save_sound).pack(anchor='e')
     def clean_review(self):
         if self.busy:return
         try:j=self.current(True);folder=Path(j['analysis'])
@@ -322,6 +363,8 @@ class App:
                     for j in self.jobs:
                         if j['id']==e[1]:j['step']=e[2]
                     self.refresh()
+                elif e[0]=='sound_ready':
+                    self.root.after(200,self.clean_review if e[1] else lambda:self.listen(True))
                 elif e[0]=='state':
                     for j in self.jobs:
                         if j['id']==e[1]:

@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.11.1'
+VERSION='0.11.2'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -82,12 +82,20 @@ def preview_audio(folder,cancel):
     if m.get('version') not in ('0.10.0','0.10.1',VERSION):raise ValueError('旧工程含旧版声音处理，请从原素材重新分析。')
     ev=validate_events(import_plan(folder/'pause_plan.csv'),m['audio_duration']);r,c=m['rate'],m['channels']
     speed=playback_speed(m['job'])
-    plan_hash=hashlib.sha256((folder/'pause_plan.csv').read_bytes()+json.dumps([VERSION,speed,m['job'].get('denoise'),m['job'].get('clean_mode','standard'),m['job'].get('mute',True)],sort_keys=True).encode('utf8')).hexdigest()
+    plan_hash=hashlib.sha256((folder/'pause_plan.csv').read_bytes()+json.dumps([VERSION,speed,m['job'].get('denoise'),m['job'].get('clean_mode','standard'),m['job'].get('mute',True),m['job'].get('audio_profile'),m['job'].get('audio_separate')],sort_keys=True).encode('utf8')).hexdigest()
     cache_path=folder/'audio_versions.json'
     if cache_path.is_file():
         cache=json.loads(cache_path.read_text(encoding='utf8'))
         if cache.get('plan_hash')==plan_hash and all((folder/cache[k]).is_file() for k in ('A','B')) and (folder/'edited.f32').is_file():return cache['duration'],ev
-    total=apply(folder/'original.f32',folder/'edited.f32',r,c,ev,cancel)
+    audio_source=folder/'original.f32'
+    from voice_clean import enabled,process_wav
+    if enabled(m['job']):
+        audio_source=folder/'enhanced.f32'
+        if not audio_source.exists():
+            run([executable('ffmpeg'),'-v','error','-y','-f','f32le','-ar',str(r),'-ac',str(c),'-i',str(folder/'original.f32'),'-c:a','pcm_f32le',str(folder/'original.wav')],cancel)
+            process_wav(folder/'original.wav',folder/'enhanced.wav',m['job'],cancel)
+            run([executable('ffmpeg'),'-v','error','-y','-i',str(folder/'enhanced.wav'),'-f','f32le',str(audio_source)],cancel)
+    total=apply(audio_source,folder/'edited.f32',r,c,ev,cancel)
     original=folder/'A_original.m4a'
     if not original.exists():run([executable('ffmpeg'),'-v','error','-y','-i',m['job']['audio'],'-map','0:a:0','-c:a','aac','-b:a','192k',str(original)],cancel)
     import uuid

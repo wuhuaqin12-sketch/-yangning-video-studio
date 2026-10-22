@@ -37,19 +37,19 @@ def prepare(job,cancel,progress=lambda s:None,make_previews=True):
     folder=Path(tempfile.mkdtemp(prefix='试听工程_',dir=out));progress('提取原声；保留源视频，不导出整片…')
     rate=int(a.get('sample_rate',48000));channels=min(2,int(a.get('channels',1)))
     run([executable('ffmpeg'),'-v','error','-y','-i',str(source),'-vn','-ar',str(rate),'-ac',str(channels),'-c:a','pcm_f32le',str(folder/'original.wav')],cancel)
-    # Preserve the original decoded PCM. No filter, gate or separation.
-    shutil.copyfile(folder/'original.wav',folder/'enhanced.wav')
-    separation=None;report=dict(enabled=False,mode='original_audio')
-    progress('保留原始配音，仅检查自然停顿…')
+    from voice_clean import process_wav
+    report=process_wav(folder/'original.wav',folder/'enhanced.wav',job,cancel,progress)
+    separation=report.get('separation')
+    progress('检查自然停顿；剪短时同步画面和字幕…')
     sources={'video':identity(video),'audio':identity(source)}
     if srt:sources['srt']=identity(srt)
     from auto_silence import propose
-    automatic=propose(folder/'enhanced.wav',cues) if job.get('auto_cut',True) else []
+    automatic=propose(folder/'original.wav',cues) if job.get('auto_cut',True) else []
     progress(f'自动剪短{len(automatic)}处长空白；保留自然停顿。')
     m=dict(version='0.10.0',video=str(video),audio=str(source),sources=sources,
            stream=v,duration=duration,rate=rate,channels=channels,cues=cues,edits=[],auto_edits=automatic,separation=separation,
            style=None,denoise=report,preview_start=0,preview_end=min(15,duration),
-           note='所有修改从源素材和原始PCM重建；生成预览不做降噪、人声分离或自动删词。')
+           note='原始PCM始终保留；声音处理按明确开关执行，不自动删词。')
     save(folder/'clean_project.json',m);rebuild(folder,cancel)
     if make_previews:
         preview(folder,cancel,0,min(15,duration))
@@ -165,7 +165,7 @@ def export(folder,cancel,progress=lambda s:None,preview_time=None,preview_range=
         if not 0<=t<duration:raise ValueError('预览时间超出视频。')
         run(args+['-filter_complex',graph,'-map','[v]','-ss',str(t),'-frames:v','1',str(out)],cancel,cwd=folder)
         return str(out)
-    progress('从源视频最终导出；保留原始配音，从源素材合成…')
+    progress('从源视频最终导出；使用已试听的声音处理设置…')
     if not m['cuts'] and not styled:
         encoding=['-map','0:v:0','-map','1:a:0','-c:v','copy']
     else:encoding=['-filter_complex',graph,'-map','[v]','-map','1:a:0','-c:v','libx264','-threads','4','-preset','medium','-crf','16','-pix_fmt','yuv420p','-fps_mode','vfr']
