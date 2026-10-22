@@ -1,0 +1,5 @@
+仓库：wuhuaqin12-sketch/-yangning-video-studio
+正式发布由 .github/workflows/release.yml 执行。测试和 Windows 安装检查通过后创建 Release。
+更新 release.json、program/desktop_update.py、program/engine.py 的版本号后推送 main。
+已发布版本不覆盖；新版本使用新的三段版本号。
+安装包的固定更新地址由 make_release.py 写入；下载内容包含SHA-256校验。

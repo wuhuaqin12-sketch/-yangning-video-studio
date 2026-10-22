@@ -1,0 +1,3 @@
+18 tests passed: long_caption_test, publish_style_test, clean_project_test.
+Verified actual FFmpeg export, text completeness, fixed font size, page timing bounds, keyword colors, cover/audio regression, and rendered English layout.
+Windows launcher not executed in this Linux environment.

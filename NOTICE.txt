@@ -1,0 +1,9 @@
+Project code: MIT, see LICENSE.txt.
+This version contains no speech denoising or vocal separation modules/models.
+Bundled fonts retain their OFL licenses in program/fonts.
+No FFmpeg binaries are bundled; installed runtime dependencies retain their licenses.
+FFmpeg: https://ffmpeg.org/
+NumPy: https://numpy.org/
+SciPy: https://scipy.org/
+Pillow: https://python-pillow.org/
+Optional multilingual reference alignment: stable-ts, Whisper, Torch and torchaudio retain their respective licenses and are downloaded separately when needed.

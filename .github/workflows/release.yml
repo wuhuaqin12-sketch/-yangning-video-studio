@@ -1,0 +1,66 @@
+name: Test and publish desktop app
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: python -m pip install -r program/requirements.txt
+      - run: python ci/fetch_fonts.py
+      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test
+        working-directory: program
+  windows-install:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+      YANGNING_INSTALL_ROOT: ${{ runner.temp }}\YangNingStudioInstallTest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: choco install ffmpeg --no-progress -y
+      - run: python ci/fetch_fonts.py
+      - run: python program/install_desktop.py --quiet
+      - name: Verify installed runtime, version and desktop shortcut
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $data=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'current.json') | ConvertFrom-Json
+          $expected=(Get-Content release.json | ConvertFrom-Json).version
+          if ($data.version -ne $expected) { throw 'Wrong installed version' }
+          if (!(Test-Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/pythonw.exe'))) { throw 'Missing runtime' }
+          if (!(Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) '杨宁视频工作室.lnk'))) { throw 'Missing shortcut' }
+          & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -c "import tkinter,numpy,scipy,PIL; print('Windows installation verified')"
+  release:
+    needs: [test, windows-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python ci/fetch_fonts.py
+      - run: python ci/publish_release.py

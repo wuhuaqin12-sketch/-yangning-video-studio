@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+program/fonts/*.ttf
+program/fonts/*.otf
+*.partial.mp4

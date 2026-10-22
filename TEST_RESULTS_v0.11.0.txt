@@ -1,0 +1,7 @@
+Validation:
+desktop_update_test: 10 tests passed
+long_caption_test + publish_style_test + clean_project_test: 18 tests passed
+28 total. Actual FFmpeg render/export passed.
+Verified: staging before activation, rollback pointer, failed digest/size, cancellation, ZIP traversal/symlink/Windows device rejection, release generation consistency, subtitle paging/text/color, and existing export regressions.
+Not executed: Windows installer/shortcuts/native GUI, live HTTPS update service.
+No live release endpoint was configured or published.
