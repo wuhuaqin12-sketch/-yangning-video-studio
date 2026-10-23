@@ -43,6 +43,7 @@ def prepare(job,cancel,progress=lambda s:None,make_previews=True):
     progress('检查自然停顿；剪短时同步画面和字幕…')
     sources={'video':identity(video),'audio':identity(source)}
     if srt:sources['srt']=identity(srt)
+    if job.get('audio_reference_srt'):sources['audio_reference_srt']=identity(job['audio_reference_srt'])
     from auto_silence import propose
     automatic=propose(folder/'original.wav',cues) if job.get('auto_cut',True) else []
     progress(f'自动剪短{len(automatic)}处长空白；保留自然停顿。')
@@ -74,7 +75,7 @@ def mapped(t,cuts):
 def rebuild(folder,cancel):
     folder=Path(folder);m=load(folder);edits=validate_edits(m['edits'],m['duration'])
     from auto_silence import merge_cuts
-    r,x=wavfile.read(folder/'enhanced.wav');x=x.copy();cuts=merge_cuts(m.get('auto_edits',[])+[e for e in edits if e['kind']=='cut'])
+    r,x=wavfile.read(folder/'enhanced.wav');enhanced_samples=len(x);x=x.copy();cuts=merge_cuts(m.get('auto_edits',[])+[e for e in edits if e['kind']=='cut'])
     for e in edits:
         if cancel.is_set():raise Cancelled()
         a,b=round(e['start']*r),min(len(x),round(e['end']*r));k=min(round(r*.005),a,len(x)-b)
@@ -100,6 +101,15 @@ def rebuild(folder,cancel):
     (folder/'subtitles.srt').write_text('\n\n'.join(f'{i}\n{stamp(a)} --> {stamp(b)}\n{text}' for i,a,b,text in adjusted)+'\n',encoding='utf-8-sig')
     m['adjusted']=adjusted;m['cuts']=cuts;m['output_duration']=mapped(m['duration'],cuts)
     save(folder/'clean_project.json',m)
+    from sound_report import write_report
+    muted=[]
+    for e in edits:
+        if e['kind']!='mute':continue
+        a,b=round(e['start']*r),min(enhanced_samples,round(e['end']*r))
+        if b<=a:continue
+        k=min(round(r*.005),a,enhanced_samples-b)
+        muted.append(dict(start=a/r,end=b/r,fade_start=(a-k)/r,fade_end=(b+k)/r))
+    write_report(folder,m.get('denoise'),enhanced_samples/r,events=[dict(e,kind='cut') for e in cuts],mutes=muted,source=m['audio'],output_duration=len(x)/r,cues=m['denoise'].get('reference_cues',m['cues']),subtitle_reference=m['denoise'].get('reference_path') or m['sources'].get('srt',[''])[0])
     return m
 
 def edit(folder,start,end,kind,cancel):

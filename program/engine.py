@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.11.3'
+VERSION='0.11.4'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -28,7 +28,7 @@ def playback_speed(job):
 
 def fingerprint(job):
     result={}
-    for k in ('video','audio','source_srt','target_srt'):
+    for k in ('video','audio','source_srt','target_srt','audio_reference_srt'):
         if not job.get(k):continue
         p=Path(job[k]).resolve();st=p.stat()
         with p.open('rb') as f:
@@ -62,6 +62,9 @@ def prepare(job,cancel,progress=lambda s:None):
     raw=folder/'original.f32';progress('提取原配音，保留声道/采样率，不调速、不统一改音量')
     args=[executable('ffmpeg'),'-v','error','-y','-i',str(audio),'-vn','-ac',str(channels),'-ar',str(rate)]
     run(args+['-f','f32le',str(raw)],cancel);duration=raw.stat().st_size/(4*channels*rate)
+    if job.get('audio_reference_srt'):
+        from sound_report import load_reference
+        load_reference(job['audio_reference_srt'],duration)
     if job.get('alignment')=='multi':
         from multilingual import align
         dst=align(dst,audio,folder,cancel,progress,job['language'],duration)
@@ -86,7 +89,7 @@ def preview_audio(folder,cancel):
     cache_path=folder/'audio_versions.json'
     if cache_path.is_file():
         cache=json.loads(cache_path.read_text(encoding='utf8'))
-        if cache.get('plan_hash')==plan_hash and all((folder/cache[k]).is_file() for k in ('A','B')) and (folder/'edited.f32').is_file():return cache['duration'],ev
+        if cache.get('plan_hash')==plan_hash and all((folder/cache[k]).is_file() for k in ('A','B')) and (folder/'edited.f32').is_file() and (folder/'声音处理明细.txt').is_file():return cache['duration'],ev
     audio_source=folder/'original.f32'
     from voice_clean import enabled,process_wav
     if enabled(m['job']):
@@ -107,6 +110,12 @@ def preview_audio(folder,cancel):
     adjusted=[(i,mapped(a,ev)/speed,mapped(b,ev)/speed,text) for i,a,b,text in m['target']]
     if 'video_stream' in m:
         write_subs(adjusted,folder,m['video_stream']['width'],m['video_stream']['height'],m['job'].get('font') or 'Noto Serif CJK JP',round(m['video_stream']['height']*float(m['job'].get('font_percent',5.6))/100))
+    from sound_report import write_report
+    sound_meta=json.loads((folder/'声音处理报告.json').read_text(encoding='utf8')) if enabled(m['job']) else {'enabled':False,'mode':'original_audio'}
+    if m['job'].get('audio_reference_srt') and not sound_meta.get('reference_path'):
+        from sound_report import load_reference
+        sound_meta.update(load_reference(m['job']['audio_reference_srt'],m['audio_duration']))
+    write_report(folder,sound_meta,m['audio_duration'],events=ev,speed=speed,source=m['job']['audio'],timeline='原配音时间轴',output_duration=total,cues=sound_meta.get('reference_cues',m['target']),subtitle_reference=sound_meta.get('reference_path') or m['job'].get('target_srt',''))
     save_json(cache_path,{'A':original.name,'B':optimized.name,'plan_hash':plan_hash,'duration':total})
     return total,ev
 

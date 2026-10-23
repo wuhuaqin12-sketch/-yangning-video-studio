@@ -22,7 +22,7 @@ jobs:
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test
+      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test
         working-directory: program
   windows-install:
     runs-on: windows-latest

@@ -40,10 +40,14 @@ def process_wav(source,destination,job,cancel,progress=lambda s:None):
     source,destination=Path(source),Path(destination)
     if source.resolve()==destination.resolve():raise ValueError('必须保留原声，不能覆盖源文件。')
     if cancel.is_set():raise Cancelled()
+    rate,x=wavfile.read(source)
+    reference={}
+    if job.get('audio_reference_srt'):
+        from sound_report import load_reference
+        reference=load_reference(job['audio_reference_srt'],len(x)/rate)
     if not enabled(job):
         shutil.copyfile(source,destination)
-        return dict(enabled=False,mode='original_audio',separation=None)
-    rate,x=wavfile.read(source)
+        return dict(enabled=False,mode='original_audio',separation=None,**reference)
     if x.dtype.kind!='f':raise ValueError('声音处理需要解码后的浮点PCM。')
     separation=None;input_file=source
     if job.get('audio_separate'):
@@ -81,7 +85,10 @@ def process_wav(source,destination,job,cancel,progress=lambda s:None):
         gain=min(1.,.98/peak) if peak else 1.
         if gain<1:wavfile.write(partial,r,(y*gain).astype('float32'))
         partial.replace(destination)
-        report=dict(enabled=True,mode=job.get('audio_profile') if denoise else 'separation_only',denoise_enabled=denoise,filters=filters,rate=rate,samples=len(y),compensated_latency_samples=latency if denoise else 0,latency_sample_rate=48000 if deep else rate,manual_phrase_review_required=True,semantic_noise_removal=False,channels=1 if y.ndim==1 else y.shape[1],separation=separation,peak_gain=gain,
+        from sound_report import attenuation
+        _,noise_input=wavfile.read(input_file)
+        intervals=attenuation(noise_input,y*gain,rate,gain) if denoise else []
+        report=dict(**reference,attenuated_intervals=intervals,attenuation_reference='分离后人声' if separation else '原声',enabled=True,mode=job.get('audio_profile') if denoise else 'separation_only',denoise_enabled=denoise,filters=filters,rate=rate,samples=len(y),compensated_latency_samples=latency if denoise else 0,latency_sample_rate=48000 if deep else rate,manual_phrase_review_required=True,semantic_noise_removal=False,channels=1 if y.ndim==1 else y.shape[1],separation=separation,peak_gain=gain,
                     note='降噪不能保证消除全部杂音；保留原声供A/B试听。杂声和人声重叠时可能残留，不自动删词。')
         (destination.parent/'声音处理报告.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
         return report

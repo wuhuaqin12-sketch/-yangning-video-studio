@@ -15,10 +15,10 @@ def open_path(p):
     else:subprocess.Popen(['xdg-open',str(p)])
 class App:
     def __init__(self,root):
-        self.root=root;root.title('杨宁视频工作室 · 生成预览 · '+VERSION)
-        root.geometry('1000x740');root.minsize(840,660)
+        self.root=root;root.title('杨宁视频工作室 · 成片制作 · '+VERSION)
+        root.geometry(f'1000x{max(640,min(780,root.winfo_screenheight()-100))}');root.minsize(880,640)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
-        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',alignment='auto',audio_profile='off',font='',font_percent='5.6')
+        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.auto_cut=tk.BooleanVar(value=True)
         self.v['audio_separate']=tk.BooleanVar(value=False)
@@ -38,49 +38,101 @@ class App:
                     if j.get('status') not in ('失败','已停止','待处理','待导出','待试听') and not j.get('status','').startswith('完成'):j['status']='已停止';j['error']='上次运行中断，请重试。'
                     self.jobs.append(j)
         except (OSError,ValueError):pass
-        pane=ttk.Frame(root,padding=16);pane.pack(fill='both',expand=True)
-        ttk.Label(pane,text='杨宁视频工作室',font=('Microsoft YaHei UI',22,'bold')).pack(anchor='w')
-        ttk.Label(pane,text='配音与字幕同步 · 自然停顿调整 · 选好素材，一键导出').pack(anchor='w',pady=(3,12))
-        form=ttk.LabelFrame(pane,text='选择素材',padding=12);form.pack(fill='x')
-        for i,(k,label) in enumerate([('video','1  原视频'),('audio','配音（可留空）'),('source_srt','原视频时间轴语言'),('output','保存到')]):
-            ttk.Label(form,text=label).grid(row=(i if i<3 else 4),column=0,sticky='w',padx=(0,10),pady=5)
-            ttk.Entry(form,textvariable=self.v[k]).grid(row=(i if i<3 else 4),column=1,sticky='ew')
-            ttk.Button(form,text='选择',command=lambda key=k:self.pick(key)).grid(row=(i if i<3 else 4),column=2,padx=(6,0))
+        outer=ttk.Frame(root);outer.pack(fill='both',expand=True)
+        canvas=tk.Canvas(outer,highlightthickness=0);scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set);scroll.pack(side='right',fill='y');canvas.pack(side='left',fill='both',expand=True)
+        pane=ttk.Frame(canvas,padding=14);pane_id=canvas.create_window((0,0),window=pane,anchor='nw')
+        pane.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>',lambda e:canvas.itemconfigure(pane_id,width=e.width,height=max(pane.winfo_reqheight(),e.height)))
+        heading=ttk.Frame(pane);heading.pack(fill='x',pady=(0,8))
+        ttk.Label(heading,text='杨宁视频工作室',font=('Microsoft YaHei UI',20,'bold')).pack(side='left')
+        ttk.Button(heading,text='更多设置 / 批量',command=self.advanced).pack(side='right')
+        form=ttk.LabelFrame(pane,text='1  选择素材',padding=8);form.pack(fill='x',pady=3)
+        for i,(k,label) in enumerate([('video','原视频'),('audio','替换配音（可留空）'),('source_srt','原视频时间轴字幕 SRT')]):
+            ttk.Label(form,text=label).grid(row=i,column=0,sticky='w',padx=(0,10),pady=3)
+            ttk.Entry(form,textvariable=self.v[k]).grid(row=i,column=1,sticky='ew')
+            ttk.Button(form,text='选择',command=lambda key=k:self.pick(key)).grid(row=i,column=2,padx=(6,0))
         form.columnconfigure(1,weight=1)
-        ttk.Label(form,text='SRT / 带时间轴TXT：时间对应原视频，文字可用对应译文；自动匹配配音时，参考文字须与配音语言一致。',wraplength=650).grid(row=5,column=0,columnspan=3,sticky='w',pady=(5,0))
-        self.target_label=ttk.Label(form,text='独立配音SRT（可选）')
+        self.target_label=ttk.Label(form,text='独立配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
-        self.target_label.grid(row=3,column=0,sticky='w',padx=(0,10),pady=5);self.target_entry.grid(row=3,column=1,sticky='ew');self.target_button.grid(row=3,column=2,padx=(6,0))
+        for widget,column in [(self.target_label,0),(self.target_entry,1),(self.target_button,2)]:
+            widget.grid(row=3,column=column,sticky='ew',pady=3);widget.grid_remove()
         self.language_name=tk.StringVar(value='日语')
-        for widget in (self.target_label,self.target_entry,self.target_button):widget.grid_remove()
-
-        ttk.Label(pane,text='不额外调速。剪掉的空白会同步调整画面和字幕；多余词先试听再决定。').pack(anchor='w',pady=(8,4))
-        line=ttk.Frame(pane);line.pack(fill='x',pady=4)
-        ttk.Button(line,text='声音处理 / 降噪试听',command=self.sound_settings).pack(side='left')
-        ttk.Button(line,text='更多设置 / 批量',command=self.advanced).pack(side='right')
-        ttk.Label(pane,text='不会自动删词或擦画面字幕。可先选一小段试听，再决定修改。').pack(anchor='w',pady=(0,8))
-        line=ttk.Frame(pane);line.pack(fill='x',pady=6)
-        self.main_button=ttk.Button(line,text='一键制作并导出',command=self.clean_start);self.main_button.pack(side='left',ipadx=18,ipady=6)
+        ttk.Label(form,text='去噪专用字幕在下一步单独选择；这里的字幕用于原画面时间轴。',wraplength=820).grid(row=4,column=0,columnspan=3,sticky='w',pady=(4,0))
+        sound=ttk.LabelFrame(pane,text='2  去噪与整段试听',padding=8);sound.pack(fill='x',pady=3)
+        ttk.Button(sound,text='一键去噪 / 选择对应字幕',command=self.sound_settings).pack(side='left')
+        ttk.Button(sound,text='继续整段试听 / 修改',command=self.review_current).pack(side='left',padx=8)
+        timing=ttk.LabelFrame(pane,text='3  停顿与速度',padding=8);timing.pack(fill='x',pady=3)
+        ttk.Checkbutton(timing,text='剪短多余空白，保留自然停顿',variable=self.auto_cut).pack(side='left')
+        ttk.Button(timing,text='语言 / 倍速规则',command=self.timing_settings).pack(side='left',padx=8)
+        visual=ttk.LabelFrame(pane,text='4  标题、字幕样式与封面',padding=8);visual.pack(fill='x',pady=3)
+        ttk.Button(visual,text='设置成片样式',command=self.publish).pack(side='left')
+        ttk.Label(visual,text='沿用已保存的字体和字号；背景、标题按本次素材设置。').pack(side='left',padx=10)
+        final=ttk.LabelFrame(pane,text='5  导出成片',padding=8);final.pack(fill='x',pady=3)
+        output=ttk.Frame(final);output.pack(fill='x',pady=(0,6))
+        ttk.Label(output,text='保存到').pack(side='left',padx=(0,10))
+        ttk.Entry(output,textvariable=self.v['output']).pack(side='left',fill='x',expand=True)
+        ttk.Button(output,text='选择',command=lambda:self.pick('output')).pack(side='left',padx=(6,0))
+        line=ttk.Frame(final);line.pack(fill='x')
+        self.main_button=ttk.Button(line,text='制作并导出成片',command=self.finish_movie);self.main_button.pack(side='left',ipadx=16,ipady=3)
         ttk.Button(line,text='停止',command=self.request_stop).pack(side='left',padx=8)
-        ttk.Button(line,text='预览（可选）',command=self.clean_review).pack(side='left')
-        self.status=tk.StringVar(value='选择素材与排版后，点击“一键制作并导出”。不用先试听。')
-        ttk.Label(pane,textvariable=self.status,wraplength=900).pack(anchor='w',pady=(8,3))
-        self.bar=ttk.Progressbar(pane,mode='indeterminate');self.bar.pack(fill='x',pady=(0,8))
-        self.table=ttk.Treeview(pane,columns=('name','status','detail'),show='headings',height=5)
-        self.table.pack(fill='both',expand=True,pady=7)
+        ttk.Button(line,text='打开成片文件夹',command=self.open_result).pack(side='left')
+        self.status=tk.StringVar(value='按1—5的顺序操作；去噪可选，已确认的静音修改会沿用到成片。')
+        ttk.Label(pane,textvariable=self.status,wraplength=900).pack(anchor='w',pady=(6,2))
+        self.bar=ttk.Progressbar(pane,mode='indeterminate');self.bar.pack(fill='x',pady=(0,4))
+        history=ttk.Notebook(pane);history.pack(fill='both',expand=True,pady=3)
+        tasks=ttk.Frame(history);logs=ttk.Frame(history);history.add(tasks,text='任务');history.add(logs,text='运行记录')
+        self.table=ttk.Treeview(tasks,columns=('name','status','detail'),show='headings',height=3)
+        self.table.pack(fill='both',expand=True)
         for key,label,width in [('name','任务',210),('status','状态',135),('detail','当前步骤 / 失败原因',550)]:self.table.heading(key,text=label);self.table.column(key,width=width,minwidth=70)
         self.table.bind('<Double-1>',self.show_detail)
-        self.log=tk.Text(pane,height=5,wrap='word');self.log.pack(fill='x',pady=(7,0))
+        self.log=tk.Text(logs,height=3,wrap='word');self.log.pack(fill='both',expand=True)
         from desktop_ui import DesktopUpdates
         self.desktop_updates=DesktopUpdates(self,pane)
         self.refresh();root.after(100,self.poll);root.after(1000,self.heartbeat);root.protocol('WM_DELETE_WINDOW',self.close)
+    def review_current(self):
+        if self.busy:return
+        try:folder=Path(self.current(True)['analysis'])
+        except Exception:messagebox.showinfo('先处理声音','请先在步骤2完成声音处理。');return
+        if (folder/'clean_project.json').is_file():self.clean_review()
+        else:self.full_sound_review()
+    def timing_settings(self):
+        if self.busy:return
+        win=tk.Toplevel(self.root);win.title('停顿与速度');win.geometry('620x250')
+        box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
+        ttk.Checkbutton(box,text='剪短多余空白，保留自然停顿',variable=self.auto_cut).pack(anchor='w',pady=5)
+        line=ttk.Frame(box);line.pack(fill='x',pady=8)
+        ttk.Label(line,text='配音语言').pack(side='left')
+        choices=('英语','日语','法语','德语','西班牙语','意大利语','韩语','葡萄牙语','中文','印尼语','其他语言')
+        language=ttk.Combobox(line,textvariable=self.language_name,values=choices,state='readonly',width=12)
+        language.pack(side='left',padx=8);language.bind('<<ComboboxSelected>>',self.language_changed)
+        ttk.Label(box,text='整段去噪试听保持原速。成片沿用当前规则：日语配音1.1倍，其他配音和原声工程保持原速；保持音调。',wraplength=570).pack(anchor='w',pady=8)
+        ttk.Button(box,text='保存，返回制作',command=win.destroy).pack(anchor='e',pady=8)
+    def finish_movie(self):
+        if self.busy:return
+        from production import same_material,finish
+        job=self.current();values={k:v.get() for k,v in self.v.items()}
+        folder=Path(job['analysis']) if job and job.get('analysis') else None
+        try:reuse=folder is not None and same_material(folder,values)
+        except Exception as e:messagebox.showinfo('工程无法读取',str(e));return
+        if not reuse:self.clean_start();return
+        style=dict(self.pending_style);automatic=self.auto_cut.get();ident=job['id']
+        def work():
+            try:
+                self.events.put(('state',ident,'正在导出',{}))
+                path=finish(folder,values,style,automatic,self.stop,self.progress)
+                self.events.put(('state',ident,'完成·检查通过',dict(result=str(Path(path).parent),error='')))
+                self.events.put(('publish_done',path))
+            except Cancelled:self.events.put(('state',ident,'已停止',dict(error='用户停止了任务')))
+            except Exception as e:self.events.put(('state',ident,'失败',dict(error=str(e))))
+        self.worker(work)
     def clean_start(self):
         if self.busy:return
         from clean_project import prepare,load,save,export
         style=dict(self.pending_style)
         job={k:v.get() for k,v in self.v.items()}
-        job.update(id=uuid.uuid4().hex,name=Path(job['video']).stem or '原声预览',status='待处理',clean_project=True,auto_cut=self.auto_cut.get())
+        job.update(id=uuid.uuid4().hex,name=Path(job['video']).stem or '原声预览',status='待处理',clean_project=True,auto_cut=self.auto_cut.get(),trim=self.auto_cut.get())
         if not Path(job['video']).is_file():messagebox.showinfo('选择视频','请先选择有效的视频。');return
         self.jobs.append(job);self.refresh();self.table.selection_set(job['id'])
         def work():
@@ -102,15 +154,24 @@ class App:
         self.worker(work)
     def sound_settings(self):
         if self.busy:return
-        win=tk.Toplevel(self.root);win.title('声音处理');win.geometry('680x560')
+        win=tk.Toplevel(self.root);win.title('声音处理');win.geometry('720x700')
         box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
         ttk.Radiobutton(box,text='关闭降噪',variable=self.v['audio_profile'],value='off').pack(anchor='w',pady=4)
         ttk.Radiobutton(box,text='启用温和降噪（底噪、沙沙声、短促点击声）',variable=self.v['audio_profile'],value='v11').pack(anchor='w',pady=4)
         ttk.Radiobutton(box,text='V11 加强降噪（本次：RNNoise + 低频与点击声清理）',variable=self.v['audio_profile'],value='v11_deep').pack(anchor='w',pady=4)
+        ttk.Label(box,text='对应这段音频的字幕 SRT（可选）').pack(anchor='w',pady=(8,2))
+        refline=ttk.Frame(box);refline.pack(fill='x')
+        ttk.Entry(refline,textvariable=self.v['audio_reference_srt']).pack(side='left',fill='x',expand=True)
+        def choose_reference():
+            path=filedialog.askopenfilename(parent=win,title='选择待降噪音频对应时间轴的字幕',filetypes=[('字幕 SRT','*.srt'),('带时间轴 TXT','*.txt')])
+            if path:self.v['audio_reference_srt'].set(path)
+        ttk.Button(refline,text='选择字幕',command=choose_reference).pack(side='right',padx=4)
+        ttk.Label(box,text='仅用于声音报告按时间段附上字幕，不替换视频字幕；请选与待降噪音频匹配的时间轴。',wraplength=650).pack(anchor='w',pady=4)
         def v11_preset():
             self.v['audio_profile'].set('v11_deep');self.v['audio_separate'].set(True)
-        ttk.Button(box,text='按本次标准设置：人声分离 + 加强降噪',command=v11_preset).pack(anchor='w',pady=6)
+        ttk.Button(box,text='一键降噪并生成试听',command=lambda:(v11_preset(),listen())).pack(anchor='w',pady=6)
         ttk.Button(box,text='查看 / 复制本次去噪指令',command=self.sound_rules).pack(anchor='w',pady=4)
+        ttk.Button(box,text='查看当前任务声音报告',command=self.sound_report).pack(anchor='w',pady=4)
         ttk.Checkbutton(box,text='分离人声与背景音乐（独立可选）',variable=self.v['audio_separate']).pack(anchor='w',pady=8)
         ttk.Label(box,text='人声分离首次需要联网下载较大运行环境和模型，仅支持 Python 3.10–3.12；以后在本机处理。',wraplength=570).pack(anchor='w',pady=4)
         ttk.Label(box,text='设置用于新任务。保留原文件和原声；不自动删词、不主动改变音调。杂声与人声重叠时可能残留或影响音质，请对比试听。',wraplength=570).pack(anchor='w',pady=4)
@@ -118,19 +179,24 @@ class App:
             if self.busy:return
             job={k:v.get() for k,v in self.v.items()}
             if not Path(job.get('video','')).is_file():messagebox.showinfo('选择视频','请先选择视频。',parent=win);return
-            job.update(id=uuid.uuid4().hex,name=Path(job['video']).stem,clean_project=True,auto_cut=self.auto_cut.get(),status='待处理')
+            job.update(id=uuid.uuid4().hex,name=Path(job['video']).stem,clean_project=True,auto_cut=False,trim=False,status='待处理')
             self.jobs.append(job);self.refresh();self.table.selection_set(job['id']);win.destroy()
             def work():
                 try:
                     if job.get('audio'):
                         folder=execute(job,self.stop,self.events.put,export=False)
-                        if folder:self.events.put(('sound_ready',False))
+                        if folder:
+                            from full_listen import preview_full
+                            preview_full(folder,self.stop,True);preview_full(folder,self.stop,False)
+                            self.events.put(('sound_ready',False))
                     else:
-                        from clean_project import prepare
+                        from clean_project import prepare,preview,load
                         folder=prepare(job,self.stop,self.progress,make_previews=False)
                         if self.pending_style:
                             from clean_project import load,save
                             m=load(folder);m['style']=dict(self.pending_style);save(Path(folder)/'clean_project.json',m)
+                        from full_listen import preview_full
+                        preview_full(folder,self.stop,True);preview_full(folder,self.stop,False)
                         self.events.put(('state',job['id'],'待试听',dict(analysis=folder)))
                         self.events.put(('sound_ready',True))
                 except Cancelled:self.events.put(('state',job['id'],'已停止',dict(error='用户停止了任务')))
@@ -140,6 +206,26 @@ class App:
         def save_sound():
             (DATA/'sound_preferences.json').write_text(json.dumps({k:self.v[k].get() for k in ('audio_profile','audio_separate')}),encoding='utf8');win.destroy()
         ttk.Button(box,text='保存设置，返回制作',command=save_sound).pack(anchor='e')
+    def full_sound_review(self):
+        if self.busy:return
+        try:folder=Path(self.current(True)['analysis'])
+        except Exception:messagebox.showinfo('整段试听','请先完成声音处理。');return
+        win=tk.Toplevel(self.root);win.title('整段去噪试听');win.geometry('650x240')
+        box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
+        ttk.Label(box,text='从头听到尾：原速去噪试听，未剪停顿。成片倍速另按制作设置执行。',wraplength=600).pack(anchor='w',pady=8)
+        def play(original):
+            if self.busy:return
+            from full_listen import preview_full
+            self.worker(lambda:self.events.put(('publish_done',preview_full(folder,self.stop,original))))
+        for label,original in [('听整段原声',True),('听整段处理后',False)]:
+            ttk.Button(box,text=label,command=lambda a=original:play(a)).pack(anchor='w',pady=5)
+        ttk.Button(box,text='查看声音处理报告',command=self.sound_report).pack(anchor='w',pady=8)
+    def sound_report(self):
+        try:
+            job=self.current(True);path=Path(job['analysis'])/'声音处理明细.txt'
+            if not path.is_file():raise ValueError('请先用新版本分析或制作任务，再查看声音报告。')
+            open_path(str(path))
+        except Exception as e:messagebox.showinfo('声音报告',str(e))
     def sound_rules(self):
         from sound_rules import TITLE,RULES
         from tkinter.scrolledtext import ScrolledText
@@ -158,14 +244,14 @@ class App:
         from clean_project import load,preview,edit,undo,export
         try:m=load(folder)
         except Exception as e:messagebox.showinfo('重新建工程',str(e));return
-        win=tk.Toplevel(self.root);win.title('试听与修改片段');win.geometry('710x440')
+        win=tk.Toplevel(self.root);win.title('整段试听与片段修改');win.geometry('740x560')
         box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
         ttk.Label(box,text='先试听，再决定；范围使用原视频秒数。',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
         start=tk.StringVar(value=str(m.get('preview_start',0)));end=tk.StringVar(value=str(m.get('preview_end',15)))
         line=ttk.Frame(box);line.pack(fill='x',pady=12)
         for label,var in [('开始（秒）',start),('结束（秒）',end)]:
             ttk.Label(line,text=label).pack(side='left');ttk.Entry(line,textvariable=var,width=10).pack(side='left',padx=8)
-        note=tk.StringVar(value='试听最多60秒；修改范围可精确输入到0.01秒。')
+        note=tk.StringVar(value='可先听整段；局部试听每次最多60秒。修改范围可精确输入到0.01秒。')
         ttk.Label(box,textvariable=note,wraplength=650).pack(anchor='w')
         history=tk.Text(box,height=7,wrap='word');history.pack(fill='both',expand=True,pady=10)
         def refresh():
@@ -174,6 +260,13 @@ class App:
             history.insert('1.0',f"已自动剪短{len(data.get('auto_edits',[]))}处长空白。\n")
             if not data['edits']:history.insert('end','还没有手动修改。原声始终保留。')
         refresh()
+        def full_play(original):
+            if self.busy:return
+            from full_listen import preview_full
+            self.worker(lambda:self.events.put(('publish_done',preview_full(folder,self.stop,original))))
+        whole=ttk.Frame(box);whole.pack(fill='x',pady=4)
+        ttk.Button(whole,text='听整段原声',command=lambda:full_play(True)).pack(side='left',padx=4)
+        ttk.Button(whole,text='听整段处理后',command=lambda:full_play(False)).pack(side='left',padx=4)
         def action(kind):
             if self.busy:return
             try:a,b=float(start.get()),float(end.get())
@@ -192,6 +285,7 @@ class App:
         for label,kind in [('听原声','A'),('听处理后','B'),('预览视频','clip')]:ttk.Button(line,text=label,command=lambda k=kind:action(k)).pack(side='left',padx=4)
         line=ttk.Frame(box);line.pack(fill='x',pady=5)
         for label,kind in [('这段静音','mute'),('剪掉这段','cut'),('撤销上一步','undo'),('恢复所有手动修改','reset')]:ttk.Button(line,text=label,command=lambda k=kind:action(k)).pack(side='left',padx=4)
+        ttk.Button(box,text='查看声音处理报告',command=lambda:open_path(str(folder/'声音处理明细.txt'))).pack(anchor='w',pady=4)
         ttk.Label(box,text='“静音”保留时长；“剪掉”同步缩短音画与字幕。多余词需人工试听确认。',wraplength=650).pack(anchor='w',pady=8)
     def final_export(self):
         if self.busy:return
@@ -223,7 +317,7 @@ class App:
         selected=filedialog.askdirectory() if k=='output' else filedialog.askopenfilename()
         if selected:self.v[k].set(selected)
     def settings(self):
-        j={k:v.get() for k,v in self.v.items()};j['publish_settings']=dict(self.pending_style);j.pop('preview_time',None)
+        j={k:v.get() for k,v in self.v.items()};j['publish_settings']=dict(self.pending_style);j['trim']=self.auto_cut.get();j.pop('preview_time',None)
         if not 1<=float(j['font_percent'])<=15:raise ValueError('字号应为1–15%')
         if not j['name']:j['name']=Path(j['video']).stem or 'video'
         return normalize(j)
@@ -282,7 +376,7 @@ class App:
         with (DATA/'processing.log').open('a',encoding='utf8') as f:f.write(text+'\n')
     def heartbeat(self):
         if self.busy:self.root.title('杨宁视频工作室 · 处理中 '+str(int(time.monotonic()-self.started))+'秒 · '+VERSION)
-        else:self.root.title('杨宁视频工作室 · 生成预览 · '+VERSION)
+        else:self.root.title('杨宁视频工作室 · 成片制作 · '+VERSION)
         self.root.after(1000,self.heartbeat)
     def listen(self,optimized):
         try:j=self.current(True);folder=Path(j['analysis'])
@@ -378,7 +472,7 @@ class App:
                         if j['id']==e[1]:j['step']=e[2]
                     self.refresh()
                 elif e[0]=='sound_ready':
-                    self.root.after(200,self.clean_review if e[1] else lambda:self.listen(True))
+                    self.root.after(200,self.clean_review if e[1] else self.full_sound_review)
                 elif e[0]=='state':
                     for j in self.jobs:
                         if j['id']==e[1]:

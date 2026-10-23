@@ -60,6 +60,15 @@ class VoiceTests(unittest.TestCase):
             cancel=threading.Event();cancel.set()
             with self.assertRaises(Cancelled):process_wav(a,b,{'audio_profile':'v11'},cancel)
             with self.assertRaises(ValueError):process_wav(a,a,{},threading.Event())
+    def test_invalid_reference_fails_before_model_setup(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d);a=p/'a.wav';b=p/'b.wav';ref=p/'reference.srt'
+            wavfile.write(a,24000,np.zeros(24000,dtype='float32'))
+            ref.write_text('1\n00:00:00,000 --> 00:00:02,000\n対応字幕\n',encoding='utf8')
+            with patch('voice_clean.isolate',side_effect=AssertionError('model must not start')):
+                with self.assertRaisesRegex(ValueError,'超过当前音频时长'):
+                    process_wav(a,b,{'audio_profile':'v11_deep','audio_separate':True,'audio_reference_srt':str(ref)},threading.Event())
+            self.assertFalse(b.exists())
     def test_explicit_separation_is_independent_and_failure_is_visible(self):
         with tempfile.TemporaryDirectory() as d:
             a=Path(d)/'original.wav';b=Path(d)/'enhanced.wav';wavfile.write(a,24000,np.zeros(24000,dtype='float32'))

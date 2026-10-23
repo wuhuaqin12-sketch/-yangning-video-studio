@@ -16,10 +16,14 @@ with tempfile.TemporaryDirectory() as d:
         for child in parent.winfo_children():
             yield child
             yield from widgets(child)
-    preset=next(w for w in widgets(window) if isinstance(w,ui.ttk.Button) and str(w.cget('text')).startswith('按本次标准设置'))
-    preset.invoke()
+    assert [str(w.cget('text')) for w in widgets(window) if isinstance(w,ui.ttk.LabelFrame)][:5]==['1  选择素材','2  去噪与整段试听','3  停顿与速度','4  标题、字幕样式与封面','5  导出成片']
+    preset=next(w for w in widgets(window) if isinstance(w,ui.ttk.Button) and str(w.cget('text'))=='一键降噪并生成试听')
+    from unittest.mock import patch
+    with patch.object(ui.messagebox,'showinfo'):
+        preset.invoke()
     assert application.v['audio_profile'].get()=='v11_deep'
     assert application.v['audio_separate'].get()
+    assert any(isinstance(w,ui.ttk.Entry) and str(w.cget('textvariable'))==str(application.v['audio_reference_srt']) for w in widgets(window))
     application.sound_rules();window.update_idletasks()
     assert any(isinstance(w,ui.tk.Text) and 'RNNoise' in w.get('1.0','end') for w in widgets(window))
     window.destroy()
@@ -31,4 +35,5 @@ with tempfile.TemporaryDirectory() as d:
     rr,y=wavfile.read(root/'enhanced.wav')
     assert rr==r and x.shape==y.shape and np.isfinite(y).all()
     assert report['separation']['model']=='htdemucs'
+    assert (root/'声音处理报告.json').is_file()
     print('REAL_CPU_SEPARATION_AND_DENOISE_PASS')
