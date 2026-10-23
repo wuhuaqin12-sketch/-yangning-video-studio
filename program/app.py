@@ -24,7 +24,7 @@ class App:
         self.v['audio_separate']=tk.BooleanVar(value=False)
         try:
             sound=json.loads((DATA/'sound_preferences.json').read_text(encoding='utf8'))
-            if sound.get('audio_profile') in ('off','v11'):self.v['audio_profile'].set(sound['audio_profile'])
+            if sound.get('audio_profile') in ('off','v11','v11_deep'):self.v['audio_profile'].set(sound['audio_profile'])
             self.v['audio_separate'].set(sound.get('audio_separate') is True)
         except (OSError,ValueError):pass
         try:self.pending_style=json.loads((DATA/'style_no_denoise.json').read_text(encoding='utf8'))
@@ -102,10 +102,15 @@ class App:
         self.worker(work)
     def sound_settings(self):
         if self.busy:return
-        win=tk.Toplevel(self.root);win.title('声音处理');win.geometry('620x420')
+        win=tk.Toplevel(self.root);win.title('声音处理');win.geometry('680x560')
         box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
         ttk.Radiobutton(box,text='关闭降噪',variable=self.v['audio_profile'],value='off').pack(anchor='w',pady=4)
         ttk.Radiobutton(box,text='启用温和降噪（底噪、沙沙声、短促点击声）',variable=self.v['audio_profile'],value='v11').pack(anchor='w',pady=4)
+        ttk.Radiobutton(box,text='V11 加强降噪（本次：RNNoise + 低频与点击声清理）',variable=self.v['audio_profile'],value='v11_deep').pack(anchor='w',pady=4)
+        def v11_preset():
+            self.v['audio_profile'].set('v11_deep');self.v['audio_separate'].set(True)
+        ttk.Button(box,text='按本次标准设置：人声分离 + 加强降噪',command=v11_preset).pack(anchor='w',pady=6)
+        ttk.Button(box,text='查看 / 复制本次去噪指令',command=self.sound_rules).pack(anchor='w',pady=4)
         ttk.Checkbutton(box,text='分离人声与背景音乐（独立可选）',variable=self.v['audio_separate']).pack(anchor='w',pady=8)
         ttk.Label(box,text='人声分离首次需要联网下载较大运行环境和模型，仅支持 Python 3.10–3.12；以后在本机处理。',wraplength=570).pack(anchor='w',pady=4)
         ttk.Label(box,text='设置用于新任务。保留原文件和原声；不自动删词、不主动改变音调。杂声与人声重叠时可能残留或影响音质，请对比试听。',wraplength=570).pack(anchor='w',pady=4)
@@ -135,6 +140,15 @@ class App:
         def save_sound():
             (DATA/'sound_preferences.json').write_text(json.dumps({k:self.v[k].get() for k in ('audio_profile','audio_separate')}),encoding='utf8');win.destroy()
         ttk.Button(box,text='保存设置，返回制作',command=save_sound).pack(anchor='e')
+    def sound_rules(self):
+        from sound_rules import TITLE,RULES
+        from tkinter.scrolledtext import ScrolledText
+        win=tk.Toplevel(self.root);win.title(TITLE);win.geometry('760x640')
+        text=ScrolledText(win,wrap='word',font=('Microsoft YaHei UI',11),padx=16,pady=16)
+        text.pack(fill='both',expand=True);text.insert('1.0',RULES);text.configure(state='disabled')
+        def copy():
+            win.clipboard_clear();win.clipboard_append(RULES)
+        ttk.Button(win,text='复制全部指令',command=copy).pack(pady=10)
     def clean_review(self):
         if self.busy:return
         try:j=self.current(True);folder=Path(j['analysis'])

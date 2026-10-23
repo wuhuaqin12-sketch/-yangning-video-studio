@@ -4,3 +4,5 @@ __pycache__/
 program/fonts/*.ttf
 program/fonts/*.otf
 *.partial.mp4
+
+program/models/*.rnnn

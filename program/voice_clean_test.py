@@ -44,7 +44,7 @@ class VoiceTests(unittest.TestCase):
         fixtures.CleanTests.setUpClass()
         try:
             f=fixtures.CleanTests
-            folder=Path(cp.prepare(dict(video=str(f.video),source_srt=str(f.srt),output=str(f.root),auto_cut=False,audio_profile='v11'),f.cancel,make_previews=False))
+            folder=Path(cp.prepare(dict(video=str(f.video),source_srt=str(f.srt),output=str(f.root),auto_cut=False,audio_profile='v11_deep'),f.cancel,make_previews=False))
             m=cp.load(folder);self.assertTrue(m['denoise']['enabled'])
             self.assertEqual(m['cues'],m['adjusted'])
             _,a=wavfile.read(folder/'original.wav');_,b=wavfile.read(folder/'edited.wav')
@@ -66,6 +66,38 @@ class VoiceTests(unittest.TestCase):
             with patch('voice_clean.isolate',side_effect=RuntimeError('model failed')) as isolate:
                 with self.assertRaisesRegex(RuntimeError,'model failed'):process_wav(a,b,{'audio_profile':'v11','audio_separate':True},threading.Event())
                 isolate.assert_called_once()
+            self.assertFalse(b.exists())
+
+
+class DeepVoiceTests(unittest.TestCase):
+    def test_rnnoise_preserves_channels_duration_and_last_voice(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)
+            for rate,channels in ((16000,1),(24000,1),(44100,2),(48000,2)):
+                with self.subTest(rate=rate,channels=channels):
+                    t=np.arange(rate*2+17)/rate
+                    phase=2*np.pi*(160*t+25*t*t)
+                    x=sum(.1/k*np.sin(k*phase) for k in range(1,7));x[:rate//2]=0
+                    if channels==2:x=np.stack([x,x*.7],axis=1)
+                    x=x.astype('float32');a=p/'原声.wav';b=p/'处理.wav';wavfile.write(a,rate,x)
+                    before=hashlib.sha256(a.read_bytes()).hexdigest()
+                    report=process_wav(a,b,{'audio_profile':'v11_deep'},threading.Event())
+                    rr,y=wavfile.read(b)
+                    self.assertEqual((rr,y.shape),(rate,x.shape));self.assertTrue(np.isfinite(y).all())
+                    self.assertEqual(before,hashlib.sha256(a.read_bytes()).hexdigest())
+                    self.assertGreater(np.max(np.abs(y[-rate//50:])),.001)
+                    from scipy.signal import correlate,correlation_lags
+                    xx=x if channels==1 else x[:,0];yy=y if channels==1 else y[:,0]
+                    lag=correlation_lags(len(yy),len(xx))[np.argmax(correlate(yy,xx))]
+                    self.assertLessEqual(abs(lag),rate*.001)
+                    self.assertEqual(report['latency_sample_rate'],48000)
+                    self.assertTrue(report['manual_phrase_review_required']);self.assertFalse(report['semantic_noise_removal'])
+    def test_missing_deep_model_fails_visibly(self):
+        with tempfile.TemporaryDirectory() as d:
+            a=Path(d)/'a.wav';b=Path(d)/'b.wav';wavfile.write(a,24000,np.zeros(24000,dtype='float32'))
+            with patch('voice_clean.MODEL_DIGEST','invalid'):
+                with self.assertRaisesRegex(RuntimeError,'模型缺失或校验失败'):
+                    process_wav(a,b,{'audio_profile':'v11_deep'},threading.Event())
             self.assertFalse(b.exists())
 
 if __name__=='__main__':unittest.main()

@@ -8,7 +8,7 @@ def normalize(job):
     # Removed features cannot be re-enabled by old queues or imported jobs.
     job.update(denoise=False,separate=False,mute=False)
     job.pop('clean_mode',None)
-    if job.get('audio_profile') not in (None,'off','v11'):raise ValueError('未知的声音处理选项。')
+    if job.get('audio_profile') not in (None,'off','v11','v11_deep'):raise ValueError('未知的声音处理选项。')
     job['audio_separate']=job.get('audio_separate') is True
     job['erase_method']='off';job['shots']='';job.pop('_cleanup_profile',None)
     job.setdefault('language','en');job.setdefault('alignment','auto')

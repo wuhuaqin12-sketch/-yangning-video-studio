@@ -7,3 +7,5 @@ NumPy: https://numpy.org/
 SciPy: https://scipy.org/
 Pillow: https://python-pillow.org/
 Optional multilingual reference alignment: stable-ts, Whisper, Torch and torchaudio retain their respective licenses and are downloaded separately when needed.
+
+V11 加强降噪模型：bd.rnnn，来源 richardpl/arnndn-models，作者 Gregor Richards；固定来源和 SHA-256 见 ci/fetch_noise_model.py。模型仅用于本机 FFmpeg arnndn 处理。
