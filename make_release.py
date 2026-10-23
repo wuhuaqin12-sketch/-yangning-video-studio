@@ -20,7 +20,7 @@ def main():
     archive=out/('YangNing_VideoStudio_Windows_'+args.version+'.zip')
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
         for f in root.rglob('*'):
-            if not f.is_file() or any(part in ('.venv','__pycache__','.git') for part in f.parts) or f.suffix=='.pyc':continue
+            if not f.is_file() or any(part in ('.venv','__pycache__','.git') or part.startswith('.venv.failed_') for part in f.parts) or f.suffix=='.pyc':continue
             name=f.relative_to(root).as_posix();body=f.read_bytes()
             if name=='release.json':
                 body=json.dumps(dict(app='YangNingStudio',schema=1,version=args.version,update_manifest_url=args.manifest_url)).encode()

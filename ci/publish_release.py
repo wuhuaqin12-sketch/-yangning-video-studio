@@ -7,7 +7,7 @@ repo=os.environ['GITHUB_REPOSITORY'];tag='v'+version
 out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
 manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
 package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
-subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','新版按成片五步排列；新增整段去噪试听、独立对应字幕与声音明细报告。沿用已确认静音修改，保留原素材；字幕仅按时间段对照，不自动判定杂音。'],check=True)
+subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','修复商店版Python重定向导致安装失败；自动检测并重建不完整运行环境，保留失败环境及原素材。'],check=True)
 def gh(*args,**kwargs):return subprocess.run(['gh',*args,'--repo',repo],**kwargs)
 result=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
 if result.returncode==0:

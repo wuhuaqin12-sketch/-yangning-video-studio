@@ -22,7 +22,7 @@ jobs:
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test
+      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test bootstrap_test
         working-directory: program
   windows-install:
     runs-on: windows-latest
@@ -41,13 +41,20 @@ jobs:
       - run: choco install ffmpeg --no-progress -y
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - run: python program/install_desktop.py --quiet
+      - name: Seed an incomplete runtime from a failed installation
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts') | Out-Null
+          Set-Content -Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -Value 'failed old runtime'
+      - run: cmd /c "INSTALL.bat --quiet"
       - name: Verify installed runtime, version and desktop shortcut
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $data=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'current.json') | ConvertFrom-Json
           $expected=(Get-Content release.json | ConvertFrom-Json).version
+          if (!(Test-Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/pyvenv.cfg'))) { throw 'Missing repaired venv config' }
+          if (!(Get-ChildItem $env:YANGNING_INSTALL_ROOT -Directory -Filter 'runtime.failed_*')) { throw 'Old broken runtime was not preserved' }
           if ($data.version -ne $expected) { throw 'Wrong installed version' }
           if (!(Test-Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/pythonw.exe'))) { throw 'Missing runtime' }
           if (!(Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) '杨宁视频工作室.lnk'))) { throw 'Missing shortcut' }

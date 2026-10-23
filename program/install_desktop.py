@@ -15,7 +15,7 @@ def install():
         archive=Path(d)/'app.zip'
         with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
             for p in source.rglob('*'):
-                if p.is_file() and not any(part in ('.venv','__pycache__','.git') for part in p.parts):
+                if p.is_file() and not any(part in ('.venv','__pycache__','.git') or part.startswith('.venv.failed_') for part in p.parts):
                     z.write(p,p.relative_to(source))
         target=root/'versions'/APP_VERSION
         if not target.exists():stage_package(archive,root,APP_VERSION)

@@ -5,43 +5,58 @@ set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 cd /d "%~dp0"
 if exist "program\.venv\Scripts\python.exe" (
-  "program\.venv\Scripts\python.exe" program\install_desktop.py
-  goto finished
+  "program\.venv\Scripts\python.exe" -I program\python_check.py >nul 2>nul
+  if not errorlevel 1 (
+    "program\.venv\Scripts\python.exe" program\install_desktop.py %*
+    goto finished
+  )
 )
 if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
-  "%LocalAppData%\Programs\Python\Python312\python.exe" program\install_desktop.py
-  goto finished
+  "%LocalAppData%\Programs\Python\Python312\python.exe" -I program\python_check.py >nul 2>nul
+  if not errorlevel 1 (
+    "%LocalAppData%\Programs\Python\Python312\python.exe" program\install_desktop.py %*
+    goto finished
+  )
 )
 where py >nul 2>nul
 if not errorlevel 1 (
-  for %%V in (3.12 3.13 3.11 3.10) do (
-    py -%%V -c "import struct; assert struct.calcsize('P')==8" >nul 2>nul
+  for %%V in (3.12 3.11 3.10 3.13) do (
+    py -%%V -I program\python_check.py >nul 2>nul
     if not errorlevel 1 (
-      py -%%V program\install_desktop.py
+      py -%%V program\install_desktop.py %*
       goto finished
     )
   )
 )
-python -c "import sys,struct; assert (3,10)<=sys.version_info[:2]<=(3,13) and struct.calcsize('P')==8" >nul 2>nul
+python -I program\python_check.py >nul 2>nul
 if not errorlevel 1 (
-  python program\install_desktop.py
+  python program\install_desktop.py %*
   goto finished
 )
 where winget >nul 2>nul
 if errorlevel 1 (
   echo Install 64-bit Python 3.12 from https://www.python.org/downloads/windows/
-  echo Enable Python launcher and tkinter, then open START.bat again.
-  pause
+  echo Enable Python launcher and tkinter, then open INSTALL.bat again.
+  if /I not "%~1"=="--quiet" pause
   exit /b 1
 )
-echo Installing the supported 64-bit Python runtime...
-winget install --exact --id Python.Python.3.12 --architecture x64 --scope user --source winget
+echo Preparing standard 64-bit Python 3.12; Microsoft Store Python is skipped...
+winget install --exact --id Python.Python.3.12 --architecture x64 --scope user --source winget --accept-package-agreements --accept-source-agreements
 if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
-  "%LocalAppData%\Programs\Python\Python312\python.exe" program\install_desktop.py
+  "%LocalAppData%\Programs\Python\Python312\python.exe" -I program\python_check.py
+  if not errorlevel 1 (
+    "%LocalAppData%\Programs\Python\Python312\python.exe" program\install_desktop.py %*
+    goto finished
+  )
+  echo Python validation failed. Please keep this error window.
+  if /I not "%~1"=="--quiet" pause
+  exit /b 1
 ) else (
-  echo Close this window and open START.bat again to refresh PATH.
-  pause
+  echo Close this window and open INSTALL.bat again to refresh PATH.
+  if /I not "%~1"=="--quiet" pause
+  exit /b 1
 )
 :finished
-if errorlevel 1 pause
-endlocal
+set "YANGNING_INSTALL_RESULT=%ERRORLEVEL%"
+if not "%YANGNING_INSTALL_RESULT%"=="0" if /I not "%~1"=="--quiet" pause
+exit /b %YANGNING_INSTALL_RESULT%
