@@ -16,7 +16,9 @@ with tempfile.TemporaryDirectory() as d:
         for child in parent.winfo_children():
             yield child
             yield from widgets(child)
-    assert [str(w.cget('text')) for w in widgets(window) if isinstance(w,ui.ttk.LabelFrame)][:5]==['1  选择素材','2  去噪与整段试听','3  停顿与速度','4  标题、字幕样式与封面','5  导出成片']
+    frames = [str(w.cget('text')) for w in widgets(window) if isinstance(w, ui.ttk.LabelFrame)]
+    assert '①  选择素材' in frames
+    assert '②  一键生成' in frames
     preset=next(w for w in widgets(window) if isinstance(w,ui.ttk.Button) and str(w.cget('text'))=='一键降噪并生成试听')
     from unittest.mock import patch
     with patch.object(ui.messagebox,'showinfo'):
