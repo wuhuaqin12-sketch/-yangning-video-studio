@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      confirm_release:
+        description: '输入 RELEASE 确认正式发布'
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -66,6 +71,7 @@ jobs:
         run: '& (Join-Path $env:YANGNING_INSTALL_ROOT "runtime/Scripts/python.exe") ci/separation_smoke.py'
   release:
     needs: [test, windows-install]
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE'
     runs-on: ubuntu-latest
     permissions:
       contents: write
