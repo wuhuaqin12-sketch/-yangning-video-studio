@@ -11,6 +11,8 @@ def normalize(job):
     if job.get('audio_profile') not in (None,'off','v11','v11_deep'):raise ValueError('未知的声音处理选项。')
     job['audio_separate']=job.get('audio_separate') is True
     job['erase_method']='off';job['shots']='';job.pop('_cleanup_profile',None)
+    if not job.get('audio') and job.get('video'):
+        job['audio']=job['video']  # Reuse the source video's audio when no replacement is selected.
     job.setdefault('language','en');job.setdefault('alignment','auto')
     if job['alignment'] in ('auto','english'):
         job['alignment']='multi' if job['language'] in LANGUAGES else 'timed'

@@ -8,7 +8,23 @@ def text_key(text):
     return ''.join(c for c in unicodedata.normalize('NFKC',text).casefold() if c.isalnum())
 def validate(cues,result,duration,join_subwords=False):
     segments=result.get('segments',[])
-    if len(segments)!=len(cues):raise ValueError('定位句数与参考稿不一致，已停止；请检查分句和配音文字。')
+    # Some languages are split into different segment counts by the speech model.
+    # Repartition word timestamps using the original reference text, not old SRT times.
+    if len(segments)!=len(cues):
+        all_words=[w for seg in segments for w in seg.get('words',[])]
+        reference=''.join(text_key(c[3]) for c in cues)
+        observed=''.join(text_key(w.get('word','')) for w in all_words)
+        if observed!=reference:
+            raise ValueError('定位文本与参考稿不一致，请检查配音和字幕文字。')
+        rebuilt=[];pos=0
+        for cue in cues:
+            target=text_key(cue[3]);selected=[];matched=''
+            while len(matched)<len(target) and pos<len(all_words):
+                w=all_words[pos];pos+=1;selected.append(w);matched+=text_key(w.get('word',''))
+            if matched!=target:
+                raise ValueError(f'第{cue[0]}句跨越语音模型词边界，无法安全分句；请检查参考稿。')
+            rebuilt.append({'words':selected})
+        segments=rebuilt
     aligned=[];rows=[];ids=[];last=0.
     for cue,seg in zip(cues,segments):
         ident,_,_,text=cue
@@ -103,7 +119,12 @@ def worker(request):
     data=json.loads(Path(request).read_text(encoding='utf8'))
     cache=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))/'YangNingStudio'/'models';cache.mkdir(parents=True,exist_ok=True)
     status('加载多语言模型 small；首次下载约460MB，之后复用')
-    model=stable_whisper.load_model('small',device='cpu',download_root=str(cache))
+    from model_cache import load_stable_model
+    try:
+        model=load_stable_model(stable_whisper,'small',cache,device='cpu')
+    except (OSError,RuntimeError,ValueError) as exc:
+        status('多语言模型加载失败，请查看 multilingual.log')
+        raise RuntimeError('Whisper模型加载失败；请检查磁盘空间、模型缓存和网络。原有模型不会被直接删除。') from exc
     def update(done,total):status(f'本地多语言定位 {min(100,round(100*done/max(total,.01)))}%')
     status('正在按参考稿定位配音；电脑速度决定用时')
     result=model.align(data['audio'],data['text'],language=data['language'],original_split=True,regroup=False,verbose=None,progress_callback=update)

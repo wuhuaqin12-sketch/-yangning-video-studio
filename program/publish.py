@@ -46,7 +46,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if columns<1:
             raise ValueError('字幕区域太窄，连一个字也放不下，请扩大字幕区域宽度。')
         lines=line_parts(text,columns)
-        max_lines=int(available//(size*1.4))
+        max_lines=min(2,int(available//(size*1.4)))
         if max_lines<1:
             raise ValueError('字幕区域高度不足一行，请扩大区域高度或减小统一字号。')
         pages=[lines[i:i+max_lines] for i in range(0,len(lines),max_lines)]
@@ -71,7 +71,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         elif ty>vy+vh:th=2*min(ty-vy-vh-h*.0125,h*.975-ty)
         else:th=2*min(ty-h*.025,h*.975-ty)
         if tw<20 or th<20:raise ValueError('标题区域过小或超出画面，请调整标题中心和宽度。')
-        text=clean(opts['title']);size,lines=fit_lines(text,title_size,tw+12,th,opts['auto_fit'],leading=1.2);actual_title=size
+        text=clean(opts['title'])
+        # Never reject a reasonable title solely because the saved preset has
+        # auto_fit=False. First preserve the requested size; if it cannot fit,
+        # reduce only the title, without altering subtitle font sizes.
+        try:
+            size,lines=fit_lines(text,title_size,tw+12,th,False,leading=1.2)
+        except ValueError:
+            size,lines=fit_lines(text,title_size,tw+12,th,True,leading=1.2)
+        actual_title=size
         text=styled_lines(text,lines,opts,highlight=False)
         # libass normalizes this bundled font to its 1448/1000 hhea height.
         # Match the 230px FreeType brush title used in the approved V11 render.

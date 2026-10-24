@@ -7,11 +7,11 @@ from pathlib import Path
 
 DEFAULTS = dict(title='', font='Noto Serif CJK JP', title_font='Yuji Boku',
     subtitle_color='#FFFFFF', title_color='#34221B', outline_color='#202020',
-    subtitle_outline=2, title_outline=0, subtitle_x=50, subtitle_y=88,
-    subtitle_width=84, subtitle_height=22, font_percent=4.5,
-    subtitle_font_size=47, title_font_size=230, title_x=50, title_y=25,
+    subtitle_outline=3, title_outline=0, subtitle_x=50, subtitle_y=76,
+    subtitle_width=92, subtitle_height=32, font_percent=4.5,
+    subtitle_font_size=70, title_font_size=230, title_x=50, title_y=25,
     title_width=94, title_size=12, video_width=100, video_height=76,
-    auto_fit=False, keywords='', keyword_color='#E53935',
+    auto_fit=True, keywords='', keyword_color='#E53935',
     keyword_ignore_case=True, keyword_whole_words=False)
 
 LIMITS = {'subtitle_x':(0,100), 'subtitle_y':(0,100),
