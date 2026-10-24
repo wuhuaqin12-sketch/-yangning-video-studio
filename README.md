@@ -21,8 +21,8 @@ Windows 桌面视频制作工具：压缩停顿、同步字幕，合成背景、
 
 ## 发布维护
 
-更新 release.json 的版本号，同时更新 program/desktop_update.py 与 program/engine.py 的版本号。
-推送到 main 后，工作流校验字体、执行视频导出测试和 Windows 安装检查，通过后创建公开 Release。
+正式发布前只需在 release.json 中更新版本号；make_release.py 打包时会自动同步安装包内 program/desktop_update.py 与 program/engine.py 的版本号，无需手工逐个修改。
+推送到 main 后自动运行测试与 Windows 安装检查，但不会直接公开发布。确认发布时，在 GitHub Actions 中运行“Test and publish desktop app”，输入 RELEASE；测试通过后自动创建公开 Release、Windows ZIP 和 latest.json。发布版本号不能与现有公开版本重复。
 已发布的同版本安装包不覆盖。下载校验失败时不切换当前版本。
 
 ## 声音处理（0.11.4）
