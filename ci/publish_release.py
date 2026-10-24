@@ -9,7 +9,7 @@ repo=os.environ['GITHUB_REPOSITORY']
 def next_version():
     import re
     def version_tuple(value):
-        if not re.fullmatch(r'\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}',value):raise ValueError('Invalid version: '+str(value))
+        if not re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}',value):raise ValueError('Invalid version: '+str(value))
         return tuple(map(int,value.split('.')))
     base=version_tuple(base_version)
     result=subprocess.run(['gh','release','list','--repo',repo,'--limit','100','--json','tagName,isDraft'],capture_output=True,text=True,check=True)
