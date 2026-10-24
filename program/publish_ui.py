@@ -28,16 +28,9 @@ def show(app, open_path):
         'srt':str(folder/'subtitles.srt') if (folder/'subtitles.srt').is_file() else app.v['source_srt'].get(),
         'background':'','output':job.get('output') or app.v['output'].get(),'preview_time':'1'}
     values.update(saved_style)
-    # Project-specific visual assets and title must be selected for each new publication.
-    values['background']=''
-    values['title']=''
-    values['keywords']=''
     if project:
         values['video']=str(folder/'video.mp4') if (folder/'video.mp4').is_file() else (cm['video'] if clean else meta['job']['video'])
         values['srt']=str(folder/'subtitles.srt')
-        values['background']=''
-        values['title']=''
-        values['keywords']=''
     elif meta.get('job',{}).get('burn'):values['video']=''
     win=tk.Toplevel(app.root);win.title('制作发布成片 · 字体 / 颜色 / 重点词');win.geometry('920x700');win.minsize(780,620)
     box=ttk.Frame(win,padding=12);box.pack(fill='both',expand=True)
@@ -83,7 +76,7 @@ def show(app, open_path):
     ttk.Label(page,text='日语标题默认 Yuji Boku（佑字 朴）毛笔体。可选本机字体，也可直接输入字体名。',wraplength=780).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
-    for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认47）'),('subtitle_x','中心横向 %（相对老师画面）'),('subtitle_y','中心纵向 %（相对老师画面）'),('subtitle_width','区域宽度 %（相对老师画面）'),('subtitle_height','区域高度 %（相对老师画面）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
+    for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认70）'),('subtitle_x','中心横向 %（相对老师画面）'),('subtitle_y','中心纵向 %（相对老师画面）'),('subtitle_width','区域宽度 %（相对老师画面）'),('subtitle_height','区域高度 %（相对老师画面）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
     colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
     ttk.Label(page,text='日语字幕默认 Noto Serif CJK JP 明朝体。位置以老师画面计算：0＝左/上，100＝右/下。',wraplength=780).grid(row=9,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
@@ -148,7 +141,7 @@ def show(app, open_path):
         msg.set('正在生成封面；完成后自动打开。');app.worker(work)
     ttk.Button(page,text='预览 / 导出封面',command=cover_preview).grid(row=5,column=0,columnspan=2,sticky='w',pady=8)
     line=ttk.Frame(box);line.pack(fill='x',pady=5)
-    ttk.Label(line,text='字幕统一字号；长句自动换行，超长字幕分屏显示。').pack(side='left')
+    ttk.Label(line,text='所有语言字幕统一字号；最多两行，超长字幕自动分屏。').pack(side='left')
     ttk.Label(line,text='预览时间 秒').pack(side='left',padx=(12,3));ttk.Entry(line,textvariable=variables['preview_time'],width=7).pack(side='left')
     msg=tk.StringVar(value='先预览字体、字形、颜色、重点词及位置。字体须包含对应语言的文字。')
     ttk.Label(box,textvariable=msg,wraplength=860).pack(anchor='w',pady=4)

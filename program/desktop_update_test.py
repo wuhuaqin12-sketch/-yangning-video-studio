@@ -70,8 +70,8 @@ class UpdateTests(unittest.TestCase):
     def test_config_and_release_check(self):
         self.assertIsNone(check_update(self.root))
         save_config('https://example.org/latest.json',self.root)
-        data=dict(format='YangNingStudioUpdate',schema=1,version='0.12.0',url='https://example.org/app.zip',sha256='a'*64,size=100,notes='Fix')
-        self.assertEqual(check_update(self.root,lambda *_:json.dumps(data).encode())['version'],'0.12.0')
+        data=dict(format='YangNingStudioUpdate',schema=1,version='0.12.6',url='https://example.org/app.zip',sha256='a'*64,size=100,notes='Fix')
+        self.assertEqual(check_update(self.root,lambda *_:json.dumps(data).encode())['version'],'0.12.6')
         data['version']=APP_VERSION
         self.assertEqual(check_update(self.root,lambda *_:json.dumps(data).encode()),{})
         data['url']='http://example.org/app.zip'
@@ -79,21 +79,21 @@ class UpdateTests(unittest.TestCase):
     def test_publisher_bundle_matches_manifest_and_version(self):
         import subprocess,sys
         helper=Path(__file__).resolve().parent.parent/'make_release.py'
-        subprocess.run([sys.executable,str(helper),'--version','0.12.1',
+        subprocess.run([sys.executable,str(helper),'--version','0.12.3',
                         '--package-url','https://example.org/app.zip',
                         '--manifest-url','https://example.org/latest.json',
                         '--output',str(self.p/'published')],check=True,capture_output=True)
         manifest=json.loads((self.p/'published/latest.json').read_text())
-        archive=self.p/'published/YangNing_VideoStudio_Windows_0.12.1.zip'
+        archive=self.p/'published/YangNing_VideoStudio_Windows_0.12.3.zip'
         self.assertEqual(manifest['sha256'],hashlib.sha256(archive.read_bytes()).hexdigest())
         self.assertEqual(manifest['size'],archive.stat().st_size)
         with zipfile.ZipFile(archive) as z:
-            self.assertIn(b"APP_VERSION='0.12.1'",z.read('program/desktop_update.py'))
-            self.assertIn(b"VERSION='0.12.1'",z.read('program/engine.py'))
+            self.assertIn(b"APP_VERSION='0.12.3'",z.read('program/desktop_update.py'))
+            self.assertIn(b"VERSION='0.12.3'",z.read('program/engine.py'))
             self.assertEqual(json.loads(z.read('release.json'))['update_manifest_url'],'https://example.org/latest.json')
             self.assertFalse(any('__pycache__' in n or '.venv/' in n for n in z.namelist()))
-        version,target=stage_package(archive,self.root,'0.12.1')
-        self.assertEqual(version,'0.12.1')
+        version,target=stage_package(archive,self.root,'0.12.3')
+        self.assertEqual(version,'0.12.3')
 
     def test_invalid_version_and_url(self):
         for value in ('../oops','1','1.0.0/dev',None):

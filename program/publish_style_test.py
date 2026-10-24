@@ -7,7 +7,7 @@ from media import run,executable,probe,parse_srt
 
 class StyleTests(unittest.TestCase):
     def test_defaults_and_colour_conversion(self):
-        self.assertEqual(DEFAULTS['subtitle_font_size'],47)
+        self.assertEqual(DEFAULTS['subtitle_font_size'],70)
         self.assertEqual(DEFAULTS['title_font_size'],230)
         self.assertEqual(DEFAULTS['title_font'],'Yuji Boku')
         self.assertEqual(DEFAULTS['font'],'Noto Serif CJK JP')
@@ -56,6 +56,30 @@ class StyleTests(unittest.TestCase):
             self.assertEqual(o['keywords'],'無我=#E53935')
     def test_fixed_size_rejects_overflow(self):
         with self.assertRaises(ValueError):fit_lines('A'*200,47,200,50,False)
+    def test_long_title_fits_without_changing_subtitle_size(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'long_title.ass'
+            make_ass(p,[(1,1,4,'本当の姿')],dict(title='本来の姿を見つめる 心を静める',title_font_size=230,auto_fit=False),{'width':854,'height':480},5,1080,1920)
+            report=json.loads((p.parent/'layout_report.json').read_text())
+            self.assertEqual(report['subtitle_actual_px'],[70])
+            self.assertLessEqual(report['title_actual_px'],230)
+            self.assertGreaterEqual(report['title_actual_px'],10)
+            self.assertIn('本来の姿',p.read_text(encoding='utf-8-sig'))
+
+    def test_long_multilingual_cues_split_two_lines_without_shrinking(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'test.ass'
+            for language,text in [('ja','心を静めて集中する'*22),('en','Focus your attention inward and stay still. '*12),('fr','Concentrez votre esprit vers l’intérieur. '*12),('id','Tenangkan pikiran dan pusatkan perhatian. '*12)]:
+                make_ass(path,[(1,0,12,text)],dict(),{'width':854,'height':480},12,1080,1920)
+                report=json.loads((path.parent/'layout_report.json').read_text())
+                self.assertEqual(report['subtitle_actual_px'],[70],language)
+                self.assertEqual(report['shrunk_cues'],[],language)
+                self.assertGreater(report['display_cue_count'],1,language)
+                cues=parse_srt(path.parent/'publish_subtitles.srt')
+                self.assertTrue(all(len(t.splitlines())<=2 for _,a,b,t in cues),language)
+                self.assertAlmostEqual(cues[0][1],0,delta=.01)
+                self.assertAlmostEqual(cues[-1][2],12,delta=.01)
+
     def test_position_size_and_all_languages_share_style(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'p.ass'
@@ -64,7 +88,7 @@ class StyleTests(unittest.TestCase):
                 make_ass(p,[(1,.1,1.,'無我')],opts,{'width':854,'height':480},2,1080,1920)
                 report=json.loads((p.parent/'layout_report.json').read_text())
                 self.assertEqual(report['title_actual_px'],230)
-                self.assertEqual(report['subtitle_actual_px'],[47])
+                self.assertEqual(report['subtitle_actual_px'],[70])
                 self.assertLess(report['subtitle_center'][0],540)
                 self.assertEqual(report['video_box'][2],1080)
 
