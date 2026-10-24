@@ -2,8 +2,28 @@
 import json,os,subprocess,sys
 from pathlib import Path
 root=Path(__file__).resolve().parent.parent
-data=json.loads((root/'release.json').read_text());version=data['version']
-repo=os.environ['GITHUB_REPOSITORY'];tag='v'+version
+data=json.loads((root/'release.json').read_text());base_version=data['version']
+repo=os.environ['GITHUB_REPOSITORY']
+# Choose a new patch version without requiring manual edits to release.json.
+# Published releases are immutable: never overwrite an existing version.
+def next_version():
+    import re
+    def version_tuple(value):
+        if not re.fullmatch(r'\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}',value):raise ValueError('Invalid version: '+str(value))
+        return tuple(map(int,value.split('.')))
+    base=version_tuple(base_version)
+    result=subprocess.run(['gh','release','list','--repo',repo,'--limit','100','--json','tagName,isDraft'],capture_output=True,text=True,check=True)
+    published=[]
+    for entry in json.loads(result.stdout):
+        if entry.get('isDraft'):continue
+        tag_name=entry.get('tagName','')
+        try:
+            if tag_name.startswith('v'):published.append(version_tuple(tag_name[1:]))
+        except ValueError:pass
+    latest=max([base,*published])
+    return '.'.join(map(str,(latest[0],latest[1],latest[2]+1)))
+version=next_version()
+tag='v'+version
 out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
 manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
 package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
