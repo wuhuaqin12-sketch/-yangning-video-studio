@@ -27,7 +27,7 @@ jobs:
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - run: python -m unittest desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test bootstrap_test
+      - run: python -m unittest alignment_runtime_test multilingual_test english_regression_test desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test bootstrap_test
         working-directory: program
   windows-install:
     runs-on: windows-latest
@@ -66,12 +66,17 @@ jobs:
           $config=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'update_config.json') | ConvertFrom-Json
           if ($config.manifest_url -ne 'https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json') { throw 'Missing built-in update URL' }
           & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -c "import tkinter,numpy,scipy,PIL; print('Windows installation verified')"
+      - name: Verify isolated CPU multilingual alignment runtime on Windows
+        shell: pwsh
+        run: |
+          & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') program/alignment_runtime.py
+          if ($LASTEXITCODE -ne 0) { throw 'CPU alignment runtime failed' }
       - name: Verify real CPU voice separation and denoise on Windows
         shell: pwsh
         run: '& (Join-Path $env:YANGNING_INSTALL_ROOT "runtime/Scripts/python.exe") ci/separation_smoke.py'
   release:
     needs: [test, windows-install]
-    if: github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE'
+    if: (github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: ') && contains(github.event.head_commit.message, '[publish-approved]'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,3 +92,4 @@ jobs:
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
       - run: python ci/publish_release.py
+

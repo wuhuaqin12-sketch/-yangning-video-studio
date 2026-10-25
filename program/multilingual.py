@@ -72,7 +72,7 @@ def _worker_run(request,folder,cancel,progress):
                 process.wait()
     if process.returncode:
         detail=log_path.read_text(encoding='utf8',errors='replace')[-1500:]
-        raise RuntimeError('多语言定位未完成；首次需联网下载组件及模型。详细日志：'+str(log_path)+'\n'+detail)
+        raise RuntimeError(failure_message(detail)+' 详细日志：'+str(log_path)+'\n'+detail)
 
 def english_reference(cues):
     """Use English lines from a separately-lined bilingual reference, without translation."""
@@ -100,7 +100,7 @@ def align(cues,audio,folder,cancel,progress,language,duration):
         (folder/'alignment_diagnostics.json').write_text(json.dumps(dict(status='failed',language=language,error=str(exc),reference_times_ignored=True),ensure_ascii=False,indent=2),encoding='utf8')
         raise ValueError(str(exc)+' 定位诊断：'+str(folder/'alignment_diagnostics.json')) from exc
     (folder/'alignment_diagnostics.json').write_text(json.dumps(dict(status='completed',language=language,reference_times_ignored=True,reference_cues=cues,aligned_cues=aligned),ensure_ascii=False,indent=2),encoding='utf8')
-    (folder/'words.json').write_text(json.dumps(dict(backend='stable-ts-small-cpu',reference_guided=True,zero_duration_units_grouped=sum(float(w['end'])==float(w['start']) for seg in result.get('segments',[]) for w in seg.get('words',[])),language=language,words=rows,cue_ids=ids),ensure_ascii=False,indent=2),encoding='utf8')
+    (folder/'words.json').write_text(json.dumps(dict(backend='stable-ts-cpu',model=result.get('_yangning_model','unknown'),reference_guided=True,zero_duration_units_grouped=sum(float(w['end'])==float(w['start']) for seg in result.get('segments',[]) for w in seg.get('words',[])),language=language,words=rows,cue_ids=ids),ensure_ascii=False,indent=2),encoding='utf8')
     progress('多语言字词组定位完成，开始分析自然停顿')
     return aligned
 
@@ -109,26 +109,53 @@ def worker(request):
     def status(s):
         tmp=folder/'alignment_progress.writing';tmp.write_text(s,encoding='utf8');tmp.replace(folder/'alignment_progress.txt')
     status('检查多语言本地组件')
-    try:import stable_whisper
-    except ImportError:
-        status('首次安装多语言组件，下载量较大，请保持联网')
-        subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--only-binary=:all:','--no-binary=stable-ts,openai-whisper','stable-ts==2.19.1'],check=True)
-        import stable_whisper
+    import stable_whisper
     import torch
     torch.set_num_threads(max(1,min(4,os.cpu_count() or 1)))
     data=json.loads(Path(request).read_text(encoding='utf8'))
     cache=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))/'YangNingStudio'/'models';cache.mkdir(parents=True,exist_ok=True)
-    status('加载多语言模型 small；首次下载约460MB，之后复用')
     from model_cache import load_stable_model
-    try:
-        model=load_stable_model(stable_whisper,'small',cache,device='cpu')
-    except (OSError,RuntimeError,ValueError) as exc:
-        status('多语言模型加载失败，请查看 multilingual.log')
-        raise RuntimeError('Whisper模型加载失败；请检查磁盘空间、模型缓存和网络。原有模型不会被直接删除。') from exc
+    model,model_name=load_with_fallback(stable_whisper,cache,status)
     def update(done,total):status(f'本地多语言定位 {min(100,round(100*done/max(total,.01)))}%')
     status('正在按参考稿定位配音；电脑速度决定用时')
     result=model.align(data['audio'],data['text'],language=data['language'],original_split=True,regroup=False,verbose=None,progress_callback=update)
     if result is None:raise RuntimeError('未能定位，请检查配音与参考稿。')
-    (folder/'multilingual_result.json').write_text(json.dumps(result.to_dict(),ensure_ascii=False),encoding='utf8')
+    output=result.to_dict();output['_yangning_model']=model_name
+    (folder/'multilingual_result.json').write_text(json.dumps(output,ensure_ascii=False),encoding='utf8')
     status('定位完成，检查逐句时间轴')
-if __name__=='__main__':worker(sys.argv[1])
+def is_memory_error(exc):
+    message=str(exc).lower()
+    return isinstance(exc,MemoryError) or any(x in message for x in
+        ('not enough memory','out of memory','defaultcpuallocator','cannot allocate memory','winerror 1455'))
+
+def failure_message(detail):
+    if is_memory_error(detail):
+        return '定位失败：可用内存或虚拟内存不足。请关闭其他软件，重启后重试。'
+    if any(x in detail.lower() for x in ('winerror 1114','winerror 126','c10.dll','dll load failed')):
+        return '定位失败：PyTorch运行组件无法加载。请运行 REPAIR_ALIGNMENT.bat；若仍失败，请提供日志。'
+    return '多语言定位失败，请查看日志中的具体原因。'
+
+def load_with_fallback(stable_whisper,cache,status):
+    import gc
+    from model_cache import load_stable_model
+    names=('base','tiny')
+    for index,name in enumerate(names):
+        status('加载多语言模型 '+name+'；首次使用需要联网下载，之后复用')
+        oom=False
+        try:
+            return load_stable_model(stable_whisper,name,cache,device='cpu'),name
+        except (OSError,RuntimeError,ValueError,MemoryError) as exc:
+            if not is_memory_error(exc):raise
+            if index==len(names)-1:raise
+            oom=True
+        # Leave exception scope first so its traceback no longer retains tensors.
+        if oom:
+            gc.collect()
+            status('内存不足，自动改用更小的多语言模型 tiny（精度可能降低）')
+
+if __name__=='__main__':
+    if '--alignment-ready' in sys.argv:worker(sys.argv[1])
+    else:
+        from alignment_runtime import launch
+        sys.exit(launch(sys.argv[1]))
+
