@@ -70,8 +70,10 @@ class UpdateTests(unittest.TestCase):
     def test_config_and_release_check(self):
         self.assertIsNone(check_update(self.root))
         save_config('https://example.org/latest.json',self.root)
-        data=dict(format='YangNingStudioUpdate',schema=1,version='0.12.6',url='https://example.org/app.zip',sha256='a'*64,size=100,notes='Fix')
-        self.assertEqual(check_update(self.root,lambda *_:json.dumps(data).encode())['version'],'0.12.6')
+        major,minor,patch=map(int,APP_VERSION.split('.'))
+        newer=f'{major}.{minor}.{patch+1}'
+        data=dict(format='YangNingStudioUpdate',schema=1,version=newer,url='https://example.org/app.zip',sha256='a'*64,size=100,notes='Fix')
+        self.assertEqual(check_update(self.root,lambda *_:json.dumps(data).encode())['version'],newer)
         data['version']=APP_VERSION
         self.assertEqual(check_update(self.root,lambda *_:json.dumps(data).encode()),{})
         data['url']='http://example.org/app.zip'
