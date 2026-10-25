@@ -76,7 +76,8 @@ jobs:
         run: '& (Join-Path $env:YANGNING_INSTALL_ROOT "runtime/Scripts/python.exe") ci/separation_smoke.py'
   release:
     needs: [test, windows-install]
-    if: (github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: ') && contains(github.event.head_commit.message, '[publish-approved]'))
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: ') && contains(github.event.head_commit.message, '[publish-approved]'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
