@@ -136,22 +136,10 @@ def failure_message(detail):
     return '多语言定位失败，请查看日志中的具体原因。'
 
 def load_with_fallback(stable_whisper,cache,status):
-    import gc
+    # Keep alignment quality consistent with 0.10.2; never silently downgrade.
     from model_cache import load_stable_model
-    names=('base','tiny')
-    for index,name in enumerate(names):
-        status('加载多语言模型 '+name+'；首次使用需要联网下载，之后复用')
-        oom=False
-        try:
-            return load_stable_model(stable_whisper,name,cache,device='cpu'),name
-        except (OSError,RuntimeError,ValueError,MemoryError) as exc:
-            if not is_memory_error(exc):raise
-            if index==len(names)-1:raise
-            oom=True
-        # Leave exception scope first so its traceback no longer retains tensors.
-        if oom:
-            gc.collect()
-            status('内存不足，自动改用更小的多语言模型 tiny（精度可能降低）')
+    status('加载多语言模型 small；首次下载约460MB，之后复用')
+    return load_stable_model(stable_whisper,'small',cache,device='cpu'),'small'
 
 if __name__=='__main__':
     if '--alignment-ready' in sys.argv:worker(sys.argv[1])

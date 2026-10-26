@@ -148,7 +148,7 @@ def video_graph(m):
 
 def export(folder,cancel,progress=lambda s:None,preview_time=None,preview_range=None):
     from publish_style import normalize_style
-    from publish import make_ass,write_cover,COVER_DEFAULTS,validate_cover
+    from publish import canvas_style,make_ass,write_cover,COVER_DEFAULTS,validate_cover
     folder=Path(folder);m=rebuild(folder,cancel);duration=m['output_duration'];style=m.get('style')
     out=folder/('preview.mp4' if preview_range is not None else 'preview.png' if preview_time is not None else 'video.partial.mp4')
     args=[executable('ffmpeg'),'-v','error','-y','-filter_complex_threads','1','-i',m['video'],'-i',str(folder/'edited.wav')]
@@ -157,11 +157,13 @@ def export(folder,cancel,progress=lambda s:None,preview_time=None,preview_range=
         if not m['adjusted']:raise ValueError('排版需要当前视频对应的字幕SRT。')
         opts={**COVER_DEFAULTS,**style,**normalize_style(style)}
         validate_cover(opts,duration)
-        if not Path(opts['background']).is_file():raise ValueError('请选择背景图片。')
-        vw,vh,vx,vy=make_ass(folder/'publish.ass',m['adjusted'],opts,m['stream'],duration,1080,1920)
+        opts,cw,ch=canvas_style(opts,m['stream'])
+        vw,vh,vx,vy=make_ass(folder/'publish.ass',m['adjusted'],opts,m['stream'],duration,cw,ch)
         if not (folder/'fonts').exists():shutil.copytree(Path(__file__).parent/'fonts',folder/'fonts')
-        args+=['-loop','1','-i',str(Path(opts['background']).resolve())]
-        graph+=f';[2:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg];[teacher]scale={vw}:{vh},setsar=1[scaled];[bg][scaled]overlay={vx}:{vy}:shortest=1,ass=publish.ass:fontsdir=fonts[v]'
+        if opts['background']:
+            args+=['-loop','1','-i',str(Path(opts['background']).resolve())]
+            graph+=f';[2:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg];[teacher]scale={vw}:{vh},setsar=1[scaled];[bg][scaled]overlay={vx}:{vy}:shortest=1,ass=publish.ass:fontsdir=fonts[v]'
+        else:graph+=';[teacher]ass=publish.ass:fontsdir=fonts[v]'
     else:graph+=';[teacher]null[v]'
     if preview_range is not None:
         start,end=map(float,preview_range)

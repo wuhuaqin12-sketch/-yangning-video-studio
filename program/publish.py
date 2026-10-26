@@ -6,6 +6,17 @@ from publish_style import (DEFAULTS, normalize_style, clean, units, wrap, fit_te
                            fit_lines, styled_lines, ass_colour, line_parts)
 
 
+def canvas_style(opts, stream):
+    opts=dict(opts)
+    background=str(opts.get('background') or '').strip()
+    opts['background']=background
+    if background:
+        if not Path(background).is_file():raise ValueError('请选择有效的背景图，或清空背景图。')
+        return opts,1080,1920
+    opts.update(video_width=100,video_height=100)
+    return opts,int(stream['width']),int(stream['height'])
+
+
 def layout(opts, stream, w, h):
     scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
@@ -142,7 +153,7 @@ def preview_cover(settings,cancel,progress=lambda s:None):
 
 def compose(settings, cancel, progress=lambda s:None, preview=False):
     opts={**COVER_DEFAULTS,**settings,**normalize_style(settings)}
-    for key in ('video','srt','background'):
+    for key in ('video','srt'):
         if not Path(opts.get(key,'')).is_file():raise ValueError('请选择有效的'+{'video':'优化后视频','srt':'优化后最新SRT','background':'背景图'}[key])
     if not opts.get('output'):raise ValueError('请选择成片保存位置。')
     vp=probe(opts['video'],cancel);stream=next(s for s in vp['streams'] if s['codec_type']=='video')
@@ -150,7 +161,7 @@ def compose(settings, cancel, progress=lambda s:None, preview=False):
     duration=float(stream.get('duration') or vp['format']['duration']);cues=parse_srt(opts['srt'])
     if cues[-1][2]>duration+.1:raise ValueError('字幕超过视频结尾，请选择这次优化导出的最新SRT。')
     validate_cover(opts,duration)
-    w,h=1080,1920
+    opts,w,h=canvas_style(opts,stream)
     out=Path(opts['output']).resolve();out.mkdir(parents=True,exist_ok=True)
     folder=out/('publish_'+uuid.uuid4().hex[:10]);folder.mkdir()
     try:
@@ -162,6 +173,9 @@ def compose(settings, cancel, progress=lambda s:None, preview=False):
                f'[1:v]scale={vw}:{vh},setsar=1[teacher];'
                f'[bg][teacher]overlay={vx}:{vy}:shortest=1,{ass}[v]')
         args=[executable('ffmpeg'),'-v','error','-y','-filter_complex_threads','1','-threads','1','-loop','1','-framerate',stream['avg_frame_rate'],'-i',str(Path(opts['background']).resolve()),'-threads','2','-i',str(Path(opts['video']).resolve()),'-filter_complex',graph,'-map','[v]']
+        if not opts['background']:
+            args=[executable('ffmpeg'),'-v','error','-y','-filter_complex_threads','1','-threads','2','-i',str(Path(opts['video']).resolve()),'-vf',ass,'-map','0:v:0']
+        audio_map='1:a:0' if opts['background'] else '0:a:0'
         report=json.loads((folder/'layout_report.json').read_text(encoding='utf8'))
         if preview:
             t=float(opts.get('preview_time',cues[0][1]+.1))
@@ -169,8 +183,8 @@ def compose(settings, cancel, progress=lambda s:None, preview=False):
             progress('正在预览字体、颜色、重点词与位置…')
             run(args+['-ss',str(t),'-frames:v','1','preview.png'],cancel,cwd=folder)
             return str(folder/'preview.png')
-        progress('正在合成背景、标题和最新字幕（1080×1920）…')
-        run(args+['-map','1:a:0','-c:v','libx264','-threads','4','-crf','16','-preset','medium','-pix_fmt','yuv420p','-c:a','copy','-t',str(duration),'-movflags','+faststart','publish.partial.mp4'],cancel,cwd=folder)
+        progress(f'正在合成标题和最新字幕（{w}×{h}）…')
+        run(args+['-map',audio_map,'-c:v','libx264','-threads','4','-crf','16','-preset','medium','-pix_fmt','yuv420p','-c:a','copy','-t',str(duration),'-movflags','+faststart','publish.partial.mp4'],cancel,cwd=folder)
         progress('正在检查完整成片和音轨…')
         check=run([executable('ffmpeg'),'-v','error','-xerror','-threads','2','-i',str(folder/'publish.partial.mp4'),'-f','null','-'],cancel)
         if check.strip():raise RuntimeError(check[-1000:])

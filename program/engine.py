@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.12.7'
+VERSION='0.12.9'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -131,14 +131,18 @@ def render_preview(folder,time,cancel):
     st=float(PchipInterpolator(tx,sx)(t))
     image=folder/'source_preview.png';Image.fromarray(frame_at(m['job']['video'],st,cancel,m['video_stream'])).save(image)
     if not m.get('publish_settings'):return str(image)
-    from publish import make_ass
+    from publish import make_ass,canvas_style
     from publish_style import normalize_style
     opts={**m['publish_settings'],**normalize_style(m['publish_settings'])}
-    vw,vh,vx,vy=make_ass(folder/'publish.ass',cues,opts,m['video_stream'],total,1080,1920)
+    opts,cw,ch=canvas_style(opts,m['video_stream'])
+    vw,vh,vx,vy=make_ass(folder/'publish.ass',cues,opts,m['video_stream'],total,cw,ch)
     if not (folder/'fonts').exists():shutil.copytree(Path(__file__).parent/'fonts',folder/'fonts')
     graph=f'[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg];[1:v]scale={vw}:{vh},setsar=1[teacher];[bg][teacher]overlay={vx}:{vy},setpts=PTS+{t}/TB,ass=publish.ass:fontsdir=fonts[v]'
     path=folder/'preview.png'
-    run([executable('ffmpeg'),'-v','error','-y','-filter_complex_threads','1','-i',str(Path(opts['background']).resolve()),'-i',str(image),'-filter_complex',graph,'-map','[v]','-frames:v','1',str(path)],cancel,cwd=folder)
+    if opts['background']:
+        run([executable('ffmpeg'),'-v','error','-y','-filter_complex_threads','1','-i',str(Path(opts['background']).resolve()),'-i',str(image),'-filter_complex',graph,'-map','[v]','-frames:v','1',str(path)],cancel,cwd=folder)
+    else:
+        run([executable('ffmpeg'),'-v','error','-y','-i',str(image),'-vf',f'setpts=PTS+{t}/TB,ass=publish.ass:fontsdir=fonts','-frames:v','1',str(path)],cancel,cwd=folder)
     return str(path)
 
 def frame_at(video,time,cancel,stream=None):
@@ -172,14 +176,17 @@ def render(folder,cancel,progress=lambda s:None):
     bitrate_known=bool(v.get('bit_rate'))
     vf=[];video_map='0:v:0';ow,oh=w,h
     if m.get('publish_settings'):
-        from publish import make_ass
+        from publish import make_ass,canvas_style
         from publish_style import normalize_style
         opts={**m['publish_settings'],**normalize_style(m['publish_settings'])}
-        vw,vh,vx,vy=make_ass(folder/'publish.ass',adjusted,opts,v,total,1080,1920)
+        opts,cw,ch=canvas_style(opts,v)
+        vw,vh,vx,vy=make_ass(folder/'publish.ass',adjusted,opts,v,total,cw,ch)
         fonts=Path(__file__).parent/'fonts'
         if not (folder/'fonts').exists():shutil.copytree(fonts,folder/'fonts')
         graph=f'[2:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg];[0:v]scale={vw}:{vh},setsar=1[teacher];[bg][teacher]overlay={vx}:{vy}:shortest=1,ass=publish.ass:fontsdir=fonts[v]'
         vf=['-loop','1','-i',str(Path(opts['background']).resolve()),'-filter_complex_threads','1','-filter_complex',graph];video_map='[v]';ow,oh=1080,1920
+        if not opts['background']:
+            vf=['-vf','ass=publish.ass:fontsdir=fonts'];video_map='0:v:0';ow,oh=w,h
     elif job.get('burn',False):vf=['-vf','ass=subtitles.ass']
     partial=folder/'video.partial.mp4';final=folder/'video.mp4'
     decode_filter=f'fps={fps}'

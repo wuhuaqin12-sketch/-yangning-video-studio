@@ -9,14 +9,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn('运行组件',m.failure_message('OSError [WinError 1114] c10.dll'))
         self.assertIn('内存',m.failure_message('DefaultCPUAllocator: not enough memory'))
         self.assertNotIn('首次',m.failure_message('HTTP download failed'))
-    def test_oom_falls_back_but_network_does_not(self):
+    def test_small_is_used_and_failures_do_not_downgrade(self):
         model=object()
-        with patch('model_cache.load_stable_model',side_effect=[RuntimeError('not enough memory'),model]) as load:
-            self.assertEqual(m.load_with_fallback(None,Path('.'),lambda s:None),(model,'tiny'))
-            self.assertEqual([c.args[1] for c in load.call_args_list],['base','tiny'])
-        with patch('model_cache.load_stable_model',side_effect=OSError('network offline')) as load:
-            with self.assertRaises(OSError):m.load_with_fallback(None,Path('.'),lambda s:None)
-            self.assertEqual(load.call_count,1)
+        with patch('model_cache.load_stable_model',return_value=model) as load:
+            self.assertEqual(m.load_with_fallback(None,Path('.'),lambda s:None),(model,'small'))
+            self.assertEqual(load.call_args.args[1],'small')
+        for error in [RuntimeError('not enough memory'),OSError('network offline')]:
+            with patch('model_cache.load_stable_model',side_effect=error) as load:
+                with self.assertRaises(type(error)):
+                    m.load_with_fallback(None,Path('.'),lambda s:None)
+                self.assertEqual(load.call_count,1)
     def test_healthy_environment_is_reused(self):
         with patch.object(ar,'healthy',return_value=True),patch.object(ar.subprocess,'run') as run:
             self.assertEqual(ar.prepare(lambda s:None),ar.python_path(ar.runtime_path()))

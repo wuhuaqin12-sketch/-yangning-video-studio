@@ -66,12 +66,15 @@ def show(app, open_path):
         ttk.Button(controls,text='选颜色',command=choose).pack(side='left')
     page=pages['assets']
     for row,(key,label) in enumerate([('video','源视频（保留原文件）'),('srt','字幕 SRT（导出时自动同步）'),('background','背景图'),('output','成片保存到')]):
-        entry(page,row,key,label);ttk.Button(page,text='选择',command=lambda k=key:picker(k)).grid(row=row,column=2,padx=6)
+        entry(page,row,key,label)
+        controls=ttk.Frame(page);controls.grid(row=row,column=2,padx=6)
+        ttk.Button(controls,text='选择',command=lambda k=key:picker(k)).pack(side='left')
+        if key=='background':ttk.Button(controls,text='清除',command=lambda:variables['background'].set('')).pack(side='left')
     entry(page,4,'video_width','老师画面最大宽度 %（100＝铺满横向）')
     entry(page,5,'video_height','老师画面最大高度 %')
     ttk.Label(page,text='工程会从源素材直接合成，不使用反复压缩的中间视频。\n一键导出时自动使用本次优化的字幕时间轴。\n本页不擦除已有字幕：源画面有旧字幕时，请先准备干净视频。',wraplength=780).grid(row=6,column=0,columnspan=3,sticky='w',pady=10)
     page=pages['title']
-    entry(page,0,'title','标题（可留空）');entry(page,1,'title_font','字体种类','font');colour_row(page,2,'title_color','文字颜色')
+    entry(page,0,'title','标题（可留空）');ttk.Button(page,text='清除',command=lambda:variables['title'].set('')).grid(row=0,column=2,padx=6);entry(page,1,'title_font','字体种类','font');colour_row(page,2,'title_color','文字颜色')
     for row,(key,label) in enumerate([('title_font_size','大小（成片像素，默认230）'),('title_x','中心横向 %（50＝居中）'),('title_y','中心纵向 %'),('title_width','区域宽度 %'),('title_outline','描边宽度（像素，0＝无）')],3):entry(page,row,key,label)
     ttk.Label(page,text='日语标题默认 Yuji Boku（佑字 朴）毛笔体。可选本机字体，也可直接输入字体名。',wraplength=780).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
     page=pages['subtitle']
@@ -174,7 +177,7 @@ def show(app, open_path):
                     allowed={Path(expected).resolve(),(folder/'video.mp4').resolve()}
                     if Path(settings['video']).resolve() not in allowed:raise ValueError('请使用本工程的视频。')
                     if Path(settings['srt']).resolve()!=(folder/'subtitles.srt').resolve():raise ValueError('请使用本工程的同步字幕。换字幕请重新导入建立工程。')
-                    if not Path(settings['background']).is_file():raise ValueError('请先选择背景图。')
+                    if settings['background'].strip() and not Path(settings['background']).is_file():raise ValueError('背景图不存在，请重新选择或清空。')
                     if clean:
                         from clean_project import load,save,export
                         data=load(folder);data['style']=settings;save(folder/'clean_project.json',data)
@@ -185,7 +188,7 @@ def show(app, open_path):
                         if preview:app.events.put(('publish_done',render_preview(folder,float(settings['preview_time']),app.stop)))
                     app.progress('排版已保存，可以直接导出；预览可选。')
                 else:
-                    if not Path(settings['background']).is_file():raise ValueError('请选择背景图。')
+                    if settings['background'].strip() and not Path(settings['background']).is_file():raise ValueError('背景图不存在，请重新选择或清空。')
                     if preview:app.events.put(('publish_done',compose(settings,app.stop,app.progress,preview=True)))
                 saved={k:settings[k] for k in list(DEFAULTS)+list(COVER_DEFAULTS)+['background'] if k in settings}
                 app.events.put(('style_saved',saved))
