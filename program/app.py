@@ -18,7 +18,7 @@ class App:
         self.root=root;root.title('杨宁视频工作室 · 成片制作 · '+VERSION)
         root.geometry(f'1000x{max(640,min(780,root.winfo_screenheight()-100))}');root.minsize(880,640)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
-        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
+        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.1',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.auto_cut=tk.BooleanVar(value=True)
         self.v['audio_separate']=tk.BooleanVar(value=False)
@@ -63,6 +63,11 @@ class App:
         language.grid(row=3,column=1,sticky='w',pady=6)
         language.bind('<<ComboboxSelected>>',self.language_changed)
         ttk.Label(form,text='自动识别根据文件名判断；不确定时请手动选择。新SRT将在处理后生成。',wraplength=820).grid(row=4,column=0,columnspan=3,sticky='w',pady=5)
+        speed_line=ttk.Frame(form)
+        speed_line.grid(row=5,column=1,columnspan=2,sticky='w',pady=6)
+        ttk.Label(form,text='成片倍速').grid(row=5,column=0,sticky='w',pady=6)
+        ttk.Combobox(speed_line,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=8).pack(side='left')
+        ttk.Label(speed_line,text='倍  ·  所有语言默认1.1倍，保持音调').pack(side='left',padx=8)
         final=ttk.LabelFrame(pane,text='②  一键生成',padding=12);final.pack(fill='x',pady=6)
         ttk.Label(final,text='自动定位字幕 → 优化停顿与音画同步 → 写入新字幕 → 导出视频',wraplength=820).pack(anchor='w',pady=(0,10))
         line=ttk.Frame(final);line.pack(fill='x')
@@ -99,7 +104,7 @@ class App:
         choices=('英语','日语','法语','德语','西班牙语','意大利语','韩语','葡萄牙语','中文','印尼语','其他语言')
         language=ttk.Combobox(line,textvariable=self.language_name,values=choices,state='readonly',width=12)
         language.pack(side='left',padx=8);language.bind('<<ComboboxSelected>>',self.language_changed)
-        ttk.Label(box,text='整段去噪试听保持原速。成片沿用当前规则：日语配音1.1倍，其他配音和原声工程保持原速；保持音调。',wraplength=570).pack(anchor='w',pady=8)
+        ttk.Label(box,text='整段去噪试听保持原速。配音成片所有语言默认1.1倍，可在主页面选择倍速，保持音调。',wraplength=570).pack(anchor='w',pady=8)
         ttk.Button(box,text='保存，返回制作',command=win.destroy).pack(anchor='e',pady=8)
     def finish_movie(self):
         if self.busy:return

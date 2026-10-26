@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.12.6'
+VERSION='0.12.7'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -24,7 +24,10 @@ def square_pixel_stream(stream):
     return result
 
 def playback_speed(job):
-    return float(job.get('speed', 1.1))
+    try:speed=float(job.get('speed', 1.1))
+    except (TypeError,ValueError):raise ValueError('请选择有效的成片倍速。')
+    if not math.isfinite(speed) or not 0.5<=speed<=2.0:raise ValueError('成片倍速须在0.5–2.0之间。')
+    return speed
 
 def fingerprint(job):
     result={}

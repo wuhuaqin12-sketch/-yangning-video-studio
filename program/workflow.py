@@ -1,10 +1,11 @@
 """UI-independent job normalization and explicit task state transitions."""
 from pathlib import Path
-from engine import prepare,render,Cancelled
+from engine import prepare,render,Cancelled,playback_speed
 from multilingual import LANGUAGES
 
 def normalize(job):
     job=dict(job)
+    job['speed']=playback_speed(job)
     # Removed features cannot be re-enabled by old queues or imported jobs.
     job.update(denoise=False,separate=False,mute=False)
     job.pop('clean_mode',None)
