@@ -29,7 +29,7 @@ class App:
         except (OSError,ValueError):pass
         try:self.pending_style=json.loads((DATA/'style_no_denoise.json').read_text(encoding='utf8'))
         except (OSError,ValueError):self.pending_style={}
-        for k,value in dict(trim=True,mute=False,denoise=False,separate=False,burn=True).items():self.v[k]=tk.BooleanVar(value=value)
+        for k,value in dict(trim=True,mute=False,denoise=False,separate=False,burn=False).items():self.v[k]=tk.BooleanVar(value=value)
         try:
             saved=json.loads(STATE.read_text(encoding='utf8'))
             if isinstance(saved,list):
@@ -69,7 +69,7 @@ class App:
         ttk.Combobox(speed_line,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=8).pack(side='left')
         ttk.Label(speed_line,text='倍  ·  所有语言默认1.1倍，保持音调').pack(side='left',padx=8)
         final=ttk.LabelFrame(pane,text='②  一键生成',padding=12);final.pack(fill='x',pady=6)
-        ttk.Label(final,text='自动定位字幕 → 优化停顿与音画同步 → 写入新字幕 → 导出视频',wraplength=820).pack(anchor='w',pady=(0,10))
+        ttk.Label(final,text='自动定位字幕 → 优化停顿与音画同步 → 导出视频（字幕写入在更多设置中选择）',wraplength=820).pack(anchor='w',pady=(0,10))
         line=ttk.Frame(final);line.pack(fill='x')
         self.main_button=ttk.Button(line,text='一键生成视频',command=self.one_click_simple)
         self.main_button.pack(side='left',ipadx=24,ipady=8)
@@ -343,7 +343,7 @@ class App:
         except Exception as e:messagebox.showerror('检查素材',str(e))
     def one_click_simple(self):
         """Main-page workflow: use the existing proven alignment/render pipeline."""
-        self.v['burn'].set(True)
+        # Respect the user's subtitle checkbox in the one-click workflow.
         try:self.detect_language()
         except ValueError as e:messagebox.showerror('语言不一致',str(e));return
         self.one_click()
@@ -442,12 +442,12 @@ class App:
         ttk.Radiobutton(box,text='使用已校对配音SRT时间轴（可选）',variable=self.v['alignment'],value='timed').pack(anchor='w')
         line=ttk.Frame(box);line.pack(fill='x',pady=8);ttk.Label(line,text='独立配音SRT（可留空）').pack(side='left');ttk.Entry(line,textvariable=self.v['target_srt']).pack(side='left',fill='x',expand=True);ttk.Button(line,text='选择',command=lambda:self.pick('target_srt')).pack(side='left')
         ttk.Button(box,text='选择输出文件夹',command=lambda:self.pick('output')).pack(anchor='w',pady=5)
+        ttk.Checkbutton(box,text='把新字幕写入视频画面（默认关闭）',variable=self.v['burn']).pack(anchor='w',pady=6)
         ttk.Button(box,text='配音匹配并导出',command=lambda:(win.destroy(),self.one_click())).pack(anchor='w',pady=5)
         ttk.Button(box,text='降噪 / 人声分离 / 试听',command=lambda:(win.destroy(),self.sound_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='停顿 / 速度',command=lambda:(win.destroy(),self.timing_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='标题 / 字幕 / 封面',command=lambda:(win.destroy(),self.publish())).pack(anchor='w',pady=5)
         ttk.Checkbutton(box,text='自动剪短长空白（保留自然停顿）',variable=self.auto_cut).pack(anchor='w')
-        ttk.Checkbutton(box,text='把新字幕写入画面（默认开启，另存SRT）',variable=self.v['burn']).pack(anchor='w',pady=5)
         ttk.Label(box,text='日语字词间多余空白压缩已启用；保留短停顿、换气和句末停顿。日志显示前后时长与删除秒数。',wraplength=660).pack(anchor='w',pady=10)
         for controls in [[('加入批量队列',self.add),('批量分析 / 试听',self.start),('重试所选',self.retry),('删除所选',self.remove)],[('仅分析/试听',self.analyze),('A 原配音',lambda:self.listen(False)),('B 优化配音',lambda:self.listen(True)),('停顿表',self.edit_plan)]]:
             line=ttk.Frame(box);line.pack(fill='x',pady=5)

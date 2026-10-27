@@ -47,7 +47,7 @@ class PauseTests(unittest.TestCase):
     def test_default_speed_pitch_and_cache(self):
         from engine import preview_audio,save_json,playback_speed
         for language in ('en','fr','zh','de','ko','other'):
-            self.assertEqual(playback_speed(dict(language=language)),1.0)
+            self.assertEqual(playback_speed(dict(language=language)),1.1)
         self.assertEqual(playback_speed(dict(language='ja')),1.1)
         with tempfile.TemporaryDirectory() as d:
             p=Path(d);r=16000;c=threading.Event();ff=executable('ffmpeg')
@@ -63,7 +63,7 @@ class PauseTests(unittest.TestCase):
             y=np.fromfile(p/'check.f32',np.float32)[r:2*r];spectrum=np.abs(np.fft.rfft(y*np.hanning(len(y))))
             peak=np.fft.rfftfreq(len(y),1/r)[np.argmax(spectrum)]
             self.assertAlmostEqual(peak,440,delta=2)
-            m['job']['language']='fr';save_json(p/'analysis.json',m)
+            m['job']['language']='fr';m['job']['speed']='1.0';save_json(p/'analysis.json',m)
             total,_=preview_audio(p,c);self.assertAlmostEqual(total,4)
             self.assertNotEqual(first,json.loads((p/'audio_versions.json').read_text(encoding='utf8'))['B'])
 

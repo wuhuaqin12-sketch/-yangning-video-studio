@@ -29,7 +29,7 @@ tag='v'+version
 out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
 manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
 package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
-subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','主页面新增成片倍速选择；所有配音语言默认1.1倍，可手动选择，保持音调并同步画面与字幕。'],check=True)
+subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','修复一键生成忽略字幕开关的问题；字幕写入默认关闭，可在更多设置中开启，背景和标题继续支持独立选择。'],check=True)
 def gh(*args,**kwargs):return subprocess.run(['gh',*args,'--repo',repo],**kwargs)
 result=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
 if result.returncode==0:
@@ -37,8 +37,9 @@ if result.returncode==0:
         print('This version is already published; existing release left unchanged.')
         sys.exit(0)
 else:
-    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','主页面新增成片倍速选择；所有配音语言默认1.1倍，可选0.75至2.0倍，保持音调。切换语言保留所选倍速。下载Windows ZIP后完整解压运行INSTALL.bat；已安装用户可在软件中检查更新。','--draft',check=True)
+    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','修复一键生成忽略字幕开关的问题。默认不把新字幕写入画面，可在更多设置中开启；继续另存SRT，保留倍速、定位模型和可选背景/标题设置。下载Windows ZIP后完整解压运行INSTALL.bat；已安装用户可在软件中检查更新。','--draft',check=True)
 gh('release','upload',tag,str(out/('YangNing_VideoStudio_Windows_'+version+'.zip')),str(out/'latest.json'),'--clobber',check=True)
 gh('release','edit',tag,'--draft=false','--latest',check=True)
 print('Release published:',tag)
+
 
