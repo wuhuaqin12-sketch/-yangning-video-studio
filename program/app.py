@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk,filedialog,messagebox,simpledialog
 from engine import preview_audio,Cancelled,VERSION
 from workflow import normalize,execute
+from output_destination import preferred, remember, deliver
 from audio_edit import import_plan,export_plan
 DATA=Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'YangNingStudio'
 DATA.mkdir(parents=True,exist_ok=True)
@@ -19,6 +20,7 @@ class App:
         root.geometry(f'1000x{max(640,min(780,root.winfo_screenheight()-100))}');root.minsize(880,640)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
         defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.1',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
+        defaults['output']=preferred(defaults['output'])
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.auto_cut=tk.BooleanVar(value=True)
         self.v['audio_separate']=tk.BooleanVar(value=False)
@@ -120,7 +122,7 @@ class App:
                 self.events.put(('state',ident,'正在导出',{}))
                 path=finish(folder,values,style,automatic,self.stop,self.progress)
                 self.events.put(('state',ident,'完成·检查通过',dict(result=str(Path(path).parent),error='')))
-                self.events.put(('publish_done',path))
+                self.events.put(('publish_done',deliver(path, preferred(j.get('output') or self.v['output'].get()))))
             except Cancelled:self.events.put(('state',ident,'已停止',dict(error='用户停止了任务')))
             except Exception as e:self.events.put(('state',ident,'失败',dict(error=str(e))))
         self.worker(work)
@@ -318,7 +320,8 @@ class App:
             else:widget.grid()
     def pick(self,k):
         selected=filedialog.askdirectory() if k=='output' else filedialog.askopenfilename()
-        if selected:self.v[k].set(selected)
+        if selected:
+            self.v[k].set(remember(selected) if k=='output' else selected)
     def settings(self):
         j={k:v.get() for k,v in self.v.items()};j['publish_settings']=dict(self.pending_style);j['trim']=self.auto_cut.get();j.pop('preview_time',None)
         if not 1<=float(j['font_percent'])<=15:raise ValueError('字号应为1–15%')
