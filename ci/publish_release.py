@@ -29,7 +29,7 @@ tag='v'+version
 out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
 manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
 package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
-subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','修复一键生成忽略字幕开关的问题；字幕写入默认关闭，可在更多设置中开启，背景和标题继续支持独立选择。'],check=True)
+subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','修复成片保存路径选择、路径记忆及已有工程导出位置；保留原有字幕、背景和音频处理功能。'],check=True)
 def gh(*args,**kwargs):return subprocess.run(['gh',*args,'--repo',repo],**kwargs)
 result=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
 if result.returncode==0:
