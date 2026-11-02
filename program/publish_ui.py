@@ -6,6 +6,7 @@ import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from publish import compose, preview_cover, COVER_DEFAULTS
 from publish_style import DEFAULTS, normalize_style, save_preset, load_preset, colour
+from output_destination import preferred, remember, deliver
 
 
 def show(app, open_path):
@@ -26,7 +27,7 @@ def show(app, open_path):
     except (OSError,ValueError,KeyError):meta={}
     values={**defaults,**COVER_DEFAULTS,'video':str(folder/'video.mp4') if (folder/'video.mp4').is_file() else app.v['video'].get(),
         'srt':str(folder/'subtitles.srt') if (folder/'subtitles.srt').is_file() else app.v['source_srt'].get(),
-        'background':'','output':job.get('output') or app.v['output'].get(),'preview_time':'1'}
+        'background':'','output':preferred(job.get('output') or app.v['output'].get()),'preview_time':'1'}
     values.update(saved_style)
     if project:
         values['video']=str(folder/'video.mp4') if (folder/'video.mp4').is_file() else (cm['video'] if clean else meta['job']['video'])
@@ -48,8 +49,18 @@ def show(app, open_path):
         else:widget=ttk.Entry(page,textvariable=variables[key],width=32)
         widget.grid(row=row,column=1,sticky='ew');return widget
     def picker(key):
-        selected=filedialog.askdirectory(parent=win) if key=='output' else filedialog.askopenfilename(parent=win,filetypes=([('字幕 SRT / 带时间轴TXT','*.srt *.txt'),('所有文件','*.*')] if key=='srt' else [('所有文件','*.*')]))
-        if selected:variables[key].set(selected)
+        try:
+            if key=='output':
+                initial=Path(variables[key].get().strip())
+                while not initial.is_dir() and initial != initial.parent:
+                    initial=initial.parent
+                selected=filedialog.askdirectory(parent=win,title='选择成片保存文件夹',initialdir=str(initial),mustexist=True)
+                if selected:variables[key].set(remember(selected))
+            else:
+                selected=filedialog.askopenfilename(parent=win,filetypes=([('字幕 SRT / 带时间轴TXT','*.srt *.txt'),('所有文件','*.*')] if key=='srt' else [('所有文件','*.*')]))
+                if selected:variables[key].set(selected)
+        except Exception as exc:
+            messagebox.showerror('选择保存位置',str(exc),parent=win)
     def colour_row(page,row,key,label):
         entry(page,row,key,label)
         controls=ttk.Frame(page);controls.grid(row=row,column=2,padx=6)
@@ -168,7 +179,10 @@ def show(app, open_path):
         if app.busy:return
         if app.v['language'].get() != 'ja':
             words.delete('1.0','end')
-        try:settings=collect();settings.update(normalize_style(settings));settings['auto_fit']=False
+        try:
+            settings=collect();settings['output']=remember(settings['output']);app.v['output'].set(settings['output'])
+            if job:job['output']=settings['output'];app.save()
+            settings.update(normalize_style(settings));settings['auto_fit']=False
         except Exception as e:messagebox.showerror('检查样式',str(e),parent=win);return
         def work():
             try:
