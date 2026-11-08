@@ -438,7 +438,7 @@ class App:
         def save():export_plan(rows,path);win.destroy();self.progress('停顿计划已保存，B试听和导出会使用新计划。')
         ttk.Button(win,text='修改所选',command=edit).pack(side='left',padx=6,pady=8);ttk.Button(win,text='保存',command=save).pack(side='right',padx=8)
     def voice_1626_settings(self):
-        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request, load_script, load_pronunciation_rules, save_pronunciation_rules, apply_pronunciation_rules
+        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request, load_script, split_script, load_pronunciation_rules, save_pronunciation_rules, apply_pronunciation_rules
         win=tk.Toplevel(self.root)
         win.title('AI语音克隆 · 1626 原声音色')
         win.geometry('730x650')
@@ -528,11 +528,13 @@ class App:
         status=tk.StringVar(value='尚未生成')
         ttk.Label(frame,textvariable=status,wraplength=650).pack(anchor='w',pady=5)
         generate_button=ttk.Button(frame,text='生成1626克隆音频')
+        last_output={'path':None,'segments':[]}
+        repair_button=ttk.Button(frame,text='修正指定句子并替换音频')
         def generate():
             import tempfile
             try:
-                settings=VoiceSettings(reference.get(),language.get(),float(speed.get()),instruction.get('1.0','end').strip())
-                request=synthesis_request(body.get('1.0','end'),settings)
+                request=make_voice_request()
+                request['segments']=[apply_pronunciation_rules(piece,load_pronunciation_rules(dictionary_path,language.get())) for piece in split_script(body.get('1.0','end').strip())]
                 output=filedialog.asksaveasfilename(parent=win,defaultextension='.wav',filetypes=[('WAV音频','*.wav')])
                 if not output:return
             except Exception as e:
@@ -553,6 +555,8 @@ class App:
                         raise RuntimeError('没有生成有效的音频文件')
                     def on_voice_ready():
                         self.v['audio'].set(str(Path(output).resolve()))
+                        last_output['path']=output
+                        last_output['segments']=request['segments']
                         status.set('生成完成，已自动填入主页面新配音：'+output)
                     self.root.after(0,on_voice_ready)
                 except Exception as e:
@@ -564,6 +568,47 @@ class App:
             threading.Thread(target=worker,daemon=True).start()
         generate_button.configure(command=generate)
         generate_button.pack(anchor='e',pady=8)
+        def repair_segment():
+            import tempfile
+            from tkinter import simpledialog
+            output=last_output['path']
+            segments=last_output['segments']
+            if not output or not segments:
+                messagebox.showinfo('先生成','请先完成一次完整配音。',parent=win);return
+            number=simpledialog.askinteger('选择句子',f'输入要重新生成的句子序号（1 至 {len(segments)}）',minvalue=1,maxvalue=len(segments),parent=win)
+            if number is None:return
+            index=number-1
+            revised=simpledialog.askstring('修正发音',f'第{number}句：\\n{segments[index]}\\n\\n请输入修正后的朗读文本',initialvalue=segments[index],parent=win)
+            if not revised or not revised.strip():return
+            new_segments=list(segments)
+            new_segments[index]=revised.strip()
+            request=make_voice_request()
+            request['segments']=new_segments
+            repair_button.configure(state='disabled')
+            status.set(f'正在重做第{number}句并合并音频…')
+            def work():
+                try:
+                    with tempfile.TemporaryDirectory() as temp:
+                        req=Path(temp)/'request.json'
+                        req.write_text(json.dumps(request,ensure_ascii=False),encoding='utf-8')
+                        script=Path(__file__).with_name('voice_1626_worker.py')
+                        cmd=[worker_python.get(),str(script),'--request',str(req),'--output',output,'--replace-index',str(index)]
+                        proc=subprocess.run(cmd,capture_output=True,text=True,timeout=3600)
+                        if proc.returncode:raise RuntimeError((proc.stderr or proc.stdout or '重生成失败')[-1200:])
+                    def done():
+                        last_output['segments']=new_segments
+                        self.v['audio'].set(str(Path(output).resolve()))
+                        status.set(f'第{number}句已替换，完整音频已更新：'+output)
+                    self.root.after(0,done)
+                except Exception as e:
+                    error=str(e)
+                    self.root.after(0,lambda:messagebox.showerror('局部重做失败',error,parent=win))
+                finally:
+                    self.root.after(0,lambda:repair_button.configure(state='normal'))
+            threading.Thread(target=work,daemon=True).start()
+        repair_button.configure(command=repair_segment)
+        repair_button.pack(anchor='e',pady=4)
+
 
         ttk.Label(frame,text='引擎：VoxCPM2。需要独立安装Python依赖及模型；首次运行联网下载。语气指令为尽力控制，不能保证音色完全一致。',wraplength=670).pack(anchor='w')
 
