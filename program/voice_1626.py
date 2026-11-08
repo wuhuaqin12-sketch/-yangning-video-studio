@@ -127,3 +127,33 @@ def build_srt_from_durations(cues, durations, gap_seconds=0.3):
         out.append(f"{index}\\n{format_srt_time(cursor)} --> {format_srt_time(end)}\\n{cue}\\n")
         cursor = end + (gap_seconds if index < len(cues) else 0)
     return "\\n".join(out)
+
+def apply_pronunciation_rules(text, rules):
+    """Change spoken input only; keep the original text for subtitles."""
+    if not isinstance(rules, dict):
+        raise ValueError("发音词典格式错误")
+    for written, spoken in sorted(rules.items(), key=lambda item: len(item[0]), reverse=True):
+        if not written or not isinstance(spoken, str) or not spoken.strip():
+            raise ValueError("发音词典中的原词和读法不能为空")
+        text = text.replace(written, spoken.strip())
+    return text
+
+
+def load_pronunciation_rules(path, language):
+    import json
+    if language not in LANGUAGES:
+        raise ValueError("未知语言")
+    path = Path(path)
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get(language, {})
+
+
+def save_pronunciation_rules(path, language, rules):
+    import json
+    path = Path(path)
+    data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    data[language] = rules
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
