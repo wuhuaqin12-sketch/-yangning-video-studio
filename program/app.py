@@ -516,7 +516,10 @@ class App:
                             raise RuntimeError((proc.stderr or proc.stdout or '引擎执行失败')[-1200:])
                     if not Path(output).is_file() or not Path(output).stat().st_size:
                         raise RuntimeError('没有生成有效的音频文件')
-                    self.root.after(0,lambda:status.set('生成完成：'+output))
+                    def on_voice_ready():
+                        self.v['audio'].set(str(Path(output).resolve()))
+                        status.set('生成完成，已自动填入主页面新配音：'+output)
+                    self.root.after(0,on_voice_ready)
                 except Exception as e:
                     error=str(e)
                     self.root.after(0,lambda:messagebox.showerror('语音生成失败',error,parent=win))
