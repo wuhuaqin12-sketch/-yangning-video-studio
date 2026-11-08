@@ -252,18 +252,23 @@ def open_kaggle_voice(app, parent=None):
                     raise RuntimeError("Notebook 已结束，但没有找到 WAV 输出。")
                 final_path = target_dir / f"YangNing_VoxCPM2_1626_{job_id}.wav"
                 shutil.copy2(wavs[0], final_path)
-                _run_cli(["kernels", "delete", kernel_ref], env, timeout=180)
                 win.after(0, lambda p=final_path: done(p))
             except Exception as exc:
                 win.after(0, lambda e=str(exc): failed(e))
             finally:
+                if kernel_ref:
+                    try:
+                        _run_cli(["kernels", "delete", kernel_ref], env, timeout=180)
+                    except Exception:
+                        pass
                 shutil.rmtree(task_root, ignore_errors=True)
                 api_key = None
                 env.pop("KAGGLE_KEY", None)
 
         def done(path):
             run_button.state(["!disabled"])
-            status.set(f"生成完成：{path}")
+            app.v["audio"].set(str(path))
+            status.set(f"生成完成，已载入工作室配音栏：{path}")
             messagebox.showinfo("WAV 已生成", f"文件已保存：\n{path}", parent=win)
 
         def failed(error):
