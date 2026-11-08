@@ -8,7 +8,7 @@ from pathlib import Path
 
 LANGUAGES = {
     "ja": "日语", "en": "英语", "fr": "法语",
-    "de": "德语", "id": "印尼语",
+    "de": "德语", "id": "印尼语", "yue": "粤语",
 }
 DEFAULT_INSTRUCTIONS = (
     "只以1626老师原声作为音色参考。保持原声音色，不混合任何语气模板的音色。"
