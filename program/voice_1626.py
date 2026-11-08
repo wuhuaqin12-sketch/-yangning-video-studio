@@ -47,3 +47,54 @@ def synthesis_request(text, settings):
         "instructions": settings.instructions.strip(),
         "speed": settings.speed,
     }
+
+
+def load_script(path):
+    """Read TXT or SRT as speech text, without reading subtitle indexes/timestamps."""
+    import re
+    path = Path(path)
+    if path.suffix.lower() not in (".txt", ".srt"):
+        raise ValueError("只支持 TXT 或 SRT 文件")
+    raw = None
+    for encoding in ("utf-8-sig", "utf-16", "gb18030"):
+        try:
+            raw = path.read_text(encoding=encoding)
+            break
+        except UnicodeError:
+            continue
+    if raw is None:
+        raise ValueError("文件编码无法识别")
+    if path.suffix.lower() == ".txt":
+        return raw.strip()
+    # SRT cue numbering and time ranges must never be spoken.
+    lines = []
+    for line in raw.splitlines():
+        value = line.strip()
+        if not value or value.isdigit():
+            continue
+        if re.match(r"^\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->\\s*\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}", value):
+            continue
+        lines.append(value)
+    return "\\n".join(lines).strip()
+
+def split_script(text, max_chars=220):
+    """Split long scripts at punctuation; no overall document character cap."""
+    import re
+    if max_chars < 20:
+        raise ValueError("每段字符数过小")
+    parts = re.split(r"(?<=[。！？!?；;\\n])", text)
+    chunks, current = [], ""
+    for part in parts:
+        while len(part) > max_chars:
+            if current:
+                chunks.append(current.strip())
+                current = ""
+            chunks.append(part[:max_chars].strip())
+            part = part[max_chars:]
+        if len(current) + len(part) > max_chars and current:
+            chunks.append(current.strip())
+            current = ""
+        current += part
+    if current.strip():
+        chunks.append(current.strip())
+    return [chunk for chunk in chunks if chunk]
