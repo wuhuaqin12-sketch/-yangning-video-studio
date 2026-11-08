@@ -56,18 +56,18 @@ def _run_cli(args, env, cwd=None, timeout=180):
     return result.stdout.strip()
 
 
-def _build_notebook(text, seed, reference_dataset, job_id):
+def _build_notebook(text, seed, reference_dataset, job_id, language):
     dataset_name = reference_dataset.rsplit("/", 1)[-1]
     reference_path = f"/kaggle/input/{dataset_name}/1626_reference.wav"
     output_name = f"yangning_1626_{job_id}.wav"
-    code = f"""!pip -q install voxcpm==2.0.3 soundfile
+    style_guides = {\n        "日语": "(Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation)",\n        "英语": "(Calm, natural English narration, warm and gentle, smoothly connected phrases, moderate pace, subtle intonation and natural pauses)",\n        "法语": "(Natural French narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n        "德语": "(Natural German narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n        "印尼语": "(Natural Indonesian narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n        "粤语/中文": "(Natural Cantonese or Chinese narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n    }\n    style_instruction = style_guides.get(language, style_guides["日语"])\n    code = f"""!pip -q install voxcpm==2.0.3 soundfile
 
 from pathlib import Path
 import numpy as np
 import soundfile as sf
 from voxcpm import VoxCPM
 
-TEXT = {json.dumps(text, ensure_ascii=False)}
+TEXT = {json.dumps(style_instruction + text, ensure_ascii=False)}
 REFERENCE = Path({json.dumps(reference_path)})
 OUTPUT = Path('/kaggle/working/{output_name}')
 
@@ -95,7 +95,7 @@ print(f'WAV={OUTPUT}')
         "cells": [
             {"cell_type": "markdown", "metadata": {}, "source": [
                 "# 杨宁老师 VoxCPM2 私有语音任务\n",
-                "私有 Kaggle Notebook；只以 1626 老师原声作为音色参考。模板音频不会传入。\n",
+                "私有 Kaggle Notebook；只以 1626 老师原声作为音色参考。模板音频不会传入，所选语言会加入语气文字指令。\n",
             ]},
             {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": code.splitlines(True)},
         ],
@@ -108,11 +108,11 @@ print(f'WAV={OUTPUT}')
     }
 
 
-def _job_files(folder, username, dataset, text, seed, job_id):
+def _job_files(folder, username, dataset, text, seed, job_id, language):
     slug = f"yangning-voice-{job_id}"
     kernel_ref = f"{username}/{slug}"
     (folder / "voxcpm2.ipynb").write_text(
-        json.dumps(_build_notebook(text, seed, dataset, job_id), ensure_ascii=False),
+        json.dumps(_build_notebook(text, seed, dataset, job_id, language), ensure_ascii=False),
         encoding="utf-8",
     )
     metadata = {
@@ -145,6 +145,7 @@ def open_kaggle_voice(app, parent=None):
 
     user = tk.StringVar(value=settings.get("username", ""))
     dataset = tk.StringVar(value=settings.get("reference_dataset", ""))
+    language = tk.StringVar(value=settings.get("language", "日语"))
     output = tk.StringVar(value=app.v["output"].get())
     token = tk.StringVar()
     seed = tk.StringVar(value="16261109")
@@ -153,6 +154,8 @@ def open_kaggle_voice(app, parent=None):
     ttk.Entry(box, textvariable=user).pack(fill="x", pady=(0, 8))
     ttk.Label(box, text="1626 原声私有 Dataset（用户名/数据集slug）").pack(anchor="w")
     ttk.Entry(box, textvariable=dataset).pack(fill="x", pady=(0, 8))
+    ttk.Label(box, text="配音语言与语气预设（不会上传模板音频）").pack(anchor="w")
+    ttk.Combobox(box, textvariable=language, values=("日语","英语","法语","德语","印尼语","粤语/中文"), state="readonly").pack(fill="x", pady=(0, 8))
     ttk.Label(box, text="Kaggle API Key（本机 Windows 凭据库保存；不写入设置文件）").pack(anchor="w")
     ttk.Entry(box, textvariable=token, show="•").pack(fill="x", pady=(0, 5))
     ttk.Button(box, text="安全保存 Kaggle API Key", command=lambda: save_key()).pack(anchor="w", pady=(0, 8))
@@ -181,7 +184,7 @@ def open_kaggle_voice(app, parent=None):
             import keyring
             keyring.set_password(KEYRING_SERVICE, username, value)
             token.set("")
-            _save_settings({"username": username, "reference_dataset": dataset.get().strip()})
+            _save_settings({"username": username, "reference_dataset": dataset.get().strip(), "language": language.get()})
             status.set("API Key 已保存到本机 Windows 凭据库；设置文件中不保存密钥。")
         except Exception as exc:
             messagebox.showerror("安全保存失败", str(exc), parent=win)
@@ -216,7 +219,7 @@ def open_kaggle_voice(app, parent=None):
             messagebox.showinfo("还没保存 API Key", "先粘贴 API Key 并点击“安全保存”。", parent=win)
             return
 
-        _save_settings({"username": username, "reference_dataset": reference_dataset})
+        _save_settings({"username": username, "reference_dataset": reference_dataset, "language": language.get()})
         target_dir = Path(output.get()).expanduser()
         target_dir.mkdir(parents=True, exist_ok=True)
         job_id = uuid.uuid4().hex[:10]
@@ -231,7 +234,7 @@ def open_kaggle_voice(app, parent=None):
             env["KAGGLE_KEY"] = api_key
             kernel_ref = None
             try:
-                kernel_ref, slug = _job_files(task_root, username, reference_dataset, script, seed_value, job_id)
+                kernel_ref, slug = _job_files(task_root, username, reference_dataset, script, seed_value, job_id, language.get())
                 _run_cli(["kernels", "push", "-p", str(task_root)], env, timeout=600)
                 win.after(0, lambda: status.set("GPU 作业已提交；等待 Kaggle 完成…"))
                 deadline = time.time() + 9 * 60 * 60
