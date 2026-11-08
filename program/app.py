@@ -436,7 +436,7 @@ class App:
         def save():export_plan(rows,path);win.destroy();self.progress('停顿计划已保存，B试听和导出会使用新计划。')
         ttk.Button(win,text='修改所选',command=edit).pack(side='left',padx=6,pady=8);ttk.Button(win,text='保存',command=save).pack(side='right',padx=8)
     def voice_1626_settings(self):
-        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request
+        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request, load_script
         win=tk.Toplevel(self.root)
         win.title('AI语音克隆 · 1626 原声音色')
         win.geometry('730x650')
@@ -461,6 +461,19 @@ class App:
         instruction.insert('1.0',DEFAULT_INSTRUCTIONS)
         ttk.Label(frame,text='配音正文').pack(anchor='w',pady=(10,2))
         body=tk.Text(frame,height=6,wrap='word');body.pack(fill='both',expand=True)
+        def import_voice_script():
+            path=filedialog.askopenfilename(parent=win,title='导入讲经文稿',filetypes=[('文稿和字幕','*.txt *.srt'),('TXT','*.txt'),('SRT','*.srt')])
+            if not path:return
+            try:
+                content=load_script(path)
+                if not content:raise ValueError('文件没有可朗读的正文')
+                body.delete('1.0','end')
+                body.insert('1.0',content)
+                messagebox.showinfo('导入成功','已读取正文；SRT编号和时间码不会被朗读。长文稿将分段处理。',parent=win)
+            except Exception as e:
+                messagebox.showerror('导入失败',str(e),parent=win)
+        ttk.Button(frame,text='导入 TXT / SRT',command=import_voice_script).pack(anchor='w',pady=4)
+
         def validate_request():
             try:
                 settings=VoiceSettings(reference.get(),language.get(),float(speed.get()),instruction.get('1.0','end').strip())
