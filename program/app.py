@@ -435,6 +435,42 @@ class App:
         table.bind('<Double-1>',edit);refresh()
         def save():export_plan(rows,path);win.destroy();self.progress('停顿计划已保存，B试听和导出会使用新计划。')
         ttk.Button(win,text='修改所选',command=edit).pack(side='left',padx=6,pady=8);ttk.Button(win,text='保存',command=save).pack(side='right',padx=8)
+    def voice_1626_settings(self):
+        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request
+        win=tk.Toplevel(self.root)
+        win.title('AI语音克隆 · 1626 原声音色')
+        win.geometry('730x650')
+        frame=ttk.Frame(win,padding=16);frame.pack(fill='both',expand=True)
+        ttk.Label(frame,text='1626 是唯一音色参考；不加载语气参考音频。',wraplength=660).pack(anchor='w',pady=5)
+        reference=tk.StringVar()
+        language=tk.StringVar(value='ja')
+        speed=tk.StringVar(value='1.0')
+        ttk.Label(frame,text='1626 原声音频').pack(anchor='w')
+        row=ttk.Frame(frame);row.pack(fill='x',pady=5)
+        ttk.Entry(row,textvariable=reference).pack(side='left',fill='x',expand=True)
+        def pick_reference():
+            path=filedialog.askopenfilename(parent=win,title='选择1626原声',filetypes=[('音频文件','*.wav *.mp3 *.flac *.m4a'),('全部文件','*.*')])
+            if path:reference.set(path)
+        ttk.Button(row,text='选择',command=pick_reference).pack(side='left',padx=5)
+        ttk.Label(frame,text='配音语言').pack(anchor='w',pady=(10,2))
+        ttk.Combobox(frame,textvariable=language,values=list(LANGUAGES),state='readonly').pack(anchor='w')
+        ttk.Label(frame,text='语速').pack(anchor='w',pady=(10,2))
+        ttk.Entry(frame,textvariable=speed,width=12).pack(anchor='w')
+        ttk.Label(frame,text='讲经语气指令（不影响音色来源）').pack(anchor='w',pady=(10,2))
+        instruction=tk.Text(frame,height=6,wrap='word');instruction.pack(fill='x')
+        instruction.insert('1.0',DEFAULT_INSTRUCTIONS)
+        ttk.Label(frame,text='配音正文').pack(anchor='w',pady=(10,2))
+        body=tk.Text(frame,height=6,wrap='word');body.pack(fill='both',expand=True)
+        def validate_request():
+            try:
+                settings=VoiceSettings(reference.get(),language.get(),float(speed.get()),instruction.get('1.0','end').strip())
+                request=synthesis_request(body.get('1.0','end'),settings)
+            except Exception as e:
+                messagebox.showerror('配音设置',str(e),parent=win);return
+            messagebox.showinfo('配置验证通过','1626 音色与配音指令已分别校验。\\n目前尚未安装经验证的语音合成引擎，因此不能生成音频；不会输出虚假试听。',parent=win)
+        ttk.Button(frame,text='验证配音配置',command=validate_request).pack(anchor='e',pady=12)
+        ttk.Label(frame,text='注意：此界面是接入准备版；生成、试听和导出须待实际引擎及Windows测试完成后启用。',wraplength=670).pack(anchor='w')
+
     def advanced(self):
         if self.busy:return
         win=tk.Toplevel(self.root);win.title('更多设置 · 默认无需修改');win.geometry('760x760');box=ttk.Frame(win,padding=15);box.pack(fill='both',expand=True)
@@ -447,6 +483,7 @@ class App:
         ttk.Button(box,text='选择输出文件夹',command=lambda:self.pick('output')).pack(anchor='w',pady=5)
         ttk.Checkbutton(box,text='把新字幕写入视频画面（默认关闭）',variable=self.v['burn']).pack(anchor='w',pady=6)
         ttk.Button(box,text='配音匹配并导出',command=lambda:(win.destroy(),self.one_click())).pack(anchor='w',pady=5)
+        ttk.Button(box,text='AI语音克隆 · 1626（配置验证）',command=lambda:(win.destroy(),self.voice_1626_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='降噪 / 人声分离 / 试听',command=lambda:(win.destroy(),self.sound_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='停顿 / 速度',command=lambda:(win.destroy(),self.timing_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='标题 / 字幕 / 封面',command=lambda:(win.destroy(),self.publish())).pack(anchor='w',pady=5)
