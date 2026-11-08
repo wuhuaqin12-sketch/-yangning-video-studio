@@ -60,7 +60,15 @@ def _build_notebook(text, seed, reference_dataset, job_id, language):
     dataset_name = reference_dataset.rsplit("/", 1)[-1]
     reference_path = f"/kaggle/input/{dataset_name}/1626_reference.wav"
     output_name = f"yangning_1626_{job_id}.wav"
-    style_guides = {\n        "日语": "(Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation)",\n        "英语": "(Calm, natural English narration, warm and gentle, smoothly connected phrases, moderate pace, subtle intonation and natural pauses)",\n        "法语": "(Natural French narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n        "德语": "(Natural German narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n        "印尼语": "(Natural Indonesian narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n        "粤语/中文": "(Natural Cantonese or Chinese narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",\n    }\n    style_instruction = style_guides.get(language, style_guides["日语"])\n    code = f"""!pip -q install voxcpm==2.0.3 soundfile
+    style_guides = {
+        "日语": "(Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation)",
+        "英语": "(Calm, natural English narration, warm and gentle, smoothly connected phrases, moderate pace, subtle intonation and natural pauses)",
+        "法语": "(Natural French narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
+        "德语": "(Natural German narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
+        "印尼语": "(Natural Indonesian narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
+        "粤语/中文": "(Natural Cantonese or Chinese narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
+    }
+    style_instruction = style_guides.get(language, style_guides["日语"])\n    code = f"""!pip -q install voxcpm==2.0.3 soundfile
 
 from pathlib import Path
 import numpy as np
