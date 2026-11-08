@@ -11,6 +11,8 @@ from pathlib import Path
 def synthesize(payload, output):
     from voxcpm import VoxCPM
     import soundfile as sf
+    import numpy as np
+    from voice_1626 import split_script
     ref = Path(payload["voice_reference_audio"])
     if not ref.is_file():
         raise FileNotFoundError("1626 reference audio not found")
@@ -20,15 +22,25 @@ def synthesize(payload, output):
     # VoxCPM2 accepts inline text control while the reference_wav_path
     # remains the ONLY timbre input. No other style/template audio is passed.
     instructions = payload["instructions"].strip()
-    text = f"({instructions}){payload['text']}"
-    wav = model.generate(
-        text=text,
-        reference_wav_path=str(ref),
-        cfg_value=2.0,
-        inference_timesteps=10,
-        seed=42,
-    )
-    sf.write(str(output), wav, model.tts_model.sample_rate)
+    pieces = split_script(payload["text"])
+    if not pieces:
+        raise ValueError("文稿没有可朗读内容")
+    audio_parts = []
+    sample_rate = model.tts_model.sample_rate
+    for index, piece in enumerate(pieces, 1):
+        print(f"Generating segment {index}/{len(pieces)}", flush=True)
+        # Instructions are best-effort; actual model behavior requires validation.
+        wav = model.generate(
+            text=f"({instructions}){piece}",
+            reference_wav_path=str(ref),
+            cfg_value=2.0,
+            inference_timesteps=10,
+            seed=42 + index,
+        )
+        audio_parts.append(np.asarray(wav).reshape(-1))
+        if index < len(pieces):
+            audio_parts.append(np.zeros(int(sample_rate * 0.3), dtype=np.float32))
+    sf.write(str(output), np.concatenate(audio_parts), sample_rate)
     return output
 
 def main():
