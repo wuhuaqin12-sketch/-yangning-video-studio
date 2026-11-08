@@ -157,7 +157,7 @@ def open_kaggle_voice(app, parent=None):
     output = tk.StringVar(value=app.v["output"].get())
     token = tk.StringVar()
     seed = tk.StringVar(value="16261109")
-    ttk.Label(box, text="免费 GPU 作业按 Kaggle Notebook 运行；本机不下载模型。").pack(anchor="w", pady=(0, 8))
+    ttk.Label(box, text="免费 GPU 作业按 Kaggle Notebook 运行；本机不下载模型。语言预设会加入语气文字提示，不上传模板音频；抑扬停顿效果需试听确认。", wraplength=760).pack(anchor="w", pady=(0, 8))
     ttk.Label(box, text="Kaggle 用户名").pack(anchor="w")
     ttk.Entry(box, textvariable=user).pack(fill="x", pady=(0, 8))
     ttk.Label(box, text="1626 原声私有 Dataset（用户名/数据集slug）").pack(anchor="w")
