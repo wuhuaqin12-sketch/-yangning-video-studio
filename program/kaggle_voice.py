@@ -258,7 +258,7 @@ def open_kaggle_voice(app, parent=None):
             finally:
                 if kernel_ref:
                     try:
-                        _run_cli(["kernels", "delete", kernel_ref], env, timeout=180)
+                        _run_cli(["kernels", "delete", kernel_ref, "--yes"], env, timeout=180)
                     except Exception:
                         pass
                 shutil.rmtree(task_root, ignore_errors=True)
