@@ -68,7 +68,8 @@ def _build_notebook(text, seed, reference_dataset, job_id, language):
         "印尼语": "(Natural Indonesian narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
         "粤语/中文": "(Natural Cantonese or Chinese narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
     }
-    style_instruction = style_guides.get(language, style_guides["日语"])\n    code = f"""!pip -q install voxcpm==2.0.3 soundfile
+    style_instruction = style_guides.get(language, style_guides["日语"])
+    code = f"""!pip -q install voxcpm==2.0.3 soundfile
 
 from pathlib import Path
 import numpy as np
