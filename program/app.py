@@ -54,6 +54,8 @@ class App:
             ttk.Label(form,text=label).grid(row=i,column=0,sticky='w',padx=(0,10),pady=6)
             ttk.Entry(form,textvariable=self.v[k]).grid(row=i,column=1,sticky='ew')
             ttk.Button(form,text='选择',command=lambda key=k:self.pick(key)).grid(row=i,column=2,padx=(6,0))
+            if k=='audio':
+                ttk.Button(form,text='清除',command=lambda:self.v['audio'].set('')).grid(row=i,column=3,padx=(6,0))
         form.columnconfigure(1,weight=1)
         self.target_label=ttk.Label(form,text='独立配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
