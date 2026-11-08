@@ -10,7 +10,7 @@ This is an optional cloud batch workflow for the Windows Studio. It does not ins
 4. The Notebook runs openbmb/VoxCPM2 with `reference_wav_path` set to 1626, and `prompt_wav_path` and `prompt_text` left empty. It writes a PCM 16-bit WAV.
 5. The Studio downloads the WAV into the selected output folder, selects it as the new audio input, then deletes the private job Notebook and local temporary request files.
 
-The Japanese template is not used as clone input. Users should run the Studio's existing audio review/denoise and video export steps after generation.
+The Japanese template is not used as clone input. The language selector prepends a text-only style instruction; this can guide broad delivery but does not guarantee an exact match to a template recording. The template audio itself is never sent. Audition each language before production. Users should run the Studio's existing audio review/denoise and video export steps after generation.
 
 ## Account and data setup
 
