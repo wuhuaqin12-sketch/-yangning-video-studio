@@ -468,8 +468,53 @@ class App:
             except Exception as e:
                 messagebox.showerror('配音设置',str(e),parent=win);return
             messagebox.showinfo('配置验证通过','1626 音色与配音指令已分别校验。\\n目前尚未安装经验证的语音合成引擎，因此不能生成音频；不会输出虚假试听。',parent=win)
-        ttk.Button(frame,text='验证配音配置',command=validate_request).pack(anchor='e',pady=12)
-        ttk.Label(frame,text='注意：此界面是接入准备版；生成、试听和导出须待实际引擎及Windows测试完成后启用。',wraplength=670).pack(anchor='w')
+        ttk.Button(frame,text='验证配音配置',command=validate_request).pack(anchor='e',pady=5)
+        worker_python=tk.StringVar(value=os.environ.get('YANGNING_VOICE_PYTHON','python'))
+        ttk.Label(frame,text='语音引擎 Python（首次需在该环境安装 voxcpm soundfile）').pack(anchor='w')
+        row=ttk.Frame(frame);row.pack(fill='x',pady=3)
+        ttk.Entry(row,textvariable=worker_python).pack(side='left',fill='x',expand=True)
+        def choose_python():
+            path=filedialog.askopenfilename(parent=win,title='选择语音引擎Python',filetypes=[('Python','python.exe'),('全部文件','*.*')])
+            if path:worker_python.set(path)
+        ttk.Button(row,text='选择',command=choose_python).pack(side='left',padx=5)
+        status=tk.StringVar(value='尚未生成')
+        ttk.Label(frame,textvariable=status,wraplength=650).pack(anchor='w',pady=5)
+        generate_button=ttk.Button(frame,text='生成1626克隆音频')
+        def generate():
+            import tempfile
+            try:
+                settings=VoiceSettings(reference.get(),language.get(),float(speed.get()),instruction.get('1.0','end').strip())
+                request=synthesis_request(body.get('1.0','end'),settings)
+                output=filedialog.asksaveasfilename(parent=win,defaultextension='.wav',filetypes=[('WAV音频','*.wav')])
+                if not output:return
+            except Exception as e:
+                messagebox.showerror('配音设置',str(e),parent=win);return
+            generate_button.configure(state='disabled')
+            status.set('生成中：首次运行需要下载模型，可能耗时较长。')
+            def worker():
+                try:
+                    with tempfile.TemporaryDirectory() as temp:
+                        req=Path(temp)/'request.json'
+                        req.write_text(json.dumps(request,ensure_ascii=False),encoding='utf-8')
+                        script=Path(__file__).with_name('voice_1626_worker.py')
+                        cmd=[worker_python.get(),str(script),'--request',str(req),'--output',output]
+                        proc=subprocess.run(cmd,capture_output=True,text=True,timeout=3600)
+                        if proc.returncode:
+                            raise RuntimeError((proc.stderr or proc.stdout or '引擎执行失败')[-1200:])
+                    if not Path(output).is_file() or not Path(output).stat().st_size:
+                        raise RuntimeError('没有生成有效的音频文件')
+                    self.root.after(0,lambda:status.set('生成完成：'+output))
+                except Exception as e:
+                    error=str(e)
+                    self.root.after(0,lambda:messagebox.showerror('语音生成失败',error,parent=win))
+                    self.root.after(0,lambda:status.set('生成失败：请检查引擎安装和模型下载'))
+                finally:
+                    self.root.after(0,lambda:generate_button.configure(state='normal'))
+            threading.Thread(target=worker,daemon=True).start()
+        generate_button.configure(command=generate)
+        generate_button.pack(anchor='e',pady=8)
+
+        ttk.Label(frame,text='引擎：VoxCPM2。需要独立安装Python依赖及模型；首次运行联网下载。语气指令为尽力控制，不能保证音色完全一致。',wraplength=670).pack(anchor='w')
 
     def advanced(self):
         if self.busy:return
