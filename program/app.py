@@ -609,6 +609,60 @@ class App:
         repair_button.configure(command=repair_segment)
         repair_button.pack(anchor='e',pady=4)
 
+        full_regen_button=ttk.Button(frame,text='修正句子后整段重新生成')
+        def regenerate_all():
+            import tempfile
+            from tkinter import simpledialog
+            segments=last_output['segments']
+            if not segments:
+                messagebox.showinfo('先生成','请先完成一次完整配音。',parent=win);return
+            number=simpledialog.askinteger('选择需修正的句子',f'输入句子序号（1 至 {len(segments)}）',minvalue=1,maxvalue=len(segments),parent=win)
+            if number is None:return
+            index=number-1
+            revised=simpledialog.askstring('修改朗读文本',f'第{number}句：\\n{segments[index]}\\n\\n输入正确的朗读文本；随后将重新生成所有句子。',initialvalue=segments[index],parent=win)
+            if not revised or not revised.strip():return
+            new_segments=list(segments)
+            new_segments[index]=revised.strip()
+            previous=last_output['path']
+            suggested=(Path(previous).stem+'_完整重做.wav') if previous else '1626_完整重做.wav'
+            output=filedialog.asksaveasfilename(parent=win,title='另存完整重做音频',initialfile=suggested,defaultextension='.wav',filetypes=[('WAV音频','*.wav')])
+            if not output:return
+            if previous and Path(output).resolve()==Path(previous).resolve():
+                messagebox.showerror('保护原文件','请选择不同文件名，保留原音频供比较。',parent=win);return
+            try:
+                request=make_voice_request()
+                request['segments']=new_segments
+            except Exception as e:
+                messagebox.showerror('配音设置',str(e),parent=win);return
+            full_regen_button.configure(state='disabled')
+            status.set('正在从头生成全部句子；原音频不会被覆盖…')
+            def work():
+                try:
+                    with tempfile.TemporaryDirectory() as temp:
+                        req=Path(temp)/'request.json'
+                        req.write_text(json.dumps(request,ensure_ascii=False),encoding='utf-8')
+                        script=Path(__file__).with_name('voice_1626_worker.py')
+                        cmd=[worker_python.get(),str(script),'--request',str(req),'--output',output]
+                        proc=subprocess.run(cmd,capture_output=True,text=True,timeout=3600)
+                        if proc.returncode:raise RuntimeError((proc.stderr or proc.stdout or '整段重生成失败')[-1200:])
+                    if not Path(output).is_file() or not Path(output).stat().st_size:
+                        raise RuntimeError('没有生成有效音频')
+                    def done():
+                        last_output['path']=output
+                        last_output['segments']=new_segments
+                        self.v['audio'].set(str(Path(output).resolve()))
+                        status.set('整段重生成完成，已回填主页面；旧音频保留：'+output)
+                    self.root.after(0,done)
+                except Exception as e:
+                    error=str(e)
+                    self.root.after(0,lambda:messagebox.showerror('整段重做失败',error,parent=win))
+                finally:
+                    self.root.after(0,lambda:full_regen_button.configure(state='normal'))
+            threading.Thread(target=work,daemon=True).start()
+        full_regen_button.configure(command=regenerate_all)
+        full_regen_button.pack(anchor='e',pady=4)
+
+
 
         ttk.Label(frame,text='引擎：VoxCPM2。需要独立安装Python依赖及模型；首次运行联网下载。语气指令为尽力控制，不能保证音色完全一致。',wraplength=670).pack(anchor='w')
 
