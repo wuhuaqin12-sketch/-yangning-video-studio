@@ -438,7 +438,7 @@ class App:
         def save():export_plan(rows,path);win.destroy();self.progress('停顿计划已保存，B试听和导出会使用新计划。')
         ttk.Button(win,text='修改所选',command=edit).pack(side='left',padx=6,pady=8);ttk.Button(win,text='保存',command=save).pack(side='right',padx=8)
     def voice_1626_settings(self):
-        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request, load_script
+        from voice_1626 import LANGUAGES, DEFAULT_INSTRUCTIONS, VoiceSettings, synthesis_request, load_script, load_pronunciation_rules, save_pronunciation_rules, apply_pronunciation_rules
         win=tk.Toplevel(self.root)
         win.title('AI语音克隆 · 1626 原声音色')
         win.geometry('730x650')
@@ -476,10 +476,43 @@ class App:
                 messagebox.showerror('导入失败',str(e),parent=win)
         ttk.Button(frame,text='导入 TXT / SRT（仅提取正文）',command=import_voice_script).pack(anchor='w',pady=4)
 
+        dictionary_path=Path.home()/'.yangning_video_studio'/'pronunciation_rules.json'
+        def edit_pronunciation():
+            editor=tk.Toplevel(win)
+            editor.title('发音修正词典 · 每行 原词=正确读法')
+            editor.geometry('570x430')
+            ttk.Label(editor,text='仅修改语音朗读，不修改正式字幕。每行填写：原词=正确读法').pack(anchor='w',padx=12,pady=8)
+            field=tk.Text(editor,wrap='word')
+            field.pack(fill='both',expand=True,padx=12,pady=5)
+            try:
+                rules=load_pronunciation_rules(dictionary_path,language.get())
+                field.insert('1.0','\\n'.join(f'{k}={v}' for k,v in rules.items()))
+            except Exception as e:
+                messagebox.showerror('读取词典失败',str(e),parent=editor)
+            def save_rules():
+                try:
+                    rules={}
+                    for line in field.get('1.0','end').splitlines():
+                        if not line.strip():continue
+                        if '=' not in line:raise ValueError('每行必须使用 原词=正确读法')
+                        key,value=(x.strip() for x in line.split('=',1))
+                        if not key or not value:raise ValueError('原词和正确读法不能为空')
+                        rules[key]=value
+                    save_pronunciation_rules(dictionary_path,language.get(),rules)
+                    editor.destroy()
+                except Exception as e:
+                    messagebox.showerror('保存失败',str(e),parent=editor)
+            ttk.Button(editor,text='保存发音规则',command=save_rules).pack(anchor='e',padx=12,pady=8)
+        ttk.Button(frame,text='发音修正词典',command=edit_pronunciation).pack(anchor='w',pady=3)
+        def make_voice_request():
+            settings=VoiceSettings(reference.get(),language.get(),float(speed.get()),instruction.get('1.0','end').strip())
+            request=synthesis_request(body.get('1.0','end'),settings)
+            rules=load_pronunciation_rules(dictionary_path,language.get())
+            request['text']=apply_pronunciation_rules(request['text'],rules)
+            return request
         def validate_request():
             try:
-                settings=VoiceSettings(reference.get(),language.get(),float(speed.get()),instruction.get('1.0','end').strip())
-                request=synthesis_request(body.get('1.0','end'),settings)
+                request=make_voice_request()
             except Exception as e:
                 messagebox.showerror('配音设置',str(e),parent=win);return
             messagebox.showinfo('配置验证通过','1626 音色与配音指令已分别校验。\\n目前尚未安装经验证的语音合成引擎，因此不能生成音频；不会输出虚假试听。',parent=win)
