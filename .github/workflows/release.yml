@@ -44,6 +44,25 @@ jobs:
         shell: pwsh
         run: '"YANGNING_INSTALL_ROOT=$env:RUNNER_TEMP\YangNingStudio安装测试" >> $env:GITHUB_ENV'
       - run: choco install ffmpeg --no-progress -y
+      - name: Collect bundled Windows FFmpeg and FFprobe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force program/tools | Out-Null
+          foreach ($name in @('ffmpeg','ffprobe')) {
+            $command=Get-Command "$name.exe" -ErrorAction Stop
+            Copy-Item -LiteralPath $command.Source -Destination "program/tools/$name.exe" -Force
+            & "program/tools/$name.exe" -version
+            if ($LASTEXITCODE -ne 0) { throw "Bundled $name failed" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-windows-ffmpeg
+          path: |
+            program/tools/ffmpeg.exe
+            program/tools/ffprobe.exe
+          if-no-files-found: error
+          retention-days: 7
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
       - name: Seed an incomplete runtime from a failed installation
@@ -92,5 +111,15 @@ jobs:
           python-version: '3.12'
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundled-windows-ffmpeg
+          path: program/tools
+      - name: Verify bundled Windows binaries before release
+        run: |
+          test -s program/tools/ffmpeg.exe
+          test -s program/tools/ffprobe.exe
+          file program/tools/ffmpeg.exe program/tools/ffprobe.exe
+          python -c "from pathlib import Path; assert all((Path('program/tools')/n).stat().st_size > 100000 for n in ('ffmpeg.exe','ffprobe.exe'))"
       - run: python ci/publish_release.py
 
