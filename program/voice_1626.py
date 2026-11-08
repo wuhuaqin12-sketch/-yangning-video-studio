@@ -49,52 +49,81 @@ def synthesis_request(text, settings):
     }
 
 
-def load_script(path):
-    """Read TXT or SRT as speech text, without reading subtitle indexes/timestamps."""
+def read_text_file(path):
+    path = Path(path)
+    for encoding in ("utf-8-sig", "utf-16", "gb18030"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeError:
+            continue
+    raise ValueError("文件编码无法识别")
+
+
+def parse_srt_cues(source):
+    """Read SRT captions while deliberately discarding old timestamps."""
     import re
+    source = source.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+    blocks = re.split(r"\\n\\s*\\n", source.strip())
+    cues = []
+    timing = re.compile(r"^\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->")
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if lines and lines[0].isdigit():
+            lines.pop(0)
+        if lines and timing.match(lines[0]):
+            lines.pop(0)
+        if lines:
+            cues.append(" ".join(lines))
+    return cues
+
+
+def load_script(path):
+    """Read TXT/SRT text without reading original SRT timestamps aloud."""
     path = Path(path)
     if path.suffix.lower() not in (".txt", ".srt"):
         raise ValueError("只支持 TXT 或 SRT 文件")
-    raw = None
-    for encoding in ("utf-8-sig", "utf-16", "gb18030"):
-        try:
-            raw = path.read_text(encoding=encoding)
-            break
-        except UnicodeError:
-            continue
-    if raw is None:
-        raise ValueError("文件编码无法识别")
-    if path.suffix.lower() == ".txt":
-        return raw.strip()
-    # SRT cue numbering and time ranges must never be spoken.
-    lines = []
-    for line in raw.splitlines():
-        value = line.strip()
-        if not value or value.isdigit():
-            continue
-        if re.match(r"^\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->\\s*\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}", value):
-            continue
-        lines.append(value)
-    return "\\n".join(lines).strip()
+    raw = read_text_file(path)
+    return ("\\n".join(parse_srt_cues(raw)) if path.suffix.lower() == ".srt"
+            else raw.strip())
+
 
 def split_script(text, max_chars=220):
-    """Split long scripts at punctuation; no overall document character cap."""
+    """Split long text for synthesis without imposing a total length cap."""
     import re
     if max_chars < 20:
         raise ValueError("每段字符数过小")
-    parts = re.split(r"(?<=[。！？!?；;\\n])", text)
-    chunks, current = [], ""
-    for part in parts:
-        while len(part) > max_chars:
-            if current:
-                chunks.append(current.strip())
-                current = ""
-            chunks.append(part[:max_chars].strip())
-            part = part[max_chars:]
-        if len(current) + len(part) > max_chars and current:
-            chunks.append(current.strip())
-            current = ""
-        current += part
-    if current.strip():
-        chunks.append(current.strip())
-    return [chunk for chunk in chunks if chunk]
+    chunks = []
+    for paragraph in text.splitlines():
+        for sentence in re.split(r"(?<=[。！？!?；;])", paragraph):
+            sentence = sentence.strip()
+            while sentence:
+                space = max_chars - len(chunks[-1]) - 1 if chunks else 0
+                if chunks and space > 0 and len(sentence) <= space:
+                    chunks[-1] += " " + sentence
+                    break
+                chunks.append(sentence[:max_chars])
+                sentence = sentence[max_chars:]
+    return [c for c in chunks if c.strip()]
+
+
+def format_srt_time(seconds):
+    ms = max(0, round(seconds * 1000))
+    hours, ms = divmod(ms, 3600000)
+    minutes, ms = divmod(ms, 60000)
+    secs, ms = divmod(ms, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def build_srt_from_durations(cues, durations, gap_seconds=0.3):
+    """Create a NEW SRT from generated audio segment lengths, not old times."""
+    if len(cues) != len(durations):
+        raise ValueError("字幕数量与音频片段数量不一致")
+    out = []
+    cursor = 0.0
+    for index, (cue, duration) in enumerate(zip(cues, durations), 1):
+        if duration <= 0:
+            raise ValueError("音频片段时长无效")
+        end = cursor + duration
+        out.append(f"{index}\\n{format_srt_time(cursor)} --> {format_srt_time(end)}\\n{cue}\\n")
+        cursor = end + (gap_seconds if index < len(cues) else 0)
+    return "\\n".join(out)
