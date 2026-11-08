@@ -7,6 +7,7 @@ from engine import preview_audio,Cancelled,VERSION
 from workflow import normalize,execute
 from output_destination import preferred, remember, deliver
 from audio_edit import import_plan,export_plan
+from kaggle_voice import open_kaggle_voice
 DATA=Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'YangNingStudio'
 DATA.mkdir(parents=True,exist_ok=True)
 # Keep old queues intact; stale settings and analysis from old versions are not run.
@@ -449,6 +450,7 @@ class App:
         ttk.Button(box,text='配音匹配并导出',command=lambda:(win.destroy(),self.one_click())).pack(anchor='w',pady=5)
         ttk.Button(box,text='降噪 / 人声分离 / 试听',command=lambda:(win.destroy(),self.sound_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='停顿 / 速度',command=lambda:(win.destroy(),self.timing_settings())).pack(anchor='w',pady=5)
+        ttk.Button(box,text='免费 Kaggle GPU 语音克隆',command=lambda:open_kaggle_voice(self,win)).pack(anchor='w',pady=5)
         ttk.Button(box,text='标题 / 字幕 / 封面',command=lambda:(win.destroy(),self.publish())).pack(anchor='w',pady=5)
         ttk.Checkbutton(box,text='自动剪短长空白（保留自然停顿）',variable=self.auto_cut).pack(anchor='w')
         ttk.Label(box,text='日语字词间多余空白压缩已启用；保留短停顿、换气和句末停顿。日志显示前后时长与删除秒数。',wraplength=660).pack(anchor='w',pady=10)
