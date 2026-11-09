@@ -1,0 +1,53 @@
+name: Cloud voice preview checks
+
+on:
+  push:
+    branches: [feat/free-kaggle-voxcpm2-jobs]
+  pull_request:
+    paths:
+      - 'program/*voice*.py'
+      - 'program/voice_clip_edit.py'
+      - '*cloud_voice_preview*'
+      - '*CLOUD*'
+      - 'preview_requirements.txt'
+      - '.github/workflows/cloud-voice-preview-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-assembly-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare local validation dependencies
+        run: |
+          python -m pip install 'numpy>=1.26,<3'
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Check syntax and exercise local video assembly
+        run: |
+          python -m compileall -q program/cloud_voice_core.py program/voxcpm_kaggle_worker.py program/kaggle_voice.py program/voice_clip_edit.py program/cloud_voice_preview.py build_cloud_voice_preview.py
+          python -m unittest discover -s program -p cloud_voice_test.py -v
+      - name: Check PowerShell launcher syntax
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          $parseTokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'launch_cloud_voice_preview.ps1'), [ref]$parseTokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+      - name: Build isolated preview ZIP
+        run: python build_cloud_voice_preview.py --revision '${{ github.sha }}' --output '${{ runner.temp }}/YangNing_CloudVoice_Independent_Preview_0.1.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YangNing-CloudVoice-Independent-Preview
+          path: '${{ runner.temp }}/YangNing_CloudVoice_Independent_Preview_0.1.zip'
+          retention-days: 14

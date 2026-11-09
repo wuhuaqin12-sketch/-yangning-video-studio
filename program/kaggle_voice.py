@@ -13,9 +13,9 @@ from tkinter import filedialog, messagebox, ttk
 from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
 
-DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio"
+DATA = Path(os.environ.get("YANGNING_CLOUD_DATA_DIR", str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio")))
 SETTINGS = DATA / "kaggle_voice_settings.json"
-KEYRING_SERVICE = "YangNingStudio-Kaggle"
+KEYRING_SERVICE = os.environ.get("YANGNING_CLOUD_CREDENTIAL_SERVICE", "YangNingStudio-Kaggle")
 
 
 def _load_settings():
@@ -34,8 +34,17 @@ def _vault():
 
 
 def open_kaggle_voice(app, parent=None):
+    previous = getattr(app, "_cloud_voice_window", None)
+    if previous is not None:
+        try:
+            if previous.winfo_exists():
+                previous.lift()
+                return
+        except tk.TclError:
+            pass
     settings = _load_settings()
     win = tk.Toplevel(app.root)
+    app._cloud_voice_window = win
     win.title("免费云端语音克隆 · VoxCPM2")
     win.geometry("840x780")
     win.minsize(760, 650)

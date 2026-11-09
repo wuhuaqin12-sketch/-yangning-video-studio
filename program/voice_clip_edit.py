@@ -220,7 +220,12 @@ def _video_graph(timing, video_duration, fps):
     return ";".join(pieces)
 
 
-def preflight_edit(edit):
+def _fingerprint(path):
+    stat = Path(path).stat()
+    return {"bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def preflight_edit(edit, cache_dir=None):
     video = Path(edit["video"])
     if not video.is_file():
         raise ValueError("当前成片视频不存在。")
@@ -236,8 +241,29 @@ def preflight_edit(edit):
             raise ValueError("所选独立配音与当前视频时长不一致，未提交GPU任务。")
     elif not any(s["codec_type"] == "audio" for s in metadata["streams"]):
         raise ValueError("当前视频没有声音，请选择与其对齐的独立配音WAV。")
-    if edit.get("srt"):
-        read_srt(edit["srt"])
+    cues = read_srt(edit["srt"]) if edit.get("srt") else []
+    if cache_dir is not None:
+        cache = Path(cache_dir)
+        cache.mkdir(parents=True, exist_ok=True)
+        audio = cache / "source_snapshot.wav"
+        command([tool("ffmpeg"), "-v", "error", "-y", "-i", str(edit.get("audio") or video),
+                 "-vn", "-map", "0:a:0", "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(audio)])
+        frames, audio_duration = wav_info(audio)
+        if abs(audio_duration - duration) > 0.2:
+            raise ValueError("原片音轨与画面时长不一致，未提交GPU任务。")
+        if edit["mode"] == "partial":
+            a = quiet_edge(audio, float(edit["start"]), "start") / RATE
+            b = quiet_edge(audio, float(edit["end"]), "end") / RATE
+            if cues:
+                remap_subtitles(cues, {"old_start": a, "old_end": b, "delta": 0, "replacement_seconds": b-a}, edit["text"])
+        edit["_prepared_audio"] = str(audio)
+        edit["_video_fingerprint"] = _fingerprint(video)
+        if edit.get("audio"):
+            edit["_audio_fingerprint"] = _fingerprint(edit["audio"])
+        if cues:
+            copied_srt = cache / "source_snapshot.srt"
+            shutil.copy2(edit["srt"], copied_srt)
+            edit["_prepared_srt"] = str(copied_srt)
 
 
 def export_edited_clip(edit, replacement, target_dir, job_id, progress=lambda value: None):
@@ -250,6 +276,10 @@ def export_edited_clip(edit, replacement, target_dir, job_id, progress=lambda va
         video = Path(edit["video"])
         if not video.is_file():
             raise ValueError("请选择需要修改的当前完整短片。")
+        if edit.get("_video_fingerprint") and edit["_video_fingerprint"] != _fingerprint(video):
+            raise ValueError("生成期间原视频文件已变化。已保留新配音，请恢复原视频后重试合成。")
+        if edit.get("_audio_fingerprint") and edit["_audio_fingerprint"] != _fingerprint(edit["audio"]):
+            raise ValueError("生成期间原配音文件已变化。已保留新配音，请恢复原配音后重试合成。")
         metadata = probe(video)
         stream = next((s for s in metadata["streams"] if s["codec_type"] == "video"), None)
         if not stream:
@@ -260,7 +290,11 @@ def export_edited_clip(edit, replacement, target_dir, job_id, progress=lambda va
         fps = max(1.0, min(120.0, fps_value))
         original = folder / "source_audio.wav"
         progress("正在准备原片配音轨…")
-        command([tool("ffmpeg"), "-v", "error", "-y", "-i", str(edit.get("audio") or video), "-vn", "-map", "0:a:0", "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(original)])
+        prepared = edit.get("_prepared_audio")
+        if prepared and Path(prepared).is_file():
+            shutil.copy2(prepared, original)
+        else:
+            command([tool("ffmpeg"), "-v", "error", "-y", "-i", str(edit.get("audio") or video), "-vn", "-map", "0:a:0", "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(original)])
         frames, duration = wav_info(original)
         if abs(vd - duration) > max(0.20, 2 / fps):
             raise ValueError("当前视频与所选配音的时间轴不一致，请使用已对齐的当前成片，或选择与其时长一致的独立配音。")
@@ -269,7 +303,7 @@ def export_edited_clip(edit, replacement, target_dir, job_id, progress=lambda va
         timing = patch_audio(original, replacement, edited_audio, start, end, snap=edit["mode"] != "full")
         report["timing_map"] = timing
         srt = folder / "complete_subtitles.srt"
-        cues = read_srt(edit["srt"]) if edit.get("srt") else []
+        cues = read_srt(edit.get("_prepared_srt") or edit["srt"]) if edit.get("srt") else []
         if cues and max(c["end"] for c in cues) > duration + 0.25:
             raise ValueError("字幕超出当前成片时间轴，请选择配套SRT。")
         if edit["mode"] == "full":

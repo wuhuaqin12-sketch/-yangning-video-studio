@@ -204,7 +204,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
         if manifest["status"] == "prepared":
             if manifest.get("edit"):
                 from voice_clip_edit import preflight_edit
-                preflight_edit(manifest["edit"])
+                preflight_edit(manifest["edit"], folder / "edit_source_snapshot")
             # Save the identity before submission: a timed-out push may still start remotely.
             manifest["status"] = "submitting"
             save_json(manifest_path, manifest)

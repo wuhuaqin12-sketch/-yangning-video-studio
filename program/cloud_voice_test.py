@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from cloud_voice_core import auth_env, build_notebook, prepare_job, run_job, script_from_text, state_from_output
-from voice_clip_edit import command, export_edited_clip, patch_audio, probe, read_frames, read_srt, remap_subtitles, tool, wav_info, write_srt
+from voice_clip_edit import command, export_edited_clip, patch_audio, preflight_edit, probe, read_frames, read_srt, remap_subtitles, tool, wav_info, write_srt
 from voxcpm_kaggle_worker import REFERENCE_SHA256, filter_graph, process_audio, profile_for, split_script
 import voxcpm_kaggle_worker as worker
 
@@ -40,6 +40,12 @@ class WorkflowTests(unittest.TestCase):
 
     def job(self, **kwargs):
         return prepare_job(self.root / "jobs", "member", "owner/private-reference", "完整讲稿。", "日语", 16261109, self.root / "output", **kwargs)
+
+    def source_clip(self):
+        original, video = self.root/"source_voice.wav", self.root/"source_clip.mp4"
+        write_wave(original,sound(4,[(0.4,0.9,0.1),(1.4,1.9,0.1),(2.4,2.9,0.1)]))
+        command([tool("ffmpeg"),"-v","error","-y","-f","lavfi","-i","testsrc2=size=160x96:rate=25:duration=4","-i",str(original),"-c:v","libx264","-threads","1","-c:a","aac","-shortest",str(video)])
+        return original, video
 
     def fake_cli(self, manifest_path, cleanup_fails=False, invalid_recipe=False):
         manifest = json.loads(manifest_path.read_text())
@@ -208,6 +214,42 @@ class WorkflowTests(unittest.TestCase):
                  "huggingface_hub":SimpleNamespace(snapshot_download=lambda *a,**k:None)}
         with patch.dict("sys.modules",modules),self.assertRaises(ValueError):
             worker.run({"reference_path":str(reference),"language":"日语","text":"test"})
+
+    def test_invalid_subtitle_selection_is_rejected_before_gpu_submission(self):
+        audio,video=self.source_clip()
+        srt=self.root/"crossing.srt"
+        write_srt([{"start":1.0,"end":2.5,"text":"complete sentence"}],srt)
+        path=self.job(edit={"mode":"partial","video":str(video),"audio":str(audio),"srt":str(srt),"start":1.2,"end":2.2})
+        cli=self.fake_cli(path)
+        with self.assertRaises(RuntimeError):
+            run_job(path,"legacy",lambda e:None,cli=cli)
+        self.assertEqual(self.calls,[])
+        self.assertEqual(json.loads(path.read_text())["status"],"prepared")
+
+    def test_changed_source_is_detected_before_local_render(self):
+        audio,video=self.source_clip()
+        replacement=self.root/"replace.wav"
+        write_wave(replacement,sound(1,[(0.2,0.8,0.1)]))
+        edit={"mode":"partial","video":str(video),"audio":str(audio),"srt":"","start":1.2,"end":2.2,"text":"corrected"}
+        preflight_edit(edit,self.root/"snapshot")
+        self.assertTrue(Path(edit["_prepared_audio"]).exists())
+        with video.open("ab") as stream:
+            stream.write(b"changed")
+        with self.assertRaisesRegex(ValueError,"原视频文件已变化"):
+            export_edited_clip(edit,replacement,self.root,"changed")
+        self.assertFalse((self.root/"VoiceEdit_changed"/"complete_video.mp4").exists())
+
+    def test_preview_media_check_requires_both_real_tools(self):
+        import cloud_voice_preview as preview
+        media=self.root/"tools"
+        media.mkdir()
+        suffix=".exe" if os.name=="nt" else ""
+        (media/("ffmpeg"+suffix)).touch()
+        with patch.object(preview.subprocess,"run") as run:
+            self.assertFalse(preview.usable_tools(media))
+            (media/("ffprobe"+suffix)).touch()
+            run.side_effect=lambda args,**kw:SimpleNamespace(returncode=0,stdout=(Path(args[0]).stem+" version test").encode())
+            self.assertTrue(preview.usable_tools(media))
 
     def test_partial_preserves_unmodified_samples_and_retimes_subtitles(self):
         original, clip, output = [self.root/name for name in ("original.wav", "clip.wav", "edited.wav")]
