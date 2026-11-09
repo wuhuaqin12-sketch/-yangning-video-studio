@@ -182,7 +182,7 @@ def deliver_result(folder, manifest):
     return artifacts
 
 
-def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60):
+def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60, audio_only=False):
     manifest_path = Path(manifest_path)
     lock_key = str(manifest_path.resolve())
     with _ACTIVE_LOCK:
@@ -190,13 +190,13 @@ def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeo
             raise RuntimeError("这个任务正在本机后台处理中，请勿重复提交。")
         _ACTIVE.add(lock_key)
     try:
-        return _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds)
+        return _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only)
     finally:
         with _ACTIVE_LOCK:
             _ACTIVE.discard(lock_key)
 
 
-def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
+def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only=False):
     folder = manifest_path.parent
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     config_dir = folder / "auth_config"
@@ -205,7 +205,10 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
     kernel = manifest["kernel"]
     try:
         if manifest["status"] == "prepared":
-            if manifest.get("edit"):
+            if manifest.get("edit", {}).get("kind") == "audio":
+                from voice_clip_edit import preflight_audio_edit
+                preflight_audio_edit(manifest["edit"], folder / "edit_source_snapshot")
+            elif manifest.get("edit") and not audio_only:
                 from voice_clip_edit import preflight_edit
                 preflight_edit(manifest["edit"], folder / "edit_source_snapshot")
             # Save the identity before submission: a timed-out push may still start remotely.
@@ -241,7 +244,13 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
             manifest.pop("last_error", None)
             save_json(manifest_path, manifest)
         if manifest["status"] == "audio_ready":
-            if manifest.get("edit"):
+            if manifest.get("edit", {}).get("kind") == "audio":
+                from voice_clip_edit import export_edited_audio
+                manifest["artifacts"].update(export_edited_audio(
+                    manifest["edit"], manifest["artifacts"]["yangning_final.wav"], manifest["output_dir"],
+                    manifest["job_id"], progress=lambda value: emit(("status", value)),
+                ))
+            elif manifest.get("edit") and not audio_only:
                 from voice_clip_edit import export_edited_clip
                 manifest["artifacts"].update(export_edited_clip(
                     manifest["edit"], manifest["artifacts"]["yangning_final.wav"], manifest["output_dir"],

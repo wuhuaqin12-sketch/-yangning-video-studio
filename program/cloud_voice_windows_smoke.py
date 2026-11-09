@@ -57,22 +57,23 @@ def main():
             widgets = descendants(window)
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert "生成音频" in labels and "恢复最近任务" in labels
-            # Routine generation must not expose video editing controls. Switching
-            # into editing is the only way to reveal whole/partial regeneration.
-            edit_source = next(w for w in widgets if isinstance(w, ttk.LabelFrame) and w.cget("text") == "已有成片与修改范围")
-            edit_panel = edit_source.master
-            assert edit_panel.winfo_manager() == ""
+            # Audio correction is separate from ordinary generation; no video controls.
+            correction = next(w for w in widgets if isinstance(w, ttk.LabelFrame) and w.cget("text") == "原音频与替换句段")
+            assert correction.winfo_manager() == ""
             by_text = {str(w.cget("text")): w for w in widgets if isinstance(w, ttk.Radiobutton)}
-            assert by_text["生成音频"].instate(["selected"])
-            by_text["修改已有成片"].invoke()
+            assert by_text["生成新音频"].instate(["selected"])
+            assert not any("视频" in str(w.cget("text")) or "成片" in str(w.cget("text")) for w in widgets if isinstance(w, (ttk.Button, ttk.Radiobutton)))
+            by_text["局部改读音并接回原音频"].invoke()
             root.update()
-            assert edit_panel.winfo_manager() == "pack"
-            by_text["只修改选定句段并合成成片"].invoke()
+            assert correction.winfo_manager() == "pack"
+            assert "重生成句段并连接完整音频" in [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
+            by_text["修改全文后重新生成"].invoke()
             root.update()
-            assert "重做句段并合成成片" in [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
-            by_text["生成音频"].invoke()
+            assert correction.winfo_manager() == ""
+            assert "全文重新生成" in [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
+            by_text["生成新音频"].invoke()
             root.update()
-            assert edit_panel.winfo_manager() == ""
+            assert correction.winfo_manager() == ""
             assert "生成音频" in [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             speeds = [w for w in widgets if isinstance(w, ttk.Combobox) and "0.84" in tuple(w.cget("values"))]
             assert len(speeds) == 1

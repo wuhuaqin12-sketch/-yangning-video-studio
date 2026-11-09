@@ -220,6 +220,83 @@ def _video_graph(timing, video_duration, fps):
     return ";".join(pieces)
 
 
+def preflight_audio_edit(edit, cache_dir):
+    """Validate and snapshot an audio-only correction before spending GPU time."""
+    source = Path(edit["audio"])
+    if not source.is_file():
+        raise ValueError("请选择需要修改的原音频WAV。")
+    a, b = float(edit["start"]), float(edit["end"])
+    if not math.isfinite(a+b) or not 0 <= a < b:
+        raise ValueError("请输入有效的句段起止时间。")
+    cache = Path(cache_dir)
+    cache.mkdir(parents=True, exist_ok=True)
+    snapshot = cache / "original_audio.wav"
+    before = _fingerprint(source)
+    command([tool("ffmpeg"), "-v", "error", "-y", "-i", str(source), "-vn", "-map", "0:a:0",
+             "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(snapshot)])
+    if _fingerprint(source) != before:
+        raise ValueError("读取时原音频发生变化，请重新选择后再生成。")
+    _, duration = wav_info(snapshot)
+    if b > duration+0.001:
+        raise ValueError("替换范围超出原音频时长，未提交GPU任务。")
+    left = quiet_edge(snapshot, a, "start")/RATE
+    right = quiet_edge(snapshot, b, "end")/RATE
+    if edit.get("srt"):
+        cues = read_srt(edit["srt"])
+        if cues and max(c["end"] for c in cues) > duration+0.25:
+            raise ValueError("字幕时间超出原音频，请选择配套SRT。")
+        remap_subtitles(cues, {"old_start":left,"old_end":right,"delta":0,"replacement_seconds":right-left}, edit["text"])
+        copied = cache / "original_subtitles.srt"
+        shutil.copy2(edit["srt"], copied)
+        edit["_prepared_srt"] = str(copied)
+    edit.update(_prepared_audio=str(snapshot), _audio_fingerprint=before)
+
+
+def export_edited_audio(edit, replacement, target_dir, job_id, progress=lambda value: None):
+    """Join a new sentence into a complete WAV. No video is opened or produced."""
+    folder = Path(target_dir)/("AudioEdit_"+job_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    report_path = folder/"audio_edit_report.json"
+    report = {"status":"preparing", "original_audio":edit["audio"], "replacement":str(replacement),
+              "original_preserved":True, "review":"接缝、音色和读音待听检"}
+    try:
+        if edit.get("_audio_fingerprint") != _fingerprint(edit["audio"]):
+            raise ValueError("生成期间原音频已变化。新句段已保留，请恢复原音频后再重试拼接。")
+        original = Path(edit["_prepared_audio"])
+        if not original.is_file():
+            raise ValueError("原音频快照已丢失；新句段已保留，请重新准备局部修改任务。")
+        progress("正在匹配句段音量并连接完整WAV…")
+        pending, final = folder/"complete_audio.partial.wav", folder/"complete_audio.wav"
+        timing = patch_audio(original, replacement, pending, float(edit["start"]), float(edit["end"]))
+        _, duration = wav_info(pending)
+        if abs(duration-timing["new_seconds"]) > 1/RATE:
+            raise ValueError("拼接后时长不一致，未导出完整音频。")
+        results = {"edited_audio":str(final), "edit_report":str(report_path)}
+        if edit.get("srt"):
+            cues = read_srt(edit["_prepared_srt"])
+            target_srt = folder/"complete_subtitles.srt"
+            write_srt(remap_subtitles(cues, timing, edit["text"]), target_srt)
+            results["edited_srt"] = str(target_srt)
+            report["subtitle_timing"] = "区间外按时长差平移；新句段按文本长度估算，待校对"
+        for name, moment in (("join_left",timing["old_start"]),("join_right",timing["old_start"]+timing["replacement_seconds"])):
+            if moment <= 0 or moment >= duration:
+                continue
+            values = read_frames(pending, max(0, round((moment-0.8)*RATE)), min(round(duration*RATE), round((moment+0.8)*RATE)))
+            seam = folder/(name+".wav")
+            with wave.open(str(seam), "wb") as w:
+                w.setparams((1,2,RATE,0,"NONE","not compressed"))
+                w.writeframes(np.rint(values*32768).clip(-32768,32767).astype("<i2").tobytes())
+            results[name] = str(seam)
+        pending.replace(final)
+        report.update(status="exported_pending_review", timing_map=timing, audio=str(final))
+        return results
+    except Exception as exc:
+        report.update(status="failed_recoverable", error=str(exc))
+        raise
+    finally:
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _fingerprint(path):
     stat = Path(path).stat()
     return {"bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns}

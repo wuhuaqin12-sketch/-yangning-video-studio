@@ -304,6 +304,49 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             patch_audio(original,clip,output,1,2)
 
+    def test_audio_only_patch_exports_complete_wav_and_preserves_original(self):
+        from voice_clip_edit import preflight_audio_edit, export_edited_audio
+        original, replacement = self.root/"original.wav", self.root/"new_sentence.wav"
+        write_wave(original,sound(4,[(0.4,0.9,0.1),(1.4,1.9,0.1),(2.4,2.9,0.1)]))
+        write_wave(replacement,sound(1.5,[(0.2,1.0,0.08)]))
+        checksum = hashlib.sha256(original.read_bytes()).hexdigest()
+        subtitles = self.root/"current.srt"
+        write_srt([{"start":0.4,"end":0.9,"text":"first"},{"start":1.4,"end":1.9,"text":"wrong"},{"start":2.4,"end":2.9,"text":"last"}],subtitles)
+        edit={"kind":"audio","mode":"partial","audio":str(original),"srt":str(subtitles),"start":1.2,"end":2.2,"text":"Corrected."}
+        preflight_audio_edit(edit,self.root/"cache")
+        result = export_edited_audio(edit,replacement,self.root/"output","test")
+        self.assertAlmostEqual(wav_info(result["edited_audio"])[1],4.5)
+        self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),checksum)
+        self.assertFalse(list((self.root/"output").rglob("*.mp4")))
+        np.testing.assert_array_equal(read_frames(original,0,48000),read_frames(result["edited_audio"],0,48000))
+        np.testing.assert_array_equal(read_frames(original,3*48000,4*48000),read_frames(result["edited_audio"],int(3.5*48000),int(4.5*48000)))
+        self.assertAlmostEqual(read_srt(result["edited_srt"])[-1]["start"],2.9)
+        self.assertTrue(Path(result["join_left"]).is_file())
+        self.assertTrue(Path(result["join_right"]).is_file())
+
+    def test_audio_correction_preflight_rejects_speech_cut_before_gpu(self):
+        original = self.root/"speech.wav"
+        write_wave(original,sound(4,[(0,4,0.1)]))
+        manifest = self.job(edit={"kind":"audio","mode":"partial","audio":str(original),"srt":"","start":1,"end":2})
+        cli = self.fake_cli(manifest)
+        with self.assertRaisesRegex(RuntimeError,"安静的接点"):
+            run_job(manifest,"legacy",lambda e:None,cli=cli,sleep=lambda _:None,audio_only=True)
+        self.assertEqual(self.calls,[])
+
+    def test_audio_correction_local_failure_recovers_without_generating_again(self):
+        from voice_clip_edit import export_edited_audio
+        original = self.root/"original.wav"
+        write_wave(original,sound(4,[(0.4,0.9,0.1),(1.4,1.9,0.1),(2.4,2.9,0.1)]))
+        manifest = self.job(edit={"kind":"audio","mode":"partial","audio":str(original),"srt":"","start":1.2,"end":2.2})
+        cli = self.fake_cli(manifest)
+        with patch("voice_clip_edit.export_edited_audio",side_effect=RuntimeError("temporary local export failure")),self.assertRaises(RuntimeError):
+            run_job(manifest,"legacy",lambda e:None,cli=cli,sleep=lambda _:None,audio_only=True)
+        self.assertEqual(json.loads(manifest.read_text())["status"],"audio_ready")
+        self.calls.clear()
+        result=run_job(manifest,"legacy",lambda e:None,cli=cli,sleep=lambda _:None,audio_only=True)
+        self.assertTrue(Path(result["edited_audio"]).is_file())
+        self.assertEqual([args[1] for args,env in self.calls],["delete"])
+
     def test_real_ffmpeg_pitch_duration_and_pause_preservation(self):
         original = self.root/"raw.wav"
         write_wave(original,sound(2.9,[(0.2,1.05,0.2),(1.85,2.7,0.2)]))
