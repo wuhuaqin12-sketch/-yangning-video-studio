@@ -1,6 +1,8 @@
 import json
 import hashlib
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import wave
@@ -250,6 +252,15 @@ class WorkflowTests(unittest.TestCase):
             (media/("ffprobe"+suffix)).touch()
             run.side_effect=lambda args,**kw:SimpleNamespace(returncode=0,stdout=(Path(args[0]).stem+" version test").encode())
             self.assertTrue(preview.usable_tools(media))
+
+    def test_file_based_python_probe_handles_spaced_directory(self):
+        folder=self.root/"preview probe with spaces 日本語"
+        folder.mkdir()
+        target=folder/"preview_python_check.py"
+        target.write_text(Path(__file__).with_name("preview_python_check.py").read_text(),encoding="utf-8")
+        result=subprocess.run([sys.executable,"-I",str(target)],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(Path(json.loads(result.stdout)).resolve(),Path(sys.executable).resolve())
 
     def test_partial_preserves_unmodified_samples_and_retimes_subtitles(self):
         original, clip, output = [self.root/name for name in ("original.wav", "clip.wav", "edited.wav")]

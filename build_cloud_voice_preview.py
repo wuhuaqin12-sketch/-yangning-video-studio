@@ -9,7 +9,7 @@ from pathlib import Path
 FILES = (
     "START_CLOUD_VOICE_PREVIEW.bat", "launch_cloud_voice_preview.ps1", "preview_requirements.txt",
     "README_CLOUD_PREVIEW.zh-CN.md", "KAGGLE_VOXCPM2_SETUP.md", "CLOUD_VOICE_EDITING_REQUIREMENTS.md",
-    "program/cloud_voice_preview.py", "program/cloud_voice_core.py", "program/kaggle_voice.py",
+    "program/cloud_voice_preview.py", "program/preview_python_check.py", "program/cloud_voice_core.py", "program/kaggle_voice.py",
     "program/voxcpm_kaggle_worker.py", "program/voice_clip_edit.py", "program/cloud_voice_test.py",
 )
 
@@ -29,7 +29,7 @@ def build(root, output, revision):
     payloads["preview_version.json"] = json.dumps({
         "name": "YangNing Cloud Voice Independent Preview", "version": "0.1-preview.1",
         "source_revision": revision, "formal_studio_release": False,
-        "local_validation": "21 tests passed; real FFmpeg exports exercised",
+        "local_validation": "22 tests passed; real FFmpeg exports exercised",
         "pending_validation": ["Windows GUI", "PowerShell setup", "Kaggle account authorization", "real GPU inference", "teacher-voice and join listening"],
         "reference_audio_bundled": False,
     }, ensure_ascii=False, indent=2).encode("utf-8")

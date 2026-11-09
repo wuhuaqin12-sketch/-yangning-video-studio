@@ -7,6 +7,7 @@ on:
       - 'program/voice_clip_edit.py'
       - 'program/voxcpm_kaggle_worker.py'
       - 'program/requirements.txt'
+      - 'program/preview_python_check.py'
       - '*cloud_voice_preview*'
       - '*CLOUD*'
       - 'preview_requirements.txt'

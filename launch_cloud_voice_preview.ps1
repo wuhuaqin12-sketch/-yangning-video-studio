@@ -1,15 +1,19 @@
 param([switch]$SetupOnly)
 $ErrorActionPreference = 'Stop'
 $previewRoot = $PSScriptRoot
-$probeCode = 'import sys,struct,tkinter; sys.exit(1) if sys.version_info[:2] not in ((3,11),(3,12)) or struct.calcsize("P") != 8 else print(sys.executable)'
+$probeScript = Join-Path $previewRoot 'program\preview_python_check.py'
+if (-not (Test-Path $probeScript)) { throw 'Preview files are incomplete. Extract the entire ZIP first.' }
 
 function Find-PreviewPython {
     $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($launcher) {
         foreach ($version in @('-3.12', '-3.11')) {
             try {
-                $value = & $launcher.Source $version -I -c $probeCode 2>$null
-                if ($LASTEXITCODE -eq 0 -and $value -and (Test-Path ([string]$value))) { return [string]$value }
+                $rawValue = & $launcher.Source $version -I $probeScript 2>$null
+                if ($LASTEXITCODE -eq 0 -and $rawValue) {
+                    $value = ConvertFrom-Json -InputObject ([string]$rawValue)
+                    if (Test-Path ([string]$value)) { return [string]$value }
+                }
             } catch { }
         }
     }
@@ -24,8 +28,11 @@ function Find-PreviewPython {
     foreach ($candidate in $candidates) {
         if (-not (Test-Path $candidate)) { continue }
         try {
-            $value = & $candidate -I -c $probeCode 2>$null
-            if ($LASTEXITCODE -eq 0 -and $value -and (Test-Path ([string]$value))) { return [string]$value }
+            $rawValue = & $candidate -I $probeScript 2>$null
+            if ($LASTEXITCODE -eq 0 -and $rawValue) {
+                $value = ConvertFrom-Json -InputObject ([string]$rawValue)
+                if (Test-Path ([string]$value)) { return [string]$value }
+            }
         } catch { }
     }
     return $null
@@ -47,7 +54,7 @@ try {
     $healthy = $false
     if ((Test-Path $runtimePython) -and (Test-Path (Join-Path $runtimeDir 'pyvenv.cfg'))) {
         try {
-            & $runtimePython -I -c $probeCode *> $null
+            & $runtimePython -I $probeScript *> $null
             $healthy = $LASTEXITCODE -eq 0
         } catch { $healthy = $false }
     }
