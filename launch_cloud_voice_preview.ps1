@@ -73,6 +73,8 @@ try {
         Write-Host 'Preparing Kaggle client dependencies. No TTS model is installed on this PC.'
         & $runtimePython -m pip install --only-binary=:all: -r $requirements
         if ($LASTEXITCODE -ne 0) { throw 'Client dependency installation did not finish.' }
+        & $runtimePython -m kaggle --version
+        if ($LASTEXITCODE -ne 0) { throw 'Kaggle client import check failed.' }
         & $runtimePython (Join-Path $previewRoot 'program\cloud_voice_preview.py') --setup-only
         if ($LASTEXITCODE -ne 0) { throw 'Media tool setup did not finish.' }
         Set-Content -LiteralPath $marker -Value 'ready' -Encoding ASCII

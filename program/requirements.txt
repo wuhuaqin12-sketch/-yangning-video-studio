@@ -3,3 +3,4 @@ scipy>=1.11,<2
 Pillow>=10,<13
 kaggle>=2.2.5,<3; python_version >= "3.11"
 keyring>=25,<26
+six>=1.16,<2
