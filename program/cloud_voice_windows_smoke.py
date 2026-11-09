@@ -1,5 +1,6 @@
 """Windows-only GUI/credential smoke checks, using temporary nonsensitive data."""
 import os
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -9,6 +10,11 @@ from types import SimpleNamespace
 def main():
     if os.name != "nt":
         raise SystemExit("This check must run on Windows.")
+    if "--package-dir" in sys.argv:
+        folder = Path(sys.argv[sys.argv.index("--package-dir") + 1]).resolve()
+        if not (folder / "kaggle_voice.py").is_file():
+            raise ValueError("The extracted preview program directory is missing.")
+        sys.path.insert(0, str(folder))
     service = "YangNingCloudVoice-CI-" + uuid.uuid4().hex
     with tempfile.TemporaryDirectory() as directory:
         os.environ["YANGNING_CLOUD_DATA_DIR"] = directory

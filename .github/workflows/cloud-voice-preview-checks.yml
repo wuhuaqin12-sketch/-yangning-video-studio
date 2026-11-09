@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: cloud-voice-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-preview-setup:
     runs-on: windows-latest
@@ -31,14 +35,22 @@ jobs:
           choco install ffmpeg -y --no-progress
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Exercise independent environment installation
-        shell: pwsh
+        shell: powershell
         run: |
-          & .\launch_cloud_voice_preview.ps1 -SetupOnly
+          $archive = Join-Path $env:RUNNER_TEMP 'CloudVoicePreview.zip'
+          python build_cloud_voice_preview.py --revision '${{ github.sha }}' --output $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unpack = Join-Path $env:RUNNER_TEMP 'cloud-voice-extracted'
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpack -Force
+          $previewRoot = Join-Path $unpack 'YangNing_CloudVoice_Independent_Preview'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CLOUD_VOICE_PREVIEW_ROOT=$previewRoot"
+          & (Join-Path $previewRoot 'launch_cloud_voice_preview.ps1') -SetupOnly
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Open Windows GUI and check private credential storage
-        shell: pwsh
+        shell: powershell
         run: |
-          & .\.preview_runtime\Scripts\python.exe .\program\cloud_voice_windows_smoke.py
+          $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
+          & $previewPython .\program\cloud_voice_windows_smoke.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   local-assembly-and-package:
     runs-on: ubuntu-latest
