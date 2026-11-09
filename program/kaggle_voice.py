@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
+from voice_prosody import default_template
 
 DATA = Path(os.environ.get("YANGNING_CLOUD_DATA_DIR", str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio")))
 SETTINGS = DATA / "kaggle_voice_settings.json"
@@ -43,6 +44,10 @@ def open_kaggle_voice(app, parent=None):
         except tk.TclError:
             pass
     settings = _load_settings()
+    if settings.get("speed_standard_version") != 2:
+        settings["tempo_by_language"] = {name: 1.0 for name in PROFILES}
+        settings["speed_standard_version"] = 2
+        save_json(SETTINGS, settings)
     win = tk.Toplevel(app.root)
     app._cloud_voice_window = win
     win.title("免费云端语音克隆 · VoxCPM2")
@@ -67,6 +72,7 @@ def open_kaggle_voice(app, parent=None):
     saved_language = settings.get("language", "日语")
     language = tk.StringVar(value=saved_language if saved_language in PROFILES else "日语")
     tempo = tk.StringVar(value=str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
+    template = tk.StringVar(value=settings.get("prosody_templates", {}).get(language.get(), default_template(language.get())))
     mode = tk.StringVar(value="full")
     export_movie = tk.BooleanVar(value=False)
     source_video = tk.StringVar(value=app.v["video"].get() if "video" in app.v else "")
@@ -83,7 +89,7 @@ def open_kaggle_voice(app, parent=None):
     last_video = settings.get("last_video", "")
 
     ttk.Label(box, text="1626老师原声 · 保留自然停顿 · 轻度降噪", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
-    ttk.Label(box, text="语气通过文字指令提示模型；模板逐句起伏匹配尚未实现，具体效果需试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
+    ttk.Label(box, text="模板只分析停顿和相对起伏，再转成语气提示；不作为音色或续写音频。逐句语调复刻尚未实现。", wraplength=740).pack(anchor="w", pady=(4, 10))
     connection = ttk.LabelFrame(box, text="首次连接Kaggle", padding=10)
     connection.pack(fill="x", pady=(0, 10))
     connection.columnconfigure(1, weight=1)
@@ -102,6 +108,12 @@ def open_kaggle_voice(app, parent=None):
     ttk.Combobox(line, textvariable=tempo, values=("0.5", "0.75", "0.84", "0.9", "1.0", "1.1", "1.25", "1.5", "2.0"), width=7).pack(side="left", padx=8)
     ttk.Label(line, textvariable=profile_info).pack(side="left")
     combo.bind("<<ComboboxSelected>>", lambda e: update_profile(True))
+    template_row = ttk.LabelFrame(box, text="语气参考（音色始终使用1626）", padding=8)
+    template_row.pack(fill="x", pady=5)
+    ttk.Entry(template_row, textvariable=template).pack(side="left", fill="x", expand=True)
+    ttk.Button(template_row, text="选择模板", command=lambda: choose_media(template, [("音频", "*.wav *.mp3 *.m4a")])).pack(side="left", padx=5)
+    ttk.Button(template_row, text="恢复本语言模板", command=lambda: template.set(default_template(language.get()))).pack(side="left")
+    ttk.Label(box, text="日语用日语模板；英语、法语、德语用英语模板。粤语、印尼语可另选模板；留空使用自然语气。模板不会改变所选倍数。", wraplength=740).pack(anchor="w")
     choices = ttk.Frame(box)
     choices.pack(fill="x", pady=5)
     ttk.Radiobutton(choices, text="修改全文后重新生成", variable=mode, value="full").pack(side="left")
@@ -156,12 +168,14 @@ def open_kaggle_voice(app, parent=None):
     def update_profile(reset=False):
         if reset:
             tempo.set(str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
+            template.set(settings.get("prosody_templates", {}).get(language.get(), default_template(language.get())))
         profile_info.set("保音高 · 柔和连贯 · 停顿保留")
 
     def remember():
         settings.update(username=username.get().strip(), reference_dataset=dataset.get().strip(),
                         language=language.get(), output_dir=output.get(), seed=seed.get())
         settings.setdefault("tempo_by_language", {})[language.get()] = float(tempo.get())
+        settings.setdefault("prosody_templates", {})[language.get()] = template.get()
         save_json(SETTINGS, settings)
 
     def save_connection():
@@ -262,7 +276,7 @@ def open_kaggle_voice(app, parent=None):
                         raise ValueError("局部替换需要有效的起点和终点。")
                     edit = {"mode": mode.get(), "video": source_video.get(), "audio": source_audio.get(), "srt": source_srt.get(), "start": a, "end": b}
                 manifest = prepare_job(DATA / "kaggle_voice_jobs", user, dataset.get().strip(),
-                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get(), tempo=selected_tempo, edit=edit)
+                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get(), tempo=selected_tempo, edit=edit, prosody_template=template.get() or None)
                 settings["last_manifest"] = str(manifest)
                 remember()
         except Exception as exc:

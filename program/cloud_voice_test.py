@@ -99,9 +99,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text())["tempo"], 0.95)
 
     def test_language_default_and_tempo_validation(self):
-        self.assertEqual(profile_for("日语")["tempo"], 0.84)
-        for lang in ("英语", "法语", "德语"):
-            self.assertEqual(profile_for(lang)["tempo"], 0.9)
+        for lang in ("日语", "英语", "法语", "德语", "印尼语", "粤语"):
+            self.assertEqual(profile_for(lang)["tempo"], 1.0)
         for value in (0, 3, float("nan"), float("inf")):
             with self.assertRaises(ValueError):
                 profile_for("日语", value)
@@ -191,22 +190,43 @@ class WorkflowTests(unittest.TestCase):
                 return sound(1,[(0.2,0.8,0.1)])
             return SimpleNamespace(tts_model=SimpleNamespace(sample_rate=48000),generate=generate)
         modules={
-            "torch":SimpleNamespace(cuda=SimpleNamespace(is_available=lambda:True,is_bf16_supported=lambda:False,get_device_name=lambda n:"TEST GPU")),
+            "torch":SimpleNamespace(manual_seed=lambda n:None,cuda=SimpleNamespace(manual_seed_all=lambda n:None,is_available=lambda:True,is_bf16_supported=lambda:False,get_device_name=lambda n:"TEST GPU")),
             "huggingface_hub":SimpleNamespace(snapshot_download=lambda *a,**k:str(snapshot)),
             "voxcpm":SimpleNamespace(VoxCPM=SimpleNamespace(from_pretrained=load)),
             "soundfile":SimpleNamespace(write=lambda path,values,rate,subtype:write_wave(path,values)),
         }
         output=self.root/"worker-output"
+        from voice_prosody import analyze_template
+        template_profile = analyze_template(reference)
         with patch.dict("sys.modules",modules), patch.object(worker,"REFERENCE_SHA256",hashlib.sha256(reference.read_bytes()).hexdigest()):
-            worker.run({"job_id":"test","reference_path":str(reference),"text":"正しい日本語。","language":"日语","seed":16261109,"tempo":0.95,"output_dir":str(output)})
+            worker.run({"job_id":"test","reference_path":str(reference),"text":"正しい日本語。","language":"日语","seed":16261109,"tempo":0.95,"output_dir":str(output),"prosody_reference":template_profile})
         self.assertIsNone(calls[0]["prompt_wav_path"])
         self.assertIsNone(calls[0]["prompt_text"])
         self.assertIn("Warm, gentle Japanese narration",calls[0]["text"])
+        self.assertIn(template_profile["instruction"], calls[0]["text"])
+        self.assertEqual(calls[0]["reference_wav_path"], str(reference))
+        self.assertNotIn("seed", calls[0])
         recipe=json.loads((output/"voice_recipe.json").read_text())
         self.assertEqual(recipe["profile"]["tempo"],0.95)
         self.assertFalse(recipe["silence_trimmed"])
         self.assertEqual(recipe["model_dtype"],"float32")
         self.assertEqual(recipe["review"]["音色"],"待听检")
+
+    def test_template_summary_is_data_only_and_never_changes_tempo(self):
+        from voice_prosody import analyze_template
+        template = self.root / "template.wav"
+        write_wave(template, sound(2, [(0.1,0.7,0.1),(1.0,1.8,0.1)]))
+        summary = analyze_template(template)
+        self.assertFalse(summary["template_waveform_sent_to_model"])
+        self.assertFalse(summary["absolute_pitch_transferred"])
+        self.assertFalse(summary["tempo_changed_by_template"])
+        path = self.job(prosody_template=str(template))
+        notebook = json.loads((path.parent/"voxcpm2.ipynb").read_text())
+        setup = "".join(notebook["cells"][2]["source"])
+        self.assertIn(summary["source_sha256"], setup)
+        self.assertNotIn(str(template), setup)
+        self.assertNotIn("base64", setup)
+        self.assertEqual(json.loads(path.read_text())["tempo"], 1.0)
 
     def test_worker_rejects_unapproved_reference_before_model_loading(self):
         reference=self.root/"wrong.wav"

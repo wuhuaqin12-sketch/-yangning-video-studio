@@ -11,7 +11,9 @@ FILES = (
     "README_CLOUD_PREVIEW.zh-CN.md", "KAGGLE_VOXCPM2_SETUP.md", "CLOUD_VOICE_EDITING_REQUIREMENTS.md",
     "program/cloud_voice_preview.py", "program/preview_python_check.py", "program/cloud_voice_core.py", "program/kaggle_voice.py",
     "program/voxcpm_kaggle_worker.py", "program/voice_clip_edit.py", "program/cloud_voice_test.py",
+    "program/voice_prosody.py",
 )
+TEMPLATE_FILES = ("program/templates/japanese.wav", "program/templates/english.wav")
 
 
 def build(root, output, revision):
@@ -26,12 +28,20 @@ def build(root, output, revision):
         if source.suffix in (".bat", ".ps1"):
             data = data.decode("utf-8").replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
         payloads[name] = data
+    # Personal template audio is bundled in the private delivery only; never
+    # committed to a public source repository. CI may build without those files.
+    for name in TEMPLATE_FILES:
+        if (root / name).is_file():
+            payloads[name] = (root / name).read_bytes()
     payloads["preview_version.json"] = json.dumps({
-        "name": "YangNing Cloud Voice Independent Preview", "version": "0.1-preview.1",
+        "name": "YangNing Cloud Voice Independent Preview", "version": "0.2-preview.1",
         "source_revision": revision, "formal_studio_release": False,
-        "local_validation": "22 tests passed; real FFmpeg exports exercised",
-        "pending_validation": ["Windows GUI", "PowerShell setup", "Kaggle account authorization", "real GPU inference", "teacher-voice and join listening"],
+        "local_validation": "See validation report; prior GPU pipeline generated a verified WAV",
+        "pending_validation": ["Updated Windows GUI", "template-conditioned GPU audition", "teacher-voice and join listening"],
         "reference_audio_bundled": False,
+        "prosody_templates_bundled": [Path(name).name for name in TEMPLATE_FILES if name in payloads],
+        "template_waveform_sent_to_model": False,
+        "default_tempo_all_languages": 1.0,
     }, ensure_ascii=False, indent=2).encode("utf-8")
     manifest = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
     payloads["FILES_SHA256.json"] = json.dumps(manifest, indent=2).encode("utf-8")

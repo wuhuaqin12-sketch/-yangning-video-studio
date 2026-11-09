@@ -17,23 +17,23 @@ REFERENCE_SHA256 = "9be7f58bb98d61e33a3255a7fd963eda850219f8c8596e716675c078a2d0
 PROFILES = {
     "日语": {
         "style": "Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation",
-        "tempo": 0.84,
-        "basis": "Approved Japanese 14.86-second sample; pitch-preserving tempo calibration",
+        "tempo": 1.0,
+        "basis": "Natural model speed; template rhythm summary only, no automatic slowdown",
     },
     "英语": {
         "style": "Calm, natural English narration, warm and gentle, smoothly connected phrases, subtle intonation and natural pauses",
-        "tempo": 0.9,
-        "basis": "English 0.9 tempo standard; audio-template prosody matching pending",
+        "tempo": 1.0,
+        "basis": "Natural model speed; optional template acoustic-summary instructions",
     },
     "法语": {
         "style": "Natural French narration, calm and flowing, gentle emphasis, subtle intonation and natural pauses",
-        "tempo": 0.9,
-        "basis": "English production standard, delivered with natural French phrasing; audition pending",
+        "tempo": 1.0,
+        "basis": "Natural speed with French phrasing; English-template rhythm summary optional",
     },
     "德语": {
         "style": "Natural German narration, calm and flowing, gentle emphasis, subtle intonation and natural pauses",
-        "tempo": 0.9,
-        "basis": "English production standard, delivered with natural German phrasing; audition pending",
+        "tempo": 1.0,
+        "basis": "Natural speed with German phrasing; English-template rhythm summary optional",
     },
     "印尼语": {
         "style": "Natural Indonesian narration, calm and flowing, gentle emphasis, subtle intonation and natural pauses",
@@ -154,13 +154,19 @@ def run(request):
 
     if not torch.cuda.is_available():
         raise RuntimeError("此Kaggle作业没有分配到GPU；请检查账号GPU权限及剩余额度。")
-    reference = Path(request["reference_path"])
+    candidates = [p for p in Path("/kaggle/input").rglob("*") if p.is_file() and p.name in ("1626_reference.wav", "1626_reference.wav.wav")]
+    reference = next((p for p in candidates if hashlib.sha256(p.read_bytes()).hexdigest() == REFERENCE_SHA256), Path(request["reference_path"]))
     if not reference.is_file():
         raise FileNotFoundError("私有数据集中找不到1626_reference.wav。")
     reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
     if reference_hash != REFERENCE_SHA256:
         raise ValueError("参考文件与已确认的1626原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")
     profile = profile_for(request["language"], request.get("tempo"))
+    prosody = request.get("prosody_reference")
+    if prosody:
+        if prosody.get("method") != "aggregate_acoustic_summary_to_text" or prosody.get("template_waveform_sent_to_model") is not False:
+            raise ValueError("语气模板必须只提供节奏摘要，不能作为音色或续写音频。")
+        profile["style"] += ", " + prosody["instruction"]
     blocks = split_script(request["text"])
     ensure_audio_tools(profile["tempo"])
     output_dir = Path(request.get("output_dir", "/kaggle/working"))
@@ -186,10 +192,14 @@ def run(request):
     base_seed = int(request.get("seed", 16261109))
     for index, block in enumerate(blocks):
         seed = base_seed + index if base_seed >= 0 else None
+        if seed is not None:
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            np.random.seed(seed % (2**32))
         audio = np.asarray(model.generate(
             text=f"({profile['style']}){block}", reference_wav_path=str(reference),
             prompt_wav_path=None, prompt_text=None, cfg_value=2.0, inference_timesteps=10,
-            normalize=False, denoise=False, retry_badcase=False, max_len=4096, seed=seed,
+            normalize=False, denoise=False, retry_badcase=False, max_len=4096,
         ), dtype=np.float32).reshape(-1)
         if not audio.size or not np.isfinite(audio).all():
             raise RuntimeError(f"第{index + 1}段没有返回有效音频。")
@@ -206,6 +216,7 @@ def run(request):
         "job_id": request["job_id"], "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
         "language": request["language"], "reference_sha256": reference_hash,
         "template_audio_used": False, "template_prosody_alignment": "not_implemented",
+        "prosody_reference": prosody,
         "style_control": "text_instruction", "profile": profile, "seed_per_block": seeds,
         "cfg_value": 2.0, "inference_timesteps": 10, "max_len": 4096,
         "normalize": False, "model_denoise": False, "retry_badcase": False,
