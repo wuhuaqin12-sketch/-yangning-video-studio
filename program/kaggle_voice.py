@@ -73,6 +73,7 @@ def open_kaggle_voice(app, parent=None):
     language = tk.StringVar(value=saved_language if saved_language in PROFILES else "日语")
     tempo = tk.StringVar(value=str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
     template = tk.StringVar(value=settings.get("prosody_templates", {}).get(language.get(), default_template(language.get())))
+    workflow = tk.StringVar(value="audio")
     mode = tk.StringVar(value="full")
     export_movie = tk.BooleanVar(value=False)
     source_video = tk.StringVar(value=app.v["video"].get() if "video" in app.v else "")
@@ -114,11 +115,16 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(template_row, text="选择模板", command=lambda: choose_media(template, [("音频", "*.wav *.mp3 *.m4a")])).pack(side="left", padx=5)
     ttk.Button(template_row, text="恢复本语言模板", command=lambda: template.set(default_template(language.get()))).pack(side="left")
     ttk.Label(box, text="日语用日语模板；英语、法语、德语用英语模板。粤语、印尼语可另选模板；留空使用自然语气。模板不会改变所选倍数。", wraplength=740).pack(anchor="w")
-    choices = ttk.Frame(box)
+    purpose = ttk.Frame(box)
+    purpose.pack(fill="x", pady=6)
+    ttk.Radiobutton(purpose, text="生成音频", variable=workflow, value="audio", command=lambda: update_workflow()).pack(side="left")
+    ttk.Radiobutton(purpose, text="修改已有成片", variable=workflow, value="edit", command=lambda: update_workflow()).pack(side="left", padx=20)
+    edit_panel = ttk.Frame(box)
+    choices = ttk.Frame(edit_panel)
     choices.pack(fill="x", pady=5)
-    ttk.Radiobutton(choices, text="修改全文后重新生成", variable=mode, value="full").pack(side="left")
-    ttk.Radiobutton(choices, text="只重做选定句段并导出完整短片", variable=mode, value="partial", command=lambda: export_movie.set(True)).pack(side="left", padx=8)
-    source = ttk.LabelFrame(box, text="合成完整短片", padding=8)
+    ttk.Radiobutton(choices, text="修改全文并重新生成", variable=mode, value="full", command=lambda: update_workflow()).pack(side="left")
+    ttk.Radiobutton(choices, text="只修改选定句段并合成成片", variable=mode, value="partial", command=lambda: update_workflow()).pack(side="left", padx=8)
+    source = ttk.LabelFrame(edit_panel, text="已有成片与修改范围", padding=8)
     source.pack(fill="x", pady=6)
     source.columnconfigure(1, weight=1)
     for row, label, variable, types in (
@@ -136,7 +142,8 @@ def open_kaggle_voice(app, parent=None):
     ttk.Label(selection, text="终点（秒）").pack(side="left")
     ttk.Entry(selection, textvariable=range_end, width=9).pack(side="left", padx=4)
     ttk.Button(selection, text="从字幕选句段", command=lambda: select_cues()).pack(side="left", padx=6)
-    ttk.Checkbutton(source, text="全文模式也同时导出完整短片", variable=export_movie).grid(row=4, column=0, columnspan=3, sticky="w")
+    movie_option = ttk.Checkbutton(source, text="重新生成全文后，同时导出完整短片", variable=export_movie, command=lambda: update_workflow())
+    movie_option.grid(row=4, column=0, columnspan=3, sticky="w")
     ttk.Label(source, text="局部模式请选包含前后自然停顿的完整句段。画面随新配音调整时长；输出新SRT。画面里的旧烧录字幕需使用干净源视频处理。", wraplength=720).grid(row=5, column=0, columnspan=3, sticky="w", pady=4)
     buttons = ttk.Frame(box)
     buttons.pack(fill="x", pady=4)
@@ -159,11 +166,29 @@ def open_kaggle_voice(app, parent=None):
     actions.pack(fill="x", pady=5)
     preview = ttk.Button(actions, text="试听最近WAV", command=lambda: play_last())
     preview.pack(side="left")
-    ttk.Button(actions, text="播放完整短片", command=lambda: play_last(True)).pack(side="left", padx=5)
+    movie_preview = ttk.Button(actions, text="播放完整短片", command=lambda: play_last(True))
     resume = ttk.Button(actions, text="恢复最近任务", command=lambda: start(True))
     resume.pack(side="left", padx=8)
-    submit = ttk.Button(actions, text="生成克隆试听", command=lambda: start(False))
+    submit = ttk.Button(actions, text="生成音频", command=lambda: start(False))
     submit.pack(side="right")
+
+    def update_workflow():
+        if workflow.get() == "audio":
+            edit_panel.pack_forget()
+            movie_preview.pack_forget()
+            submit.configure(text="生成音频")
+        else:
+            edit_panel.pack(fill="x", pady=4, before=buttons)
+            movie_preview.pack(side="left", padx=5, before=resume)
+            if mode.get() == "partial":
+                selection.grid()
+                movie_option.grid_remove()
+                submit.configure(text="重做句段并合成成片")
+            else:
+                selection.grid_remove()
+                movie_option.grid()
+                submit.configure(text="重做全文并合成成片" if export_movie.get() else "重新生成全文音频")
+        canvas.configure(scrollregion=canvas.bbox("all"))
 
     def update_profile(reset=False):
         if reset:
@@ -268,7 +293,7 @@ def open_kaggle_voice(app, parent=None):
                 selected_tempo = float(tempo.get())
                 profile_for(language.get(), selected_tempo)
                 edit = None
-                if mode.get() == "partial" or export_movie.get():
+                if workflow.get() == "edit" and (mode.get() == "partial" or export_movie.get()):
                     if not Path(source_video.get()).is_file():
                         raise ValueError("请先选择需要重新合成的当前完整短片。")
                     a, b = (0.0, 1.0) if mode.get() == "full" else (float(range_start.get()), float(range_end.get()))
@@ -346,4 +371,5 @@ def open_kaggle_voice(app, parent=None):
             win.after(150, poll)
 
     update_profile()
+    update_workflow()
     win.after(150, poll)
