@@ -57,6 +57,16 @@ def main():
             widgets = descendants(window)
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert "生成音频" in labels and "恢复最近任务" in labels
+            assert "更多设置 ⋯" in labels and "音频微调 / 语气重生成" in labels
+            more=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="更多设置")
+            assert more.state()=="withdrawn"
+            notebook=next(w for w in more.winfo_children() if isinstance(w,ttk.Notebook))
+            assert len(notebook.tabs())==3
+            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="音频微调 / 语气重生成").invoke()
+            root.update()
+            adjustment=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="音频微调 · 保留原版")
+            assert any(isinstance(w,ttk.Button) and w.cget("text")=="识别指令并预览动作" for w in descendants(adjustment))
+            adjustment.destroy()
             assert "预览实际朗读稿" in labels and "编辑术语读音表" in labels
             next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text") == "编辑术语读音表").invoke()
             root.update()

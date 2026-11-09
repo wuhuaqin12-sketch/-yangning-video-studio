@@ -66,7 +66,7 @@ def build_notebook(request):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
@@ -95,6 +95,10 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     if prosody_template:
         from voice_prosody import analyze_template
         request["prosody_reference"] = analyze_template(prosody_template)
+    if style_options:
+        from voice_adjust import style_instruction
+        request["delivery_instruction"] = style_instruction(style_options)
+    save_json(folder / "request.json", request)
     slug = "yangning-voice-" + job_id
     kernel = f"{username}/{slug}"
     save_json(folder / "voxcpm2.ipynb", build_notebook(request))
