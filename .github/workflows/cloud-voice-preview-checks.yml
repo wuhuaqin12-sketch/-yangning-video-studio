@@ -1,12 +1,12 @@
 name: Cloud voice preview checks
 
 on:
-  push:
-    branches: [feat/free-kaggle-voxcpm2-jobs]
   pull_request:
     paths:
       - 'program/*voice*.py'
       - 'program/voice_clip_edit.py'
+      - 'program/voxcpm_kaggle_worker.py'
+      - 'program/requirements.txt'
       - '*cloud_voice_preview*'
       - '*CLOUD*'
       - 'preview_requirements.txt'
@@ -17,6 +17,29 @@ permissions:
   contents: read
 
 jobs:
+  windows-preview-setup:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare FFmpeg in the clean Windows validation machine
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise independent environment installation
+        shell: pwsh
+        run: |
+          & .\launch_cloud_voice_preview.ps1 -SetupOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Open Windows GUI and check private credential storage
+        shell: pwsh
+        run: |
+          & .\.preview_runtime\Scripts\python.exe .\program\cloud_voice_windows_smoke.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   local-assembly-and-package:
     runs-on: ubuntu-latest
     timeout-minutes: 12

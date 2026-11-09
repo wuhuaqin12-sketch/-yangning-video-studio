@@ -1,3 +1,4 @@
+param([switch]$SetupOnly)
 $ErrorActionPreference = 'Stop'
 $previewRoot = $PSScriptRoot
 $probeCode = 'import sys,struct,tkinter; sys.exit(1) if sys.version_info[:2] not in ((3,11),(3,12)) or struct.calcsize("P") != 8 else print(sys.executable)'
@@ -68,6 +69,10 @@ try {
         & $runtimePython (Join-Path $previewRoot 'program\cloud_voice_preview.py') --setup-only
         if ($LASTEXITCODE -ne 0) { throw 'Media tool setup did not finish.' }
         Set-Content -LiteralPath $marker -Value 'ready' -Encoding ASCII
+    }
+    if ($SetupOnly) {
+        Write-Host 'Independent preview setup completed.'
+        exit 0
     }
     try {
         $shell = New-Object -ComObject WScript.Shell
