@@ -1,5 +1,5 @@
 numpy>=1.26,<3
 scipy>=1.11,<2
 Pillow>=10,<13
-kaggle>=1.7,<2
+kaggle>=2.2.5,<3; python_version >= "3.11"
 keyring>=25,<26

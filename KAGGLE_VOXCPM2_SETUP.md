@@ -1,26 +1,32 @@
-# Free Kaggle GPU VoxCPM2 setup
+# 免费云端语音克隆与成片修改
 
-This is an optional cloud batch workflow for the Windows Studio. It does not install VoxCPM2 or PyTorch on the user's computer and does not change the installed 0.12.11 version.
+此功能位于工作室“更多设置”，代码在独立草稿分支。尚未发布、未在用户Kaggle账号实跑，不影响已安装的12.11。
 
-## What the Studio integration does
+## 使用流程
 
-1. The user enters a Kaggle username and the slug of the private Dataset containing the authorized 1626 teacher reference WAV.
-2. The user saves their Kaggle API key in the Windows Credential Manager through the Studio UI. The key is not written into the Studio JSON settings or submitted in the Notebook code.
-3. The Studio creates a unique private Kaggle Notebook for the text, enables GPU and Internet, and references the private 1626 Dataset.
-4. The Notebook runs openbmb/VoxCPM2 with `reference_wav_path` set to 1626, and `prompt_wav_path` and `prompt_text` left empty. It writes a PCM 16-bit WAV.
-5. The Studio downloads the WAV into the selected output folder, selects it as the new audio input, then deletes the private job Notebook and local temporary request files.
+1. 使用本人Kaggle账号及拥有访问权限的私有Dataset；Dataset中放置文件名为`1626_reference.wav`的已确认10秒老师原声。仅改文件名，不重新编码。程序校验SHA256，拒绝错误的目标音色文件。
+2. 每人将自己的现代Kaggle访问令牌或旧API Key保存到本机Windows凭据库。令牌不写入普通设置文件、不传入Notebook正文；账号各自使用各自的免费额度。
+3. 选择语言和倍数。日语默认0.84，英语、法语、德语默认0.9；倍数可选/填写0.5至2.0。使用VoxCPM2 2.0.3，1626为唯一音色参考。日语使用已确认的温暖、柔和、顺畅、克制抑扬指令。其他语言的文字预设仍需试听，模板逐句韵律匹配尚未实现。
+4. 导入TXT/SRT或粘贴正文。SRT编号和时间码不朗读。总文本不限制为短试听，长文按完整语义段生成；单个无断句超长语句要求用户按句意分段，绝不静默截断。
+5. 云端生成后，对整段仅做一次轻度降噪及保音高节奏处理。自然停顿、词尾均保留；保存原始WAV、处理后WAV、正文与制作记录。所有音色、读音和语气验收均保留“待听检”。
 
-The Japanese template is not used as clone input. The language selector prepends a text-only style instruction; this can guide broad delivery but does not guarantee an exact match to a template recording. The template audio itself is never sent. Audition each language before production. Users should run the Studio's existing audio review/denoise and video export steps after generation.
+## 两种修改模式
 
-## Account and data setup
+- **全文重做**：编辑完整正文重新生成。勾选同时导出短片时，完整视频随新音频重新计时，导出MP4、WAV及SRT。
+- **局部重做并导出完整短片**：选择当前成片、可选的独立配音轨、配套SRT；可从字幕选择连续句段，或填写起止秒数。只修改该句段文字，云端生成新段后自动接回完整音轨、调整该段画面时长、平移后续字幕，并导出完整MP4。
 
-- Each team member needs their own Kaggle account and API key if each should use an independent weekly quota. One shared Kaggle account shares one account's quota and credential.
-- The 1626 reference audio must be kept in a private Kaggle Dataset. Grant Dataset access to every account that will submit generation jobs. Never add teacher audio to this public source repository or a public Dataset.
-- Kaggle API tokens must be entered only in the Studio's secure credential field. Do not send tokens in chat or commit them to a repository.
-- Submitted text is placed in a private, per-job Notebook. The integration deletes that Notebook after retrieving the WAV, including on failure where possible. Kaggle may retain execution records under its own service policies.
+接点优先寻找选定语句附近的自然安静位置；仅在安静边界作5ms淡化，原片区间外的发声样本保持不动。新段响度匹配最多调整3dB，不改音高。若没有安全的安静接点或新配音没有完整停顿，保留任务并提示扩大到完整句子，避免强切发音。
 
-## Free compute limits and trade-offs
+修改后的新区间字幕目前按句子长度估算时间，须校对；区间外的字幕严格按时长差平移。字幕以SRT输出，默认不烧录。画面中已有的旧烧录字幕不会被此功能抹除，需要使用干净源视频。接缝试听片段、原版本、完整新音轨、MP4和编辑报告都会保留，不自动认证听感无缝。
 
-Kaggle's official notebook documentation currently lists free P100 GPU access, up to 30 GPU hours per week, and up to 9 hours per session. Availability and queue times can change. This is a Notebook job workflow, not an always-on inference API; model installation and weights may be downloaded again for each job. First use must confirm the current Kaggle runtime can install and run VoxCPM2 on the allocated GPU.
+## 中断与恢复
 
-This option is intended to improve on a five-minute-per-day serverless GPU cap while avoiding paid compute. It still needs account-level credentials and private Dataset access, and it should not be advertised as unlimited or guaranteed.
+提交前保存唯一任务身份。网络中断后可恢复同一个任务，不重复提交。云端音频已取回而本地视频合成失败时，恢复会直接使用已保存的音频重试合成，不重新消耗GPU生成。只有全部本地结果通过格式检查后才删除远端私有Notebook；清理失败会保留提示并可重试。
+
+## 平台和验证边界
+
+Kaggle免费GPU按账号额度和当时可用性排队，不是固定的全天在线API，也不保证分配到某种GPU或永久固定额度。使用现代Kaggle CLI 2.2.5+需Python3.11以上；工作室安装器优先Python3.12，Python3.10环境保留原功能但此云端入口不可用。
+
+GPU不支持BF16时会显式使用FP32并记录，避免在旧GPU上直接执行BF16。不同设备、精度和模型权重快照可能改变声音；模型版本、快照、随机种子、音色文件哈希、处理滤镜和输出时长都会记录。
+
+本地18项测试通过，包含模拟Kaggle提交/恢复/清理、生成Notebook代码、凭据路由、实际FFmpeg局部/全文MP4导出、字幕后移、保音高变速和静音停顿保留。未进行真实Kaggle授权、GPU模型推理、Windows界面操作或老师音色听检；这些步骤仍需账号运行环境。

@@ -66,12 +66,12 @@ def build_notebook(request):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
         raise ValueError("私有数据集标识应为：用户名/数据集slug。")
-    profile_for(language)
+    profile = profile_for(language, tempo)
     text = script_from_text(text)
     seed = int(seed)
     if not -1 <= seed < 2**31:
@@ -82,7 +82,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir):
     target = Path(output_dir).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
     request = {
-        "job_id": job_id, "text": text, "language": language, "seed": seed,
+        "job_id": job_id, "text": text, "language": language, "seed": seed, "tempo": profile["tempo"],
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
     }
     slug = "yangning-voice-" + job_id
@@ -96,9 +96,11 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir):
     })
     manifest = {
         "job_id": job_id, "username": username, "dataset": dataset, "kernel": kernel,
-        "language": language, "output_dir": str(target), "status": "prepared",
+        "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
     }
+    if edit:
+        manifest["edit"] = {**edit, "text": text}
     save_json(folder / "manifest.json", manifest)
     return folder / "manifest.json"
 
@@ -158,7 +160,7 @@ def deliver_result(folder, manifest):
     if (recipe.get("status") != "generated_pending_review" or recipe.get("job_id") != manifest["job_id"]
             or recipe.get("reference_sha256") != REFERENCE_SHA256 or recipe.get("language") != manifest["language"]
             or recipe.get("template_audio_used") is not False or recipe.get("silence_trimmed") is not False
-            or recipe.get("pitch_ratio") != 1.0 or recipe.get("profile", {}).get("tempo") != profile_for(manifest["language"])["tempo"]):
+            or recipe.get("pitch_ratio") != 1.0 or recipe.get("profile", {}).get("tempo") != manifest.get("tempo", profile_for(manifest["language"])["tempo"])):
         raise ValueError("云端制作记录不完整或与任务不一致，保留云端文件以便检查。")
     target = Path(manifest["output_dir"])
     target.mkdir(parents=True, exist_ok=True)
@@ -200,6 +202,9 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
     kernel = manifest["kernel"]
     try:
         if manifest["status"] == "prepared":
+            if manifest.get("edit"):
+                from voice_clip_edit import preflight_edit
+                preflight_edit(manifest["edit"])
             # Save the identity before submission: a timed-out push may still start remotely.
             manifest["status"] = "submitting"
             save_json(manifest_path, manifest)
@@ -207,7 +212,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
             cli(["kernels", "push", "-p", str(folder)], env, timeout=600)
             manifest["status"] = "submitted"
             save_json(manifest_path, manifest)
-        if manifest["status"] != "completed":
+        if manifest["status"] not in ("audio_ready", "completed"):
             deadline = time.monotonic() + timeout_seconds
             while time.monotonic() < deadline:
                 state = state_from_output(cli(["kernels", "status", kernel], env, timeout=180))
@@ -229,6 +234,16 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds):
             emit(("status", "正在下载WAV和制作记录…"))
             cli(["kernels", "output", kernel, "-p", str(download), "-o"], env, timeout=900)
             manifest["artifacts"] = deliver_result(folder, manifest)
+            manifest["status"] = "audio_ready"
+            manifest.pop("last_error", None)
+            save_json(manifest_path, manifest)
+        if manifest["status"] == "audio_ready":
+            if manifest.get("edit"):
+                from voice_clip_edit import export_edited_clip
+                manifest["artifacts"].update(export_edited_clip(
+                    manifest["edit"], manifest["artifacts"]["yangning_final.wav"], manifest["output_dir"],
+                    manifest["job_id"], progress=lambda value: emit(("status", value)),
+                ))
             manifest["status"] = "completed"
             manifest.pop("last_error", None)
             save_json(manifest_path, manifest)

@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -47,10 +48,16 @@ PROFILES = {
 }
 
 
-def profile_for(language):
+def profile_for(language, tempo=None):
     if language not in PROFILES:
         raise ValueError("请选择支持的配音语言。")
-    return copy.deepcopy(PROFILES[language])
+    profile = copy.deepcopy(PROFILES[language])
+    if tempo is not None:
+        tempo = float(tempo)
+        if not math.isfinite(tempo) or not 0.5 <= tempo <= 2.0:
+            raise ValueError("倍数须在0.5到2.0之间。")
+        profile["tempo"] = tempo
+    return profile
 
 
 def split_script(text, target_chars=900):
@@ -87,8 +94,9 @@ def split_script(text, target_chars=900):
 
 
 def filter_graph(tempo):
-    if tempo not in (0.84, 0.9, 1.0):
-        raise ValueError("不支持的节奏参数。")
+    tempo = float(tempo)
+    if not math.isfinite(tempo) or not 0.5 <= tempo <= 2.0:
+        raise ValueError("倍数须在0.5到2.0之间。")
     chain = "afftdn=nr=6:nf=-55:tn=1:gs=8"
     if tempo != 1.0:
         chain += (
@@ -152,7 +160,7 @@ def run(request):
     reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
     if reference_hash != REFERENCE_SHA256:
         raise ValueError("参考文件与已确认的1626原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")
-    profile = profile_for(request["language"])
+    profile = profile_for(request["language"], request.get("tempo"))
     blocks = split_script(request["text"])
     ensure_audio_tools(profile["tempo"])
     output_dir = Path(request.get("output_dir", "/kaggle/working"))

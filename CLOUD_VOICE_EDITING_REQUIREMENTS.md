@@ -1,12 +1,9 @@
-# Voice editing requirements
+# 配音修改交付状态
 
-Implementation status: requested, not yet implemented or validated.
+已在独立分支实现：可选倍数；全文重做；按时间段或SRT连续句段局部重做；保留原文件；新配音接回完整音轨；局部画面随新语音时长调整；后续字幕时间平移；导出完整MP4、WAV和SRT；保存原始配音、正文、生成参数和编辑记录；失败任务可恢复。
 
-- Speed is selectable; Japanese defaults to 0.84 and English/French/German to 0.9. Apply pitch-preserving tempo exactly once. Preserve natural silence.
-- Full regeneration: edit the complete transcript and generate a new WAV, retain the previous version.
-- Partial regeneration: select the faulty time interval in the current audio, edit only the relevant transcript, regenerate with enough surrounding linguistic context, and audition the replacement.
-- Replacement must operate on the current project's audio version. Preserve the original audio and video.
-- Do not assume a regenerated passage has the original duration. Offer fitting the selected interval or shifting subsequent video/subtitle timing; record the chosen operation and timing map.
-- Join at appropriate quiet boundaries without cutting speech endings or removing natural pauses. Crossfades must not overlap spoken syllables. Audition joins before accepting.
-- Replace only the selected interval; derive updated audio, video timing and subtitle timing consistently. Save undo information and the model/style/tempo/reference parameters.
-- Whole-document or partial regeneration is explicit in the UI. Synthetic/local checks do not certify teacher timbre, pronunciation or seamlessness; GPU audition is pending.
+自动接合仅使用安静边界，禁止在发音中强行交叉淡化。保留全部替换配音样本和自然停顿，采用安静边界5ms淡化及最多3dB响度匹配；无安全接点时停止并保留任务。原素材和前版成片不覆盖，恢复原版可重新选择原素材。
+
+字幕新区间目前为句级时长估算，未做逐词强制对齐。模板逐句语调匹配、实际老师音色/读音/接缝听感及Windows/Kaggle端到端操作尚待验证。默认导出SRT不烧录，源视频中的旧烧录字幕需另行处理。
+
+验证：18项本地测试通过，包括真实FFmpeg合成完整短片及样本级区间外保留、倍数处理后音高与停顿检查。实际Kaggle授权和GPU试听尚未进行，PR保持草稿。

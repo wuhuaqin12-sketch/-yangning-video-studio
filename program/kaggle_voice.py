@@ -1,5 +1,6 @@
 """Optional cloud voice window. All Tk operations stay on the UI thread."""
 import json
+import math
 import os
 import queue
 import re
@@ -56,12 +57,21 @@ def open_kaggle_voice(app, parent=None):
     dataset = tk.StringVar(value=settings.get("reference_dataset", ""))
     saved_language = settings.get("language", "日语")
     language = tk.StringVar(value=saved_language if saved_language in PROFILES else "日语")
+    tempo = tk.StringVar(value=str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
+    mode = tk.StringVar(value="full")
+    export_movie = tk.BooleanVar(value=False)
+    source_video = tk.StringVar(value=app.v["video"].get() if "video" in app.v else "")
+    source_audio = tk.StringVar()
+    source_srt = tk.StringVar()
+    range_start = tk.StringVar(value="0")
+    range_end = tk.StringVar(value="1")
     output = tk.StringVar(value=settings.get("output_dir", app.v["output"].get()))
     token = tk.StringVar()
     seed = tk.StringVar(value=str(settings.get("seed", 16261109)))
     profile_info = tk.StringVar()
     status = tk.StringVar(value="准备就绪。生成结果按试听保存，音色和读音需听检确认。")
     last_audio = settings.get("last_audio", "")
+    last_video = settings.get("last_video", "")
 
     ttk.Label(box, text="1626老师原声 · 保留自然停顿 · 轻度降噪", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
     ttk.Label(box, text="语气通过文字指令提示模型；模板逐句起伏匹配尚未实现，具体效果需试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
@@ -79,8 +89,34 @@ def open_kaggle_voice(app, parent=None):
     ttk.Label(line, text="配音语言").pack(side="left")
     combo = ttk.Combobox(line, textvariable=language, values=tuple(PROFILES), state="readonly", width=12)
     combo.pack(side="left", padx=8)
+    ttk.Label(line, text="倍数").pack(side="left")
+    ttk.Combobox(line, textvariable=tempo, values=("0.5", "0.75", "0.84", "0.9", "1.0", "1.1", "1.25", "1.5", "2.0"), width=7).pack(side="left", padx=8)
     ttk.Label(line, textvariable=profile_info).pack(side="left")
-    combo.bind("<<ComboboxSelected>>", lambda e: update_profile())
+    combo.bind("<<ComboboxSelected>>", lambda e: update_profile(True))
+    choices = ttk.Frame(box)
+    choices.pack(fill="x", pady=5)
+    ttk.Radiobutton(choices, text="修改全文后重新生成", variable=mode, value="full").pack(side="left")
+    ttk.Radiobutton(choices, text="只重做选定句段并导出完整短片", variable=mode, value="partial", command=lambda: export_movie.set(True)).pack(side="left", padx=8)
+    source = ttk.LabelFrame(box, text="合成完整短片", padding=8)
+    source.pack(fill="x", pady=6)
+    source.columnconfigure(1, weight=1)
+    for row, label, variable, types in (
+        (0, "当前短片MP4", source_video, [("视频", "*.mp4 *.mov *.mkv")]),
+        (1, "独立配音（可留空）", source_audio, [("音频", "*.wav *.mp3 *.m4a")]),
+        (2, "当前成片配套SRT（可选）", source_srt, [("字幕", "*.srt")]),
+    ):
+        ttk.Label(source, text=label).grid(row=row, column=0, sticky="w", pady=3)
+        ttk.Entry(source, textvariable=variable).grid(row=row, column=1, sticky="ew", padx=6)
+        ttk.Button(source, text="选择", command=lambda v=variable, t=types: choose_media(v, t)).grid(row=row, column=2)
+    selection = ttk.Frame(source)
+    selection.grid(row=3, column=0, columnspan=3, sticky="ew", pady=4)
+    ttk.Label(selection, text="替换起点（秒）").pack(side="left")
+    ttk.Entry(selection, textvariable=range_start, width=9).pack(side="left", padx=4)
+    ttk.Label(selection, text="终点（秒）").pack(side="left")
+    ttk.Entry(selection, textvariable=range_end, width=9).pack(side="left", padx=4)
+    ttk.Button(selection, text="从字幕选句段", command=lambda: select_cues()).pack(side="left", padx=6)
+    ttk.Checkbutton(source, text="全文模式也同时导出完整短片", variable=export_movie).grid(row=4, column=0, columnspan=3, sticky="w")
+    ttk.Label(source, text="局部模式请选包含前后自然停顿的完整句段。画面随新配音调整时长；输出新SRT。画面里的旧烧录字幕需使用干净源视频处理。", wraplength=720).grid(row=5, column=0, columnspan=3, sticky="w", pady=4)
     buttons = ttk.Frame(box)
     buttons.pack(fill="x", pady=4)
     ttk.Label(buttons, text="朗读正文").pack(side="left")
@@ -102,18 +138,21 @@ def open_kaggle_voice(app, parent=None):
     actions.pack(fill="x", pady=5)
     preview = ttk.Button(actions, text="试听最近WAV", command=lambda: play_last())
     preview.pack(side="left")
+    ttk.Button(actions, text="播放完整短片", command=lambda: play_last(True)).pack(side="left", padx=5)
     resume = ttk.Button(actions, text="恢复最近任务", command=lambda: start(True))
     resume.pack(side="left", padx=8)
     submit = ttk.Button(actions, text="生成克隆试听", command=lambda: start(False))
     submit.pack(side="right")
 
-    def update_profile():
-        profile = profile_for(language.get())
-        profile_info.set(f"{profile['tempo']}倍保音高 · 柔和连贯 · 停顿保留")
+    def update_profile(reset=False):
+        if reset:
+            tempo.set(str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
+        profile_info.set("保音高 · 柔和连贯 · 停顿保留")
 
     def remember():
         settings.update(username=username.get().strip(), reference_dataset=dataset.get().strip(),
                         language=language.get(), output_dir=output.get(), seed=seed.get())
+        settings.setdefault("tempo_by_language", {})[language.get()] = float(tempo.get())
         save_json(SETTINGS, settings)
 
     def save_connection():
@@ -146,6 +185,43 @@ def open_kaggle_voice(app, parent=None):
         except (OSError, UnicodeError, ValueError) as exc:
             messagebox.showerror("导入失败", str(exc), parent=win)
 
+    def choose_media(variable, types):
+        value = filedialog.askopenfilename(parent=win, filetypes=types + [("所有文件", "*.*")])
+        if value:
+            variable.set(value)
+
+    def select_cues():
+        from voice_clip_edit import read_srt
+        if not source_srt.get():
+            choose_media(source_srt, [("字幕", "*.srt")])
+        if not source_srt.get():
+            return
+        try:
+            cues = read_srt(source_srt.get())
+        except Exception as exc:
+            messagebox.showerror("字幕未打开", str(exc), parent=win)
+            return
+        chooser = tk.Toplevel(win)
+        chooser.title("选择连续的完整句段")
+        chooser.geometry("760x440")
+        listing = tk.Listbox(chooser, selectmode="extended", exportselection=False)
+        listing.pack(fill="both", expand=True, padx=10, pady=10)
+        for cue in cues:
+            listing.insert("end", f"{cue['start']:.3f}–{cue['end']:.3f}  {cue['text'].replace(chr(10), ' ')}")
+        def take():
+            selected = list(listing.curselection())
+            if not selected or selected != list(range(selected[0], selected[-1] + 1)):
+                messagebox.showinfo("请选择连续句段", "可选择一句或连续的几句。", parent=chooser)
+                return
+            range_start.set(str(cues[selected[0]]["start"]))
+            range_end.set(str(cues[selected[-1]]["end"]))
+            text_box.delete("1.0", "end")
+            text_box.insert("1.0", " ".join(cues[i]["text"] for i in selected))
+            mode.set("partial")
+            export_movie.set(True)
+            chooser.destroy()
+        ttk.Button(chooser, text="载入选定句段，修改正文", command=take).pack(pady=8)
+
     def choose_output():
         value = filedialog.askdirectory(parent=win, initialdir=output.get() or str(Path.home()))
         if value:
@@ -166,8 +242,18 @@ def open_kaggle_voice(app, parent=None):
             if not secret:
                 raise ValueError("请先为这个Kaggle用户名安全保存访问令牌。")
             if not recover:
+                selected_tempo = float(tempo.get())
+                profile_for(language.get(), selected_tempo)
+                edit = None
+                if mode.get() == "partial" or export_movie.get():
+                    if not Path(source_video.get()).is_file():
+                        raise ValueError("请先选择需要重新合成的当前完整短片。")
+                    a, b = (0.0, 1.0) if mode.get() == "full" else (float(range_start.get()), float(range_end.get()))
+                    if mode.get() == "partial" and (not math.isfinite(a + b) or not 0 <= a < b):
+                        raise ValueError("局部替换需要有效的起点和终点。")
+                    edit = {"mode": mode.get(), "video": source_video.get(), "audio": source_audio.get(), "srt": source_srt.get(), "start": a, "end": b}
                 manifest = prepare_job(DATA / "kaggle_voice_jobs", user, dataset.get().strip(),
-                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get())
+                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get(), tempo=selected_tempo, edit=edit)
                 settings["last_manifest"] = str(manifest)
                 remember()
         except Exception as exc:
@@ -185,17 +271,18 @@ def open_kaggle_voice(app, parent=None):
                 events.put(("error", str(exc)))
         threading.Thread(target=work, daemon=True).start()
 
-    def play_last():
-        if not last_audio or not Path(last_audio).is_file():
-            messagebox.showinfo("还没有WAV", "先完成一个生成任务。", parent=win)
+    def play_last(movie=False):
+        path = last_video if movie else last_audio
+        if not path or not Path(path).is_file():
+            messagebox.showinfo("还没有结果", "先完成对应的生成或合成任务。", parent=win)
             return
         if os.name == "nt":
-            os.startfile(last_audio)
+            os.startfile(path)
         else:
-            subprocess.Popen(["xdg-open", last_audio])
+            subprocess.Popen(["xdg-open", path])
 
     def poll():
-        nonlocal running, last_audio
+        nonlocal running, last_audio, last_video
         try:
             while True:
                 kind, payload = events.get_nowait()
@@ -203,10 +290,16 @@ def open_kaggle_voice(app, parent=None):
                     status.set(payload)
                 elif kind == "done":
                     running = False
-                    last_audio = payload["yangning_final.wav"]
+                    last_audio = payload.get("edited_audio", payload["yangning_final.wav"])
+                    last_video = payload.get("edited_video", "")
                     settings["last_audio"] = last_audio
+                    settings["last_video"] = last_video
                     save_json(SETTINGS, settings)
                     app.v["audio"].set(last_audio)
+                    if last_video:
+                        app.v["video"].set(last_video)
+                        if "target_srt" in app.v:
+                            app.v["target_srt"].set(payload["edited_srt"])
                     # The WAV already has its language-specific slowdown. Prevent a second
                     # automatic speed/pause pass when it enters the video workflow.
                     if "speed" in app.v:
@@ -215,7 +308,7 @@ def open_kaggle_voice(app, parent=None):
                         app.v["trim"].set(False)
                     if hasattr(app, "auto_cut"):
                         app.auto_cut.set(False)
-                    status.set("试听WAV已载入配音栏。已保留停顿并将成片倍速设为1.0，避免重复变速；制作记录和原始WAV已保存。")
+                    status.set(("完整短片已导出，可播放检查接缝；新句段字幕时间仍需校对。" if last_video else "试听WAV已载入配音栏。") + " 已保留原版本及制作记录，成片倍速设为1.0避免重复变速。")
                     submit.state(["!disabled"])
                     resume.state(["!disabled"])
                 elif kind == "error":
