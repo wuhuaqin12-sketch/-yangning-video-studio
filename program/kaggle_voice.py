@@ -1,15 +1,16 @@
+"""Optional cloud voice window. All Tk operations stay on the UI thread."""
 import json
 import os
+import queue
 import re
-import shutil
 import subprocess
-import sys
 import threading
-import time
-import uuid
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
+
+from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
+from voxcpm_kaggle_worker import PROFILES, profile_for
 
 DATA = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio"
 SETTINGS = DATA / "kaggle_voice_settings.json"
@@ -24,268 +25,209 @@ def _load_settings():
         return {}
 
 
-def _save_settings(value):
-    DATA.mkdir(parents=True, exist_ok=True)
-    SETTINGS.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _kaggle_cli():
-    exe = Path(sys.executable).with_name("kaggle.exe" if os.name == "nt" else "kaggle")
-    if exe.is_file():
-        return str(exe)
-    found = shutil.which("kaggle")
-    if found:
-        return found
-    raise RuntimeError("缺少 Kaggle API 命令。此功能需要在新版本工作室中安装 kaggle 依赖。")
-
-
-def _run_cli(args, env, cwd=None, timeout=180):
-    result = subprocess.run(
-        [_kaggle_cli(), *args],
-        cwd=str(cwd) if cwd else None,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode:
-        details = (result.stderr or result.stdout or "Kaggle API 调用失败").strip()
-        raise RuntimeError(details[-1800:])
-    return result.stdout.strip()
-
-
-def _build_notebook(text, seed, reference_dataset, job_id, language):
-    dataset_name = reference_dataset.rsplit("/", 1)[-1]
-    reference_path = f"/kaggle/input/{dataset_name}/1626_reference.wav"
-    output_name = f"yangning_1626_{job_id}.wav"
-    style_guides = {
-        "日语": "(Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation)",
-        "英语": "(Calm, natural English narration, warm and gentle, smoothly connected phrases, moderate pace, subtle intonation and natural pauses)",
-        "法语": "(Natural French narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
-        "德语": "(Natural German narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
-        "印尼语": "(Natural Indonesian narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
-        "粤语/中文": "(Natural Cantonese or Chinese narration, calm and flowing, gentle emphasis, moderate pace, subtle intonation and natural pauses)",
-    }
-    style_instruction = style_guides.get(language, style_guides["日语"])
-    code = f"""!pip -q install voxcpm==2.0.3 soundfile
-
-from pathlib import Path
-import numpy as np
-import soundfile as sf
-from voxcpm import VoxCPM
-
-TEXT = {json.dumps(style_instruction + text, ensure_ascii=False)}
-REFERENCE = Path({json.dumps(reference_path)})
-OUTPUT = Path('/kaggle/working/{output_name}')
-
-if not REFERENCE.is_file():
-    raise FileNotFoundError(f'私有参考音频未找到：{{REFERENCE}}')
-
-model = VoxCPM.from_pretrained('openbmb/VoxCPM2', device='cuda')
-audio = model.generate(
-    text=TEXT,
-    reference_wav_path=str(REFERENCE),
-    prompt_wav_path=None,
-    prompt_text=None,
-    cfg_value=2.0,
-    inference_timesteps=10,
-    normalize=False,
-    denoise=False,
-    retry_badcase=False,
-    seed={int(seed) if int(seed) >= 0 else 'None'},
-)
-audio = np.asarray(audio, dtype=np.float32).reshape(-1)
-sf.write(OUTPUT, audio, model.tts_model.sample_rate, subtype='PCM_16')
-print(f'WAV={OUTPUT}')
-"""
-    return {
-        "cells": [
-            {"cell_type": "markdown", "metadata": {}, "source": [
-                "# 杨宁老师 VoxCPM2 私有语音任务\n",
-                "私有 Kaggle Notebook；只以 1626 老师原声作为音色参考。模板音频不会传入，所选语言会加入语气文字指令。\n",
-            ]},
-            {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": code.splitlines(True)},
-        ],
-        "metadata": {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python"},
-        },
-        "nbformat": 4,
-        "nbformat_minor": 5,
-    }
-
-
-def _job_files(folder, username, dataset, text, seed, job_id, language):
-    slug = f"yangning-voice-{job_id}"
-    kernel_ref = f"{username}/{slug}"
-    (folder / "voxcpm2.ipynb").write_text(
-        json.dumps(_build_notebook(text, seed, dataset, job_id, language), ensure_ascii=False),
-        encoding="utf-8",
-    )
-    metadata = {
-        "id": kernel_ref,
-        "title": f"YangNing VoxCPM2 {job_id}",
-        "code_file": "voxcpm2.ipynb",
-        "language": "python",
-        "kernel_type": "notebook",
-        "is_private": True,
-        "enable_gpu": True,
-        "enable_internet": True,
-        "dataset_sources": [dataset],
-        "competition_sources": [],
-        "kernel_sources": [],
-        "model_sources": [],
-    }
-    (folder / "kernel-metadata.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return kernel_ref, slug
+def _vault():
+    if os.name != "nt":
+        raise RuntimeError("此工作室版本使用Windows凭据库保存令牌，请在Windows版本中配置。")
+    from keyring.backends.Windows import WinVaultKeyring
+    return WinVaultKeyring()
 
 
 def open_kaggle_voice(app, parent=None):
     settings = _load_settings()
-    win = tk.Toplevel(parent or app.root)
-    win.title("免费 Kaggle GPU · VoxCPM2 云端克隆")
-    win.geometry("820x690")
-    box = ttk.Frame(win, padding=14)
-    box.pack(fill="both", expand=True)
+    win = tk.Toplevel(app.root)
+    win.title("免费云端语音克隆 · VoxCPM2")
+    win.geometry("840x780")
+    win.minsize(760, 650)
+    outer = ttk.Frame(win)
+    outer.pack(fill="both", expand=True)
+    canvas = tk.Canvas(outer, highlightthickness=0)
+    scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    box = ttk.Frame(canvas, padding=14)
+    item = canvas.create_window((0, 0), window=box, anchor="nw")
+    box.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(item, width=e.width))
+    events = queue.Queue()
+    running = False
 
-    user = tk.StringVar(value=settings.get("username", ""))
+    username = tk.StringVar(value=settings.get("username", ""))
     dataset = tk.StringVar(value=settings.get("reference_dataset", ""))
-    language = tk.StringVar(value=settings.get("language", "日语"))
-    output = tk.StringVar(value=app.v["output"].get())
+    saved_language = settings.get("language", "日语")
+    language = tk.StringVar(value=saved_language if saved_language in PROFILES else "日语")
+    output = tk.StringVar(value=settings.get("output_dir", app.v["output"].get()))
     token = tk.StringVar()
-    seed = tk.StringVar(value="16261109")
-    ttk.Label(box, text="免费 GPU 作业按 Kaggle Notebook 运行；本机不下载模型。语言预设会加入语气文字提示，不上传模板音频；抑扬停顿效果需试听确认。", wraplength=760).pack(anchor="w", pady=(0, 8))
-    ttk.Label(box, text="Kaggle 用户名").pack(anchor="w")
-    ttk.Entry(box, textvariable=user).pack(fill="x", pady=(0, 8))
-    ttk.Label(box, text="1626 原声私有 Dataset（用户名/数据集slug）").pack(anchor="w")
-    ttk.Entry(box, textvariable=dataset).pack(fill="x", pady=(0, 8))
-    ttk.Label(box, text="配音语言与语气预设（不会上传模板音频）").pack(anchor="w")
-    ttk.Combobox(box, textvariable=language, values=("日语","英语","法语","德语","印尼语","粤语/中文"), state="readonly").pack(fill="x", pady=(0, 8))
-    ttk.Label(box, text="Kaggle API Key（本机 Windows 凭据库保存；不写入设置文件）").pack(anchor="w")
-    ttk.Entry(box, textvariable=token, show="•").pack(fill="x", pady=(0, 5))
-    ttk.Button(box, text="安全保存 Kaggle API Key", command=lambda: save_key()).pack(anchor="w", pady=(0, 8))
-    ttk.Label(box, text="讲稿（每次任务会提交为私有 Notebook；运行结束后自动删除 Notebook）").pack(anchor="w")
-    text_box = tk.Text(box, height=15, wrap="word")
+    seed = tk.StringVar(value=str(settings.get("seed", 16261109)))
+    profile_info = tk.StringVar()
+    status = tk.StringVar(value="准备就绪。生成结果按试听保存，音色和读音需听检确认。")
+    last_audio = settings.get("last_audio", "")
+
+    ttk.Label(box, text="1626老师原声 · 保留自然停顿 · 轻度降噪", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
+    ttk.Label(box, text="语气通过文字指令提示模型；模板逐句起伏匹配尚未实现，具体效果需试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
+    connection = ttk.LabelFrame(box, text="首次连接Kaggle", padding=10)
+    connection.pack(fill="x", pady=(0, 10))
+    connection.columnconfigure(1, weight=1)
+    for row, label, variable in ((0, "本人Kaggle用户名", username), (1, "私有数据集（用户名/slug）", dataset), (2, "访问令牌 / API Key", token)):
+        ttk.Label(connection, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(connection, textvariable=variable, show="•" if row == 2 else "").grid(row=row, column=1, sticky="ew", pady=4)
+    ttk.Button(connection, text="安全保存连接", command=lambda: save_connection()).grid(row=3, column=1, sticky="e", pady=4)
+    ttk.Label(connection, text="令牌仅保存在这台电脑的Windows凭据库。1626参考文件需命名为1626_reference.wav，保留原始文件内容。", wraplength=720).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
+
+    line = ttk.Frame(box)
+    line.pack(fill="x", pady=5)
+    ttk.Label(line, text="配音语言").pack(side="left")
+    combo = ttk.Combobox(line, textvariable=language, values=tuple(PROFILES), state="readonly", width=12)
+    combo.pack(side="left", padx=8)
+    ttk.Label(line, textvariable=profile_info).pack(side="left")
+    combo.bind("<<ComboboxSelected>>", lambda e: update_profile())
+    buttons = ttk.Frame(box)
+    buttons.pack(fill="x", pady=4)
+    ttk.Label(buttons, text="朗读正文").pack(side="left")
+    ttk.Button(buttons, text="导入TXT / SRT", command=lambda: import_script()).pack(side="right")
+    text_box = tk.Text(box, height=12, wrap="word", undo=True)
     text_box.pack(fill="both", expand=True, pady=(0, 8))
     line = ttk.Frame(box)
     line.pack(fill="x", pady=4)
-    ttk.Label(line, text="随机种子").pack(side="left")
-    ttk.Entry(line, textvariable=seed, width=12).pack(side="left", padx=6)
-    ttk.Label(line, text="输出目录").pack(side="left", padx=(14, 4))
-    ttk.Entry(line, textvariable=output).pack(side="left", fill="x", expand=True)
-    ttk.Button(line, text="选择", command=lambda: choose_output()).pack(side="left", padx=(5, 0))
-    status = tk.StringVar(value="准备就绪。需要本人 Kaggle 账号及获授权的私有参考音频 Dataset。")
-    ttk.Label(box, textvariable=status, wraplength=760).pack(anchor="w", pady=6)
-    run_button = ttk.Button(box, text="提交 Kaggle 免费 GPU 生成", command=lambda: submit())
-    run_button.pack(anchor="e", pady=(5, 0))
+    ttk.Label(line, text="输出目录").pack(side="left")
+    ttk.Entry(line, textvariable=output).pack(side="left", fill="x", expand=True, padx=8)
+    ttk.Button(line, text="选择", command=lambda: choose_output()).pack(side="left")
+    advanced = ttk.Frame(box)
+    advanced.pack(fill="x", pady=4)
+    ttk.Label(advanced, text="随机种子").pack(side="left")
+    ttk.Entry(advanced, textvariable=seed, width=14).pack(side="left", padx=8)
+    ttk.Label(advanced, text="-1为随机；同种子不保证跨设备听感完全相同。").pack(side="left")
+    ttk.Label(box, textvariable=status, wraplength=740).pack(anchor="w", pady=8)
+    actions = ttk.Frame(box)
+    actions.pack(fill="x", pady=5)
+    preview = ttk.Button(actions, text="试听最近WAV", command=lambda: play_last())
+    preview.pack(side="left")
+    resume = ttk.Button(actions, text="恢复最近任务", command=lambda: start(True))
+    resume.pack(side="left", padx=8)
+    submit = ttk.Button(actions, text="生成克隆试听", command=lambda: start(False))
+    submit.pack(side="right")
 
-    def save_key():
-        username = user.get().strip()
-        value = token.get().strip()
-        if not username or not value:
-            messagebox.showinfo("需要账号信息", "请输入 Kaggle 用户名和 API Key。", parent=win)
+    def update_profile():
+        profile = profile_for(language.get())
+        profile_info.set(f"{profile['tempo']}倍保音高 · 柔和连贯 · 停顿保留")
+
+    def remember():
+        settings.update(username=username.get().strip(), reference_dataset=dataset.get().strip(),
+                        language=language.get(), output_dir=output.get(), seed=seed.get())
+        save_json(SETTINGS, settings)
+
+    def save_connection():
+        user = username.get().strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", user):
+            messagebox.showinfo("需要用户名", "请输入本人Kaggle用户名。", parent=win)
             return
         try:
-            import keyring
-            keyring.set_password(KEYRING_SERVICE, username, value)
-            token.set("")
-            _save_settings({"username": username, "reference_dataset": dataset.get().strip(), "language": language.get()})
-            status.set("API Key 已保存到本机 Windows 凭据库；设置文件中不保存密钥。")
-        except Exception as exc:
-            messagebox.showerror("安全保存失败", str(exc), parent=win)
+            vault = _vault()
+            if token.get().strip():
+                vault.set_password(KEYRING_SERVICE, user, token.get().strip())
+                token.set("")
+            elif not vault.get_password(KEYRING_SERVICE, user):
+                raise ValueError("请先输入本人Kaggle访问令牌。")
+            remember()
+            status.set("连接信息已保存。令牌已存入Windows凭据库。")
+        except Exception:
+            messagebox.showerror("连接未保存", "请检查用户名、访问令牌和Windows凭据库。密钥不会写入普通设置文件。", parent=win)
+
+    def import_script():
+        path = filedialog.askopenfilename(parent=win, filetypes=[("朗读稿", "*.txt *.srt"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            content = Path(path).read_text(encoding="utf-8-sig")
+            content = script_from_text(content)
+            text_box.delete("1.0", "end")
+            text_box.insert("1.0", content)
+            status.set("正文已导入；SRT编号和时间码不参与朗读，佛教术语读音仍需校对。")
+        except (OSError, UnicodeError, ValueError) as exc:
+            messagebox.showerror("导入失败", str(exc), parent=win)
 
     def choose_output():
-        chosen = filedialog.askdirectory(parent=win, initialdir=output.get() or str(Path.home()))
-        if chosen:
-            output.set(chosen)
+        value = filedialog.askdirectory(parent=win, initialdir=output.get() or str(Path.home()))
+        if value:
+            output.set(value)
 
-    def submit():
-        username = user.get().strip()
-        reference_dataset = dataset.get().strip()
-        script = text_box.get("1.0", "end").strip()
-        try:
-            seed_value = int(seed.get().strip())
-        except ValueError:
-            messagebox.showerror("种子格式", "随机种子请输入整数。", parent=win)
-            return
-        if not username or not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", reference_dataset):
-            messagebox.showerror("缺少设置", "请输入 Kaggle 用户名和私有 Dataset 标识。", parent=win)
-            return
-        if not script:
-            messagebox.showinfo("缺少讲稿", "请粘贴需要生成的完整文本。", parent=win)
+    def start(recover):
+        nonlocal running
+        if running:
             return
         try:
-            import keyring
-            api_key = keyring.get_password(KEYRING_SERVICE, username)
+            if recover:
+                manifest = Path(settings.get("last_manifest", ""))
+                job = json.loads(manifest.read_text(encoding="utf-8"))
+                user = job["username"]
+            else:
+                user = username.get().strip()
+            secret = _vault().get_password(KEYRING_SERVICE, user)
+            if not secret:
+                raise ValueError("请先为这个Kaggle用户名安全保存访问令牌。")
+            if not recover:
+                manifest = prepare_job(DATA / "kaggle_voice_jobs", user, dataset.get().strip(),
+                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get())
+                settings["last_manifest"] = str(manifest)
+                remember()
         except Exception as exc:
-            messagebox.showerror("凭据读取失败", str(exc), parent=win)
+            messagebox.showerror("还不能提交", str(exc) if isinstance(exc, (ValueError, OSError)) else "请检查连接信息和最近任务记录。", parent=win)
             return
-        if not api_key:
-            messagebox.showinfo("还没保存 API Key", "先粘贴 API Key 并点击“安全保存”。", parent=win)
-            return
-
-        _save_settings({"username": username, "reference_dataset": reference_dataset, "language": language.get()})
-        target_dir = Path(output.get()).expanduser()
-        target_dir.mkdir(parents=True, exist_ok=True)
-        job_id = uuid.uuid4().hex[:10]
-        run_button.state(["disabled"])
-        status.set("正在提交私有 Kaggle GPU 作业…")
+        running = True
+        submit.state(["disabled"])
+        resume.state(["disabled"])
+        status.set("正在恢复云端任务…" if recover else "正在准备私有GPU作业…")
 
         def work():
-            task_root = DATA / "kaggle_voice_jobs" / job_id
-            task_root.mkdir(parents=True, exist_ok=True)
-            env = os.environ.copy()
-            env["KAGGLE_USERNAME"] = username
-            env["KAGGLE_KEY"] = api_key
-            kernel_ref = None
             try:
-                kernel_ref, slug = _job_files(task_root, username, reference_dataset, script, seed_value, job_id, language.get())
-                _run_cli(["kernels", "push", "-p", str(task_root)], env, timeout=600)
-                win.after(0, lambda: status.set("GPU 作业已提交；等待 Kaggle 完成…"))
-                deadline = time.time() + 9 * 60 * 60
-                while time.time() < deadline:
-                    state = _run_cli(["kernels", "status", kernel_ref], env, timeout=180).upper()
-                    if "COMPLETE" in state:
-                        break
-                    if any(word in state for word in ("ERROR", "FAILED", "CANCELLED")):
-                        raise RuntimeError("Kaggle Notebook 执行失败：" + state[-500:])
-                    time.sleep(30)
-                else:
-                    raise TimeoutError("Kaggle 作业超过 9 小时会话上限。")
-                result_dir = task_root / "output"
-                result_dir.mkdir(exist_ok=True)
-                _run_cli(["kernels", "output", kernel_ref, "-p", str(result_dir)], env, timeout=900)
-                wavs = list(result_dir.rglob("*.wav"))
-                if not wavs:
-                    raise RuntimeError("Notebook 已结束，但没有找到 WAV 输出。")
-                final_path = target_dir / f"YangNing_VoxCPM2_1626_{job_id}.wav"
-                shutil.copy2(wavs[0], final_path)
-                win.after(0, lambda p=final_path: done(p))
+                run_job(manifest, secret, events.put)
             except Exception as exc:
-                win.after(0, lambda e=str(exc): failed(e))
-            finally:
-                if kernel_ref:
-                    try:
-                        _run_cli(["kernels", "delete", kernel_ref, "--yes"], env, timeout=180)
-                    except Exception:
-                        pass
-                shutil.rmtree(task_root, ignore_errors=True)
-                api_key = None
-                env.pop("KAGGLE_KEY", None)
-
-        def done(path):
-            run_button.state(["!disabled"])
-            app.v["audio"].set(str(path))
-            status.set(f"生成完成，已载入工作室配音栏：{path}")
-            messagebox.showinfo("WAV 已生成", f"文件已保存：\n{path}", parent=win)
-
-        def failed(error):
-            run_button.state(["!disabled"])
-            status.set("任务失败。")
-            messagebox.showerror("Kaggle 任务失败", error, parent=win)
-
+                events.put(("error", str(exc)))
         threading.Thread(target=work, daemon=True).start()
+
+    def play_last():
+        if not last_audio or not Path(last_audio).is_file():
+            messagebox.showinfo("还没有WAV", "先完成一个生成任务。", parent=win)
+            return
+        if os.name == "nt":
+            os.startfile(last_audio)
+        else:
+            subprocess.Popen(["xdg-open", last_audio])
+
+    def poll():
+        nonlocal running, last_audio
+        try:
+            while True:
+                kind, payload = events.get_nowait()
+                if kind in ("status", "warning"):
+                    status.set(payload)
+                elif kind == "done":
+                    running = False
+                    last_audio = payload["yangning_final.wav"]
+                    settings["last_audio"] = last_audio
+                    save_json(SETTINGS, settings)
+                    app.v["audio"].set(last_audio)
+                    # The WAV already has its language-specific slowdown. Prevent a second
+                    # automatic speed/pause pass when it enters the video workflow.
+                    if "speed" in app.v:
+                        app.v["speed"].set("1.0")
+                    if "trim" in app.v:
+                        app.v["trim"].set(False)
+                    if hasattr(app, "auto_cut"):
+                        app.auto_cut.set(False)
+                    status.set("试听WAV已载入配音栏。已保留停顿并将成片倍速设为1.0，避免重复变速；制作记录和原始WAV已保存。")
+                    submit.state(["!disabled"])
+                    resume.state(["!disabled"])
+                elif kind == "error":
+                    running = False
+                    submit.state(["!disabled"])
+                    resume.state(["!disabled"])
+                    status.set("任务未完成，记录已保留。可点击恢复最近任务；不会重新提交同一作业。")
+                    messagebox.showerror("云端任务未完成", payload, parent=win)
+        except queue.Empty:
+            pass
+        if win.winfo_exists():
+            win.after(150, poll)
+
+    update_profile()
+    win.after(150, poll)
