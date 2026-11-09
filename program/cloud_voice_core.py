@@ -66,7 +66,7 @@ def build_notebook(request):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
@@ -85,6 +85,13 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "job_id": job_id, "text": text, "language": language, "seed": seed, "tempo": profile["tempo"],
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
     }
+    if language == "日语" and pronunciation_enabled:
+        from japanese_pronunciation import reading_plan
+        plan = reading_plan(text, japanese_readings)
+        request["reading_text"] = plan.pop("reading_text")
+        request["pronunciation"] = plan
+        save_json(folder / "pronunciation_plan.json", plan)
+        (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
     if prosody_template:
         from voice_prosody import analyze_template
         request["prosody_reference"] = analyze_template(prosody_template)
@@ -102,6 +109,8 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
     }
+    if request.get("pronunciation"):
+        manifest["pronunciation"] = request["pronunciation"]
     if edit:
         manifest["edit"] = {**edit, "text": text}
     save_json(folder / "manifest.json", manifest)
@@ -165,6 +174,8 @@ def deliver_result(folder, manifest):
             or recipe.get("template_audio_used") is not False or recipe.get("silence_trimmed") is not False
             or recipe.get("pitch_ratio") != 1.0 or recipe.get("profile", {}).get("tempo") != manifest.get("tempo", profile_for(manifest["language"])["tempo"])):
         raise ValueError("云端制作记录不完整或与任务不一致，保留云端文件以便检查。")
+    if manifest.get("pronunciation") and recipe.get("pronunciation") != manifest["pronunciation"]:
+        raise ValueError("云端读音校正记录与任务不一致，未将音频标记为完成。")
     target = Path(manifest["output_dir"])
     target.mkdir(parents=True, exist_ok=True)
     prefix = "YangNing_VoxCPM2_1626_" + manifest["job_id"]
@@ -179,6 +190,12 @@ def deliver_result(folder, manifest):
         shutil.copy2(src, temporary)
         os.replace(temporary, dst)
         artifacts[name] = str(dst)
+    for name, suffix in (("reading_text.txt", "_reading_text.txt"), ("pronunciation_plan.json", "_pronunciation_plan.json")):
+        src = source/name if (source/name).is_file() else folder/name
+        if src.is_file():
+            dst = target/(prefix+suffix)
+            shutil.copy2(src,dst)
+            artifacts[name] = str(dst)
     return artifacts
 
 

@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
 from voice_prosody import default_template
+from japanese_pronunciation import READINGS, parse_overrides, reading_plan
 
 DATA = Path(os.environ.get("YANGNING_CLOUD_DATA_DIR", str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio")))
 SETTINGS = DATA / "kaggle_voice_settings.json"
@@ -76,6 +77,8 @@ def open_kaggle_voice(app, parent=None):
     source_audio = tk.StringVar(value=settings.get("last_audio", ""))
     source_srt = tk.StringVar()
     range_start, range_end = tk.StringVar(value="0"), tk.StringVar(value="1")
+    pronunciation_enabled = tk.BooleanVar(value=settings.get("japanese_pronunciation_enabled",True))
+    japanese_readings = settings.get("japanese_pronunciation_overrides",{})
     output = tk.StringVar(value=settings.get("output_dir", app.v["output"].get()))
     token = tk.StringVar()
     seed = tk.StringVar(value=str(settings.get("seed", 16261109)))
@@ -114,6 +117,10 @@ def open_kaggle_voice(app, parent=None):
     choices.pack(fill="x", pady=6)
     for label, value in (("生成新音频", "generate"), ("修改全文后重新生成", "full"), ("局部改读音并接回原音频", "partial")):
         ttk.Radiobutton(choices, text=label, variable=mode, value=value, command=lambda: update_mode()).pack(side="left", padx=(0,12))
+    pronunciation_row = ttk.Frame(box)
+    ttk.Checkbutton(pronunciation_row,text="日语佛教术语读音校正",variable=pronunciation_enabled).pack(side="left")
+    ttk.Button(pronunciation_row,text="预览实际朗读稿",command=lambda: preview_reading()).pack(side="left",padx=5)
+    ttk.Button(pronunciation_row,text="编辑术语读音表",command=lambda: edit_readings()).pack(side="left")
     correction = ttk.LabelFrame(box, text="原音频与替换句段", padding=8)
     correction.columnconfigure(1, weight=1)
     for row, label, variable, types in (
@@ -175,12 +182,18 @@ def open_kaggle_voice(app, parent=None):
             tempo.set(str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
             template.set(settings.get("prosody_templates", {}).get(language.get(), default_template(language.get())))
         profile_info.set("保音高 · 柔和连贯 · 停顿保留")
+        if language.get() == "日语":
+            pronunciation_row.pack(fill="x",pady=4,before=choices)
+        else:
+            pronunciation_row.pack_forget()
 
     def remember():
         settings.update(username=username.get().strip(), reference_dataset=dataset.get().strip(),
                         language=language.get(), output_dir=output.get(), seed=seed.get())
         settings.setdefault("tempo_by_language", {})[language.get()] = float(tempo.get())
         settings.setdefault("prosody_templates", {})[language.get()] = template.get()
+        settings["japanese_pronunciation_enabled"] = pronunciation_enabled.get()
+        settings["japanese_pronunciation_overrides"] = japanese_readings
         save_json(SETTINGS, settings)
 
     def save_connection():
@@ -222,6 +235,52 @@ def open_kaggle_voice(app, parent=None):
         value = filedialog.askdirectory(parent=win, initialdir=output.get() or str(Path.home()))
         if value:
             output.set(value)
+
+    def preview_reading():
+        try:
+            original = script_from_text(text_box.get("1.0","end"))
+            plan = reading_plan(original,japanese_readings) if pronunciation_enabled.get() else {"reading_text":original,"replacements":[],"needs_context_review":[]}
+        except ValueError as exc:
+            messagebox.showinfo("请先输入正文",str(exc),parent=win)
+            return
+        popup = tk.Toplevel(win)
+        popup.title("实际朗读稿 · 原文汉字不变")
+        popup.geometry("800x620")
+        note = "已替换："+"、".join(f"{x['term']}→{x['reading']}" for x in plan["replacements"])
+        if plan["needs_context_review"]:
+            note += "\n需按语境确认："+"、".join(plan["needs_context_review"])+"（可在读音表添加）"
+        ttk.Label(popup,text=note or "没有术语替换。",wraplength=760).pack(fill="x",padx=12,pady=8)
+        pane = tk.Text(popup,wrap="word")
+        pane.pack(fill="both",expand=True,padx=12,pady=8)
+        pane.insert("1.0",plan["reading_text"])
+        pane.configure(state="disabled")
+        ttk.Label(popup,text="这是送入模型的读音稿；原稿和字幕保留汉字。假名仍不能保证实际音频完全读对，生成后需试听。",wraplength=760).pack(padx=12,pady=8)
+
+    def edit_readings():
+        popup = tk.Toplevel(win)
+        popup.title("日语术语读音表")
+        popup.geometry("780x620")
+        ttk.Label(popup,text="内置项目读音（只读；部分术语存在其他合法读法）").pack(anchor="w",padx=10,pady=5)
+        fixed = tk.Text(popup,height=9,wrap="word")
+        fixed.pack(fill="both",expand=True,padx=10)
+        fixed.insert("1.0","\n".join(f"{term}={reading}" for term,reading in READINGS.items()))
+        fixed.configure(state="disabled")
+        ttk.Label(popup,text="自定义优先读音：每行填写“汉字词语=假名读音”，可新增或覆盖内置词。").pack(anchor="w",padx=10,pady=6)
+        custom = tk.Text(popup,height=9,wrap="word")
+        custom.pack(fill="both",expand=True,padx=10)
+        custom.insert("1.0","\n".join(f"{term}={reading}" for term,reading in japanese_readings.items()))
+        def save():
+            nonlocal japanese_readings
+            try:
+                value = parse_overrides(custom.get("1.0","end"))
+            except ValueError as exc:
+                messagebox.showerror("读音表未保存",str(exc),parent=popup)
+                return
+            japanese_readings = value
+            settings["japanese_pronunciation_overrides"] = value
+            save_json(SETTINGS,settings)
+            popup.destroy()
+        ttk.Button(popup,text="保存读音表",command=save).pack(pady=10)
 
     def select_cues():
         from voice_clip_edit import read_srt
@@ -276,7 +335,8 @@ def open_kaggle_voice(app, parent=None):
                         raise ValueError("局部改读音需要先选择原音频。")
                     edit = {"kind":"audio", "mode":"partial", "audio":source_audio.get(), "srt":source_srt.get(), "start":float(range_start.get()), "end":float(range_end.get())}
                 manifest = prepare_job(DATA / "kaggle_voice_jobs", user, dataset.get().strip(),
-                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get(), tempo=selected_tempo, edit=edit, prosody_template=template.get() or None)
+                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get(), tempo=selected_tempo, edit=edit, prosody_template=template.get() or None,
+                                       pronunciation_enabled=pronunciation_enabled.get(), japanese_readings=japanese_readings)
                 settings["last_manifest"] = str(manifest)
                 remember()
         except Exception as exc:

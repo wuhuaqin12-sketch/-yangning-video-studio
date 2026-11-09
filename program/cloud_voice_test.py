@@ -65,7 +65,7 @@ class WorkflowTests(unittest.TestCase):
                 recipe = {"job_id": manifest["job_id"], "status": "generated_pending_review", "language": "日语",
                           "reference_sha256": "wrong" if invalid_recipe else REFERENCE_SHA256,
                           "template_audio_used": False, "silence_trimmed": False, "pitch_ratio": 1.0,
-                          "profile": {"tempo": manifest["tempo"]}}
+                          "profile": {"tempo": manifest["tempo"]}, "pronunciation":manifest.get("pronunciation")}
                 (folder/"voice_recipe.json").write_text(json.dumps(recipe))
             if args[:2] == ["kernels", "delete"]:
                 self.assertTrue(list((self.root/"output").glob("*.wav")))
@@ -89,6 +89,33 @@ class WorkflowTests(unittest.TestCase):
     def test_subtitle_numbers_and_times_not_spoken(self):
         text = "1\n00:00:00,000 --> 00:00:01,000\n金剛経\n\n2\n00:00:01,000 --> 00:00:02,000\n32\n"
         self.assertEqual(script_from_text(text), "金剛経 32")
+
+    def test_japanese_readings_preserve_display_and_prioritize_long_terms(self):
+        from japanese_pronunciation import reading_plan
+        original = "金剛般若波羅蜜経。執着と欲界、空性。私はここへ行く。"
+        plan = reading_plan(original)
+        self.assertEqual(plan["reading_text"],"こんごうはんにゃはらみつきょう。しゅうじゃくとよくかい、くうしょう。私はここへ行く。")
+        self.assertEqual(plan["replacements"][0]["term"],"金剛般若波羅蜜経")
+        self.assertFalse(plan["display_text_changed"])
+        overridden=reading_plan("執着。聞性。",{"執着":"しゅうちゃく","聞性":"もんしょう"})
+        self.assertEqual(overridden["reading_text"],"しゅうちゃく。もんしょう。")
+        self.assertEqual(overridden["needs_context_review"],[])
+        self.assertIn("聞性",reading_plan("聞性。")["needs_context_review"])
+
+    def test_reading_plan_reaches_model_request_without_changing_srt_or_edit_text(self):
+        original="1\n00:00:00,000 --> 00:00:01,000\n金剛経と生死輪廻。\n"
+        path=prepare_job(self.root/"jp","member","owner/reference",original,"日语",1,self.root/"output",
+                         edit={"kind":"audio","mode":"partial","audio":"original.wav","start":0,"end":1})
+        namespace={}
+        notebook=json.loads((path.parent/"voxcpm2.ipynb").read_text())
+        exec("".join(notebook["cells"][2]["source"]),namespace)
+        request=namespace["REQUEST"]
+        self.assertEqual(request["text"],"金剛経と生死輪廻。")
+        self.assertEqual(request["reading_text"],"こんごうきょうとしょうじりんね。")
+        self.assertEqual(json.loads(path.read_text())["edit"]["text"],request["text"])
+        non_jp=prepare_job(self.root/"en","member","owner/reference","金剛経","英语",1,self.root/"output")
+        ns={}; nb=json.loads((non_jp.parent/"voxcpm2.ipynb").read_text());exec("".join(nb["cells"][2]["source"]),ns)
+        self.assertNotIn("reading_text",ns["REQUEST"])
 
     def test_private_job_and_custom_speed(self):
         path = self.job(tempo=0.95)
@@ -199,13 +226,16 @@ class WorkflowTests(unittest.TestCase):
         from voice_prosody import analyze_template
         template_profile = analyze_template(reference)
         with patch.dict("sys.modules",modules), patch.object(worker,"REFERENCE_SHA256",hashlib.sha256(reference.read_bytes()).hexdigest()):
-            worker.run({"job_id":"test","reference_path":str(reference),"text":"正しい日本語。","language":"日语","seed":16261109,"tempo":0.95,"output_dir":str(output),"prosody_reference":template_profile})
+            worker.run({"job_id":"test","reference_path":str(reference),"text":"金剛経。","reading_text":"こんごうきょう。","language":"日语","seed":16261109,"tempo":0.95,"output_dir":str(output),"prosody_reference":template_profile})
         self.assertIsNone(calls[0]["prompt_wav_path"])
         self.assertIsNone(calls[0]["prompt_text"])
         self.assertIn("Warm, gentle Japanese narration",calls[0]["text"])
         self.assertIn(template_profile["instruction"], calls[0]["text"])
         self.assertEqual(calls[0]["reference_wav_path"], str(reference))
         self.assertNotIn("seed", calls[0])
+        self.assertTrue(calls[0]["text"].endswith("こんごうきょう。"))
+        self.assertEqual((output/"script.txt").read_text(),"金剛経。")
+        self.assertEqual((output/"reading_text.txt").read_text(),"こんごうきょう。")
         recipe=json.loads((output/"voice_recipe.json").read_text())
         self.assertEqual(recipe["profile"]["tempo"],0.95)
         self.assertFalse(recipe["silence_trimmed"])

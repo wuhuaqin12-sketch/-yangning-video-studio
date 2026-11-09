@@ -57,6 +57,18 @@ def main():
             widgets = descendants(window)
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert "生成音频" in labels and "恢复最近任务" in labels
+            assert "预览实际朗读稿" in labels and "编辑术语读音表" in labels
+            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text") == "编辑术语读音表").invoke()
+            root.update()
+            dictionary_window = next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title() == "日语术语读音表")
+            editors = [w for w in dictionary_window.winfo_children() if isinstance(w,tk.Text)]
+            assert "金剛経=こんごうきょう" in editors[0].get("1.0","end")
+            editors[1].insert("1.0","聞性=もんしょう")
+            next(w for w in dictionary_window.winfo_children() if isinstance(w,ttk.Button) and w.cget("text") == "保存读音表").invoke()
+            root.update()
+            import json
+            saved = json.loads((Path(directory)/"kaggle_voice_settings.json").read_text(encoding="utf-8"))
+            assert saved["japanese_pronunciation_overrides"]["聞性"] == "もんしょう"
             # Audio correction is separate from ordinary generation; no video controls.
             correction = next(w for w in widgets if isinstance(w, ttk.LabelFrame) and w.cget("text") == "原音频与替换句段")
             assert correction.winfo_manager() == ""

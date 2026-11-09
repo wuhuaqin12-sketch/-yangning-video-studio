@@ -167,12 +167,16 @@ def run(request):
         if prosody.get("method") != "aggregate_acoustic_summary_to_text" or prosody.get("template_waveform_sent_to_model") is not False:
             raise ValueError("语气模板必须只提供节奏摘要，不能作为音色或续写音频。")
         profile["style"] += ", " + prosody["instruction"]
-    blocks = split_script(request["text"])
+    spoken_text = request.get("reading_text", request["text"])
+    blocks = split_script(spoken_text)
     ensure_audio_tools(profile["tempo"])
     output_dir = Path(request.get("output_dir", "/kaggle/working"))
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_path, final_path = output_dir / "yangning_raw.wav", output_dir / "yangning_final.wav"
     (output_dir / "script.txt").write_text(request["text"], encoding="utf-8")
+    (output_dir / "reading_text.txt").write_text(spoken_text, encoding="utf-8")
+    if request.get("pronunciation"):
+        (output_dir / "pronunciation_plan.json").write_text(json.dumps(request["pronunciation"],ensure_ascii=False,indent=2),encoding="utf-8")
 
     # Cache weights outside /kaggle/working so they are not saved as job outputs.
     snapshot = Path(snapshot_download(MODEL_ID, cache_dir="/tmp/yangning_hf_cache"))
@@ -217,6 +221,7 @@ def run(request):
         "language": request["language"], "reference_sha256": reference_hash,
         "template_audio_used": False, "template_prosody_alignment": "not_implemented",
         "prosody_reference": prosody,
+        "pronunciation": request.get("pronunciation"),
         "style_control": "text_instruction", "profile": profile, "seed_per_block": seeds,
         "cfg_value": 2.0, "inference_timesteps": 10, "max_len": 4096,
         "normalize": False, "model_denoise": False, "retry_badcase": False,
