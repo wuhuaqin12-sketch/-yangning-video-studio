@@ -43,7 +43,8 @@ def build(root, output, revision):
             raise ValueError("Unapproved teacher reference in private package")
         payloads[REFERENCE_FILE]=data
     payloads["preview_version.json"] = json.dumps({
-        "name": "YangNing Cloud Voice Independent Preview", "version": version_info["VERSION"], "update_sequence": version_info["UPDATE_SEQUENCE"],
+        "name": "YangNing Cloud Voice Independent Preview", "version": version_info.get("UPDATE_VERSION",version_info["VERSION"]), "update_sequence": version_info["UPDATE_SEQUENCE"],
+        "release_version":version_info["VERSION"],"cloud_voice_stable_release":True,
         "source_revision": revision, "formal_studio_release": False,
         "local_validation": "Local workflow and FFmpeg tests; Windows setup and UI checked separately in CI; prior GPU pipeline generated a verified WAV",
         "pending_validation": ["new generation controls GPU audition", "template-conditioned GPU audition", "teacher-voice and join listening"],

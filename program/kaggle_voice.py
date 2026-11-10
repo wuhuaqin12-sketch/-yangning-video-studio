@@ -9,7 +9,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from cloud_voice_core import prepare_job, prepare_resume_job, run_job, save_json, script_from_text
+from cloud_voice_core import prepare_job, prepare_resume_job, run_job, save_json, script_from_text, parse_srt_cues, JobCancelled
 from voxcpm_kaggle_worker import PROFILES, profile_for
 from voice_prosody import default_template, choose_template, TEMPLATE_MODES, restore_template_path, install_language_template
 from japanese_pronunciation import READINGS, parse_overrides, reading_plan
@@ -122,6 +122,7 @@ def open_kaggle_voice(app, parent=None):
     events = queue.Queue()
     running = False
     active_purpose="full"
+    cancel_event=threading.Event()
 
     username = tk.StringVar(value=settings.get("username", ""))
     dataset = tk.StringVar(value=settings.get("reference_dataset", ""))
@@ -328,10 +329,14 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(audition_actions,text="试听预听",command=lambda: play_path(settings.get("last_preview_audio","") )).pack(side="left",padx=6)
     ttk.Button(audition_actions,text="按句段试听 / 修改",command=lambda: segment_dialog()).pack(side="left",padx=6)
     ttk.Button(actions,text="音频微调",command=lambda: adjustment_dialog()).pack(side="left",padx=6)
+    ttk.Button(actions,text="打开音频所在文件夹",command=lambda: open_audio_folder()).pack(side="left",padx=6)
     resume = ttk.Button(actions, text="恢复最近任务", command=lambda: start(True))
     resume.pack(side="left", padx=8)
     submit = ttk.Button(box, text="生成音频", command=lambda: start(False))
     submit.pack(fill="x",pady=8)
+    cancel_button=ttk.Button(box,text="取消生成",command=lambda: cancel_generation(),state="disabled")
+    cancel_button.pack(anchor="center",pady=(0,6))
+    ttk.Button(generation_tab,text="查看停顿／超时报告",command=lambda: timing_report()).pack(anchor="w",pady=6)
 
     def options():
         return validate_options(tempo.get(),gain.get(),denoise.get(),[name for name,var in style_vars.items() if var.get()])
@@ -490,11 +495,12 @@ def open_kaggle_voice(app, parent=None):
             return
         try:
             content = Path(path).read_text(encoding="utf-8-sig")
-            content = script_from_text(content)
+            if path.lower().endswith(".srt"): parse_srt_cues(content)
+            else: content = script_from_text(content)
             text_box.delete("1.0", "end")
             text_box.insert("1.0", content)
             update_count()
-            status.set("正文已导入；SRT编号和时间码不参与朗读，佛教术语读音仍需校对。")
+            status.set("SRT已导入，将按时间轴保留停顿。" if path.lower().endswith(".srt") else "正文已导入，将按标点和换行安排停顿。")
         except (OSError, UnicodeError, ValueError) as exc:
             messagebox.showerror("导入失败", str(exc), parent=win)
 
@@ -585,11 +591,12 @@ def open_kaggle_voice(app, parent=None):
             chooser.destroy()
         ttk.Button(chooser,text="载入句段后修改正文",command=take).pack(pady=8)
 
-    def set_running(value):
+    def set_running(value,cancellable=False):
         nonlocal running
         running=value
         app._cloud_voice_busy=value
         for button in (submit,resume): button.state(["disabled"] if value else ["!disabled"])
+        cancel_button.state(["!disabled"] if value and cancellable else ["disabled"])
         if value: progressbar.start(12)
         else: progressbar.stop()
 
@@ -617,7 +624,7 @@ def open_kaggle_voice(app, parent=None):
                     if not range_start.get().strip() or not range_end.get().strip(): raise ValueError("请先选择完整句段的起止时间，或从配套SRT选段。")
                     edit={"kind":"audio","mode":"partial","audio":source_audio.get(),"srt":source_srt.get(),"start":float(range_start.get()),"end":float(range_end.get())}
                 snapshot=dict(root=DATA/"kaggle_voice_jobs",username=user,dataset=dataset.get().strip(),
-                              text=script_from_text(supplied_text if supplied_text is not None else text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
+                              text=(supplied_text if supplied_text is not None else text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
                               output_dir=output.get(),tempo=opt["tempo"],gain_db=opt["gain_db"],light_denoise=opt["denoise"],
                               edit=edit if purpose=="full" else None,purpose=purpose,template_library_dir=DATA/"templates",
                               prosody_template=template.get().strip() or None,template_mode=template_mode.get(),
@@ -633,17 +640,45 @@ def open_kaggle_voice(app, parent=None):
         except Exception as exc:
             messagebox.showerror("还不能提交",str(exc) if isinstance(exc,(ValueError,OSError)) else "请检查连接和最近任务记录。",parent=win);return
         active_purpose=purpose
-        set_running(True)
+        cancel_event.clear()
+        set_running(True,cancellable=True)
         status.set("正在恢复已有任务，不重复提交…" if recover else "正在检查正文、模板与修改范围…")
         def work():
             try:
                 record=prepare_resume_job(manifest) if continuation and selected_execution=="cloud" else (manifest if recover else prepare_job(**snapshot))
                 if not recover or continuation: events.put(("manifest",str(record)))
-                if selected_execution=="local": run_local_job(record,events.put)
-                else: run_job(record,secret,events.put,audio_only=True)
+                if selected_execution=="local": run_local_job(record,events.put,cancel_event=cancel_event)
+                else: run_job(record,secret,events.put,audio_only=True,cancel_event=cancel_event)
+            except JobCancelled as exc: events.put(("cancelled",str(exc)))
             except Exception as exc:
                 events.put(("error",str(exc)))
         threading.Thread(target=work,daemon=True).start()
+
+    def cancel_generation():
+        if not running: return
+        cancel_event.set();cancel_button.state(["disabled"]);status.set("正在取消本次生成…")
+        if execution.get()=="本机生成": threading.Thread(target=ENGINE.stop,daemon=True).start()
+
+    def open_audio_folder():
+        path=settings.get("latest_generated_wav") or last_audio or settings.get("last_preview_audio","")
+        if not path or not Path(path).is_file():
+            messagebox.showinfo("没有音频","尚未生成音频，或文件已移动。",parent=win);return
+        if os.name=="nt": subprocess.Popen(["explorer.exe","/select,",str(Path(path).resolve())])
+        else: subprocess.Popen(["xdg-open",str(Path(path).resolve().parent)])
+
+    def timing_report():
+        record=settings.get("last_manifest","")
+        try:
+            job=json.loads(Path(record).read_text(encoding="utf-8"));report=job["artifacts"]["timing_report.json"]
+            data=json.loads(Path(report).read_text(encoding="utf-8"))
+        except (OSError,ValueError,KeyError):
+            messagebox.showinfo("暂无报告","先完成一次音频生成。",parent=more);return
+        popup=tk.Toplevel(win);popup.title("停顿／超时报告");_fit_window(popup,760,520)
+        view=tk.Text(popup,wrap="word");view.pack(fill="both",expand=True,padx=10,pady=10)
+        note=f"超时句段：{data['overrun_count']}；后移句段：{data['shifted_count']}。未截断声音。\n"
+        for cue in data.get("cues",[]):
+            note+=f"第{cue['index']}条：计划 {cue['scheduled_start']:.3f}～{cue['scheduled_end']:.3f}秒；实际 {cue['actual_start']:.3f}～{cue['actual_end']:.3f}秒；超时 {cue['overflow_seconds']:.3f}秒\n"
+        view.insert("1.0",note);view.configure(state="disabled")
 
     def detect_hardware():
         def work():
@@ -905,6 +940,7 @@ def open_kaggle_voice(app, parent=None):
                 elif kind=="done":
                     set_running(False)
                     path=payload.get("edited_audio",payload.get("yangning_final.wav"))
+                    settings["latest_generated_wav"]=path
                     if not path: raise ValueError("生成记录没有音频路径。")
                     if active_purpose=="full":
                         install_result(path,"局部修改" if payload.get("edited_audio") else "云端生成")
@@ -920,6 +956,11 @@ def open_kaggle_voice(app, parent=None):
                     # Old SRT belongs to old audio; never silently reuse it after another result.
                     source_srt.set(payload.get("edited_srt",""))
                     status.set("音频已保存，可点击试听预听或试听最近WAV。" if payload.get("preview_audio") else "音频已保存，请试听确认。")
+                    if payload.get("timing_report.json"):
+                        report=json.loads(Path(payload["timing_report.json"]).read_text(encoding="utf-8"))
+                        if report["overrun_count"] or report["shifted_count"]:
+                            status.set(f"已保存：{report['overrun_count']}句超过字幕时长，{report['shifted_count']}句后移；未截断。请在更多设置查看超时报告。")
+                elif kind=="cancelled": set_running(False);status.set(payload)
                 elif kind=="adjusted":
                     set_running(False);install_result(payload["result"],"普通音频微调",payload["source"])
                     source_srt.set("")

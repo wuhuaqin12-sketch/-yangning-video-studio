@@ -57,7 +57,8 @@ try {
             $selection = Get-Content -LiteralPath $selector -Raw -Encoding UTF8 | ConvertFrom-Json
             $runtimeDir = [string]$selection.runtime
             $runtimeBase = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'YangNingCloudVoicePreview\runtimes')) + [IO.Path]::DirectorySeparatorChar
-            if (-not ([IO.Path]::GetFullPath($runtimeDir)).StartsWith($runtimeBase, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid independent runtime selection.' }
+            $bundledRuntime = [IO.Path]::GetFullPath((Join-Path $previewRoot '.preview_runtime'))
+            if (([IO.Path]::GetFullPath($runtimeDir) -ne $bundledRuntime) -and (-not ([IO.Path]::GetFullPath($runtimeDir)).StartsWith($runtimeBase, [StringComparison]::OrdinalIgnoreCase))) { throw 'Invalid independent runtime selection.' }
         } else {
             $runtimeDir = Join-Path $previewRoot '.preview_runtime'
         }

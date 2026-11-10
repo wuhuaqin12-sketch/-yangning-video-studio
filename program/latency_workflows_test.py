@@ -57,7 +57,7 @@ class LatencyTests(unittest.TestCase):
         self.assertLess(len(request["units"][0]["text"]), len(self.text))
         self.assertTrue(request["units"][0]["text"].endswith("."))
         with wave.open(manifest["artifacts"]["preview_audio"], "rb") as preview:
-            self.assertEqual(preview.readframes(preview.getnframes()), data[:72000*2])
+            self.assertEqual(preview.readframes(preview.getnframes()), data)
         with wave.open(manifest["artifacts"]["yangning_final.wav"], "rb") as whole:
             self.assertEqual(whole.readframes(whole.getnframes()), data)
 

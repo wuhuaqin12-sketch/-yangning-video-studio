@@ -8,6 +8,16 @@ from voxcpm_kaggle_worker import split_script
 
 
 def audition_text(text,language):
+    if "-->" in text:
+        from voxcpm_kaggle_worker import parse_srt_cues
+        cues=parse_srt_cues(text);base=cues[0]["start_ms"];selected=[]
+        for cue in cues:
+            if selected and cue["start_ms"]-base>=15000: break
+            selected.append(cue)
+        def stamp(ms):
+            sec,millis=divmod(ms,1000);minutes,sec=divmod(sec,60);hours,minutes=divmod(minutes,60)
+            return f"{hours:02}:{minutes:02}:{sec:02},{millis:03}"
+        return "\n\n".join(f"{c['index']}\n{stamp(c['start_ms']-base)} --> {stamp(c['end_ms']-base)}\n{c['text']}" for c in selected)
     units=split_script(text,target_chars=1)
     target=70 if language in ("日语","粤语") else 180
     result=[];size=0
@@ -47,7 +57,7 @@ def load_segments(audio):
 def export_opening_preview(audio, target):
     """Export the opening generated unit, without another TTS call or pause removal."""
     record = load_segments(audio)
-    end = record["segments"][0]["end"]
+    end = min((item["end"] for item in record["segments"]),key=lambda value:abs(value-15))
     target = Path(target)
     pending = target.with_suffix(".wav.tmp")
     with wave.open(str(audio), "rb") as source, wave.open(str(pending), "wb") as destination:

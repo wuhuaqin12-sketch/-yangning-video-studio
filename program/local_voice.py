@@ -149,11 +149,14 @@ ENGINE=LocalEngine()
 atexit.register(ENGINE.stop)
 
 
-def run_local_job(manifest_path, emit, engine=None):
+def run_local_job(manifest_path, emit, engine=None, cancel_event=None):
     from cloud_voice_core import save_json,deliver_result,result_hashes,reuse_completed_result
     from voice_review import write_review
     engine=engine or ENGINE
     path=Path(manifest_path);manifest=json.loads(path.read_text(encoding="utf-8"))
+    from cloud_voice_core import JobCancelled
+    def check_cancel():
+        if cancel_event is not None and cancel_event.is_set(): raise JobCancelled("本机生成已取消，已完成段落保留。")
     if manifest.get("execution")!="local": raise ValueError("该记录不是本机生成任务。")
     if manifest["status"]=="completed":
         if result_hashes(manifest["artifacts"])!=manifest.get("result_hashes"): raise ValueError("本机结果已移动或改变，请重新生成。")
@@ -169,6 +172,7 @@ def run_local_job(manifest_path, emit, engine=None):
         raise ValueError(f"当前可用内存不足{required}GB，请释放其他程序或改用云端。")
     download=path.parent/"download";download.mkdir(exist_ok=True)
     try:
+        check_cancel()
         if manifest.get("edit"):
             from voice_clip_edit import preflight_audio_edit
             preflight_audio_edit(manifest["edit"],path.parent/"edit_source_snapshot")
@@ -181,6 +185,7 @@ def run_local_job(manifest_path, emit, engine=None):
         save_json(request_path,request)
         manifest["status"]="local_running";save_json(path,manifest)
         engine.execute(request_path,emit)
+        check_cancel()
         manifest["artifacts"]=deliver_result(path.parent,manifest)
         if manifest.get("edit"):
             from voice_clip_edit import export_edited_audio
@@ -191,5 +196,7 @@ def run_local_job(manifest_path, emit, engine=None):
         manifest.pop("last_error",None);save_json(path,manifest)
         emit(("done",manifest["artifacts"]));return manifest["artifacts"]
     except Exception as exc:
-        manifest.update(status="local_failed",last_error=str(exc));save_json(path,manifest)
+        if cancel_event is not None and cancel_event.is_set(): exc=JobCancelled("本机生成已取消，已完成段落保留。")
+        manifest.update(status="cancelled" if isinstance(exc,JobCancelled) else "local_failed",last_error=str(exc));save_json(path,manifest)
+        if isinstance(exc,JobCancelled): raise exc
         raise

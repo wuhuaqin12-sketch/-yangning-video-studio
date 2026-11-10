@@ -79,6 +79,12 @@ jobs:
           $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
           & $previewPython .\program\cloud_voice_windows_update_test.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upgrade using the actual original 0.6 updater and acknowledge stable boot
+        shell: powershell
+        run: |
+          $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
+          & $previewPython .\program\cloud_voice_legacy_windows_test.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   local-assembly-and-package:
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -99,6 +105,8 @@ jobs:
           python -m unittest discover -s program -p teacher_reference_test.py -v
           python -m unittest discover -s program -p latency_workflows_test.py -v
           python -m unittest discover -s program -p local_voice_test.py -v
+          python -m unittest discover -s program -p srt_timing_test.py -v
+          python -m unittest discover -s program -p srt_release_test.py -v
           python -m unittest discover -s program -p voice_adjust_test.py -v
           python -m unittest discover -s program -p voice_workflows_test.py -v
           python -m unittest discover -s program -p cloud_voice_update_test.py -v

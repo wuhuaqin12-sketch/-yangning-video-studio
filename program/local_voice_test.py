@@ -49,11 +49,14 @@ class LocalTests(unittest.TestCase):
         report={"available_gb":32,"gpus":[]}
         try:
             with patch.dict("sys.modules",modules),patch.object(local,"hardware_report",return_value=report),patch.object(core,"kaggle_cli",side_effect=AssertionError("cloud must not be called")):
-                first=self.job();result=local.run_local_job(first,lambda e:None,engine=Engine())
+                first=self.job("1\n00:00:00,000 --> 00:00:00,500\n金剛経。\n\n2\n00:00:02,000 --> 00:00:03,000\n涅槃。");result=local.run_local_job(first,lambda e:None,engine=Engine())
                 local.run_local_job(self.job("涅槃。"),lambda e:None,engine=Engine())
                 local.run_local_job(first,lambda e:None,engine=Engine())
             self.assertEqual(len(loads),1)
-            self.assertEqual(len(calls),2)
+            self.assertEqual(len(calls),3)
+            report=json.loads(Path(result["timing_report.json"]).read_text())
+            self.assertEqual(report["overrun_count"],1)
+            self.assertEqual(report["shifted_count"],1)
             self.assertTrue(Path(result["preview_audio"]).is_file())
             for call in calls:
                 self.assertEqual(call["reference_wav_path"],str(self.ref))

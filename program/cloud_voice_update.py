@@ -96,7 +96,7 @@ def check_update(root,fetcher=fetch_bytes):
     sequence=int(current.get("update_sequence",0))
     if candidate["sequence"]==sequence and candidate["version"]!=current.get("version"):
         raise ValueError("更新渠道版本记录冲突，请稍后重试。")
-    return {"available":candidate["sequence"]>sequence,"current":current.get("version","未知"),"update":candidate}
+    return {"available":candidate["sequence"]>sequence,"current":current.get("release_version",current.get("version","未知")),"update":candidate}
 
 
 def validate_payload(data,descriptor):
@@ -142,9 +142,14 @@ def prepare_update(root,descriptor,fetcher=fetch_bytes,prepare_environment=True)
     runtime=data_root()/"runtimes"/tx.name
     if prepare_environment:
         if os.name!="nt": raise RuntimeError("自动安装目前用于Windows版本。")
-        with (tx/"setup.log").open("wb") as log:
-            result=subprocess.run(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(stage/"launch_cloud_voice_preview.ps1"),"-SetupOnly","-RuntimeDir",str(runtime)],stdout=log,stderr=subprocess.STDOUT,timeout=1200)
-        if result.returncode: raise RuntimeError("新版依赖准备失败，原版本未更改。请查看更新检查窗口的日志路径："+str(tx/"setup.log"))
+        existing=Path(sys.executable).parent.parent
+        unchanged=(root/"preview_requirements.txt").is_file() and (root/"preview_requirements.txt").read_bytes()==decoded.get("preview_requirements.txt")
+        if unchanged and (existing/"pyvenv.cfg").is_file():
+            runtime=existing
+        else:
+            with (tx/"setup.log").open("wb") as log:
+                result=subprocess.run(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(stage/"launch_cloud_voice_preview.ps1"),"-SetupOnly","-RuntimeDir",str(runtime)],stdout=log,stderr=subprocess.STDOUT,timeout=1200)
+            if result.returncode: raise RuntimeError("新版依赖准备失败，原版本未更改。请查看更新检查窗口的日志路径："+str(tx/"setup.log"))
     plan={"schema":1,"root":str(root),"tx":str(tx.resolve()),"stage":str(stage.resolve()),"runtime":str(runtime.resolve()),
           "files":{name:sha(content) for name,content in decoded.items()},"from_version":current.get("version"),
           "to_version":descriptor["version"],"sequence":descriptor["sequence"],"status":"prepared"}
@@ -361,7 +366,7 @@ def open_update_window(app,install_root=None):
                 busy=False;bar.stop();check_button.state(["!disabled"]);rollback_button.state(["!disabled"])
                 if kind=="checked":
                     value=payload["update"];candidate=value if payload["available"] else None
-                    state.set(f"当前：{payload['current']}；发现新版：{value['version']}" if candidate else f"已是当前渠道最新版：{payload['current']}")
+                    state.set(f"当前：{payload['current']}；发现新版：{value.get('release_version',value['version'])}" if candidate else f"已是当前渠道最新版：{payload['current']}")
                     notes.configure(state="normal");notes.delete("1.0","end");notes.insert("1.0",value.get("notes","") or "暂无更新说明。");notes.configure(state="disabled")
                     if candidate: install_button.state(["!disabled"])
                 elif kind=="ready":

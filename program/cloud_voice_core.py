@@ -13,13 +13,20 @@ import uuid
 import wave
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from voxcpm_kaggle_worker import PACKAGE_VERSION, REFERENCE_SHA256, profile_for, split_script
+from voxcpm_kaggle_worker import PACKAGE_VERSION, REFERENCE_SHA256, profile_for, split_script, parse_srt_cues, text_pause_units
 
 _ACTIVE = set()
 _ACTIVE_LOCK = threading.Lock()
+
+
+class JobCancelled(RuntimeError): pass
+
+
+def japan_stamp():
+    return datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d_%H%M%S_JST")
 
 
 def save_json(path, data):
@@ -34,16 +41,7 @@ def script_from_text(text):
     text = text.lstrip("\ufeff").strip()
     timing = re.compile(r"^\s*\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.]\d{3}.*$")
     if any(timing.match(line) for line in text.splitlines()):
-        cues = []
-        for block in re.split(r"\n\s*\n", text):
-            lines = block.strip().splitlines()
-            mark = next((i for i, line in enumerate(lines) if timing.match(line)), None)
-            if mark is None:
-                raise ValueError("SRT中存在没有时间码的段落，请先检查格式。")
-            spoken = " ".join(re.sub(r"<[^>]+>", "", line).strip() for line in lines[mark + 1:])
-            if spoken:
-                cues.append(spoken)
-        text = " ".join(cues)
+        text = " ".join(cue["text"] for cue in parse_srt_cues(text))
     if not text:
         raise ValueError("请输入朗读正文，或导入TXT/SRT。")
     return text
@@ -136,6 +134,8 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     options = validate_options(profile["tempo"],gain_db,light_denoise,style_options)
     if not str(output_dir).strip():
         raise ValueError("请选择输出目录。")
+    original_source=text
+    srt_cues=parse_srt_cues(text) if "-->" in text else None
     text = script_from_text(text)
     requested_seed=int(seed)
     seed = int(seed)
@@ -155,6 +155,9 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
         "postprocess": {"gain_db": options["gain_db"], "light_denoise": options["denoise"]},
     }
+    if srt_cues:
+        request["srt_cues"]=srt_cues
+        (folder/"source.srt").write_text(original_source,encoding="utf-8")
     if execution == "local":
         request.update(execution="local", local_device=local_device, reference_path=str(local_reference))
     if language == "日语" and pronunciation_enabled:
@@ -164,15 +167,11 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         request["pronunciation"] = plan
         save_json(folder / "pronunciation_plan.json", plan)
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
-    original_units=split_script(text,target_chars=240)
+    planned=[dict(text=c["text"],pause_after=0) for c in srt_cues] if srt_cues else text_pause_units(text)
+    original_units=[item["text"] for item in planned]
     if include_preview and purpose == "full" and not edit:
-        from voice_workflows import audition_text
-        sentences = split_script(text, target_chars=1)
-        opening = audition_text(text, language)
-        count = len(split_script(opening, target_chars=1))
-        original_units = [opening] + (split_script(" ".join(sentences[count:]), target_chars=240) if count < len(sentences) else [])
         request["include_preview"] = True
-    request["units"]=[{"text":unit,"reading_text":reading_plan(unit,japanese_readings)["reading_text"] if language=="日语" and pronunciation_enabled else unit} for unit in original_units]
+    request["units"]=[{"text":unit,"reading_text":reading_plan(unit,japanese_readings)["reading_text"] if language=="日语" and pronunciation_enabled else unit,"pause_after":planned[index]["pause_after"]} for index,unit in enumerate(original_units)]
     split_script(request.get("reading_text",text))  # Reject oversized single sentences before paying GPU startup time.
     if template_mode is not None:
         from voice_prosody import choose_template
@@ -203,6 +202,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "template_selection": request.get("template_selection"), "purpose":purpose,
         "include_preview": request.get("include_preview", False),
         "execution": execution,
+        "output_stamp": japan_stamp(),
     }
     if request.get("pronunciation"):
         manifest["pronunciation"] = request["pronunciation"]
@@ -271,7 +271,7 @@ def reuse_completed_result(manifest_path, manifest, emit):
     emit(("status", "正文和设置相同，正在复用已校验音频，无需排队…"))
     download = manifest_path.parent / "download"
     download.mkdir(exist_ok=True)
-    for name in ("yangning_final.wav", "yangning_raw.wav", "script.txt", "reading_text.txt", "pronunciation_plan.json"):
+    for name in ("yangning_final.wav", "yangning_raw.wav", "script.txt", "reading_text.txt", "pronunciation_plan.json", "timing_report.json", "source.srt"):
         if name in old["artifacts"]:
             shutil.copy2(old["artifacts"][name], download / name)
     if "segments" in old["artifacts"]:
@@ -383,7 +383,7 @@ def deliver_result(folder, manifest):
         raise ValueError("缺少自定义音量和降噪的执行记录。")
     target = Path(manifest["output_dir"])
     target.mkdir(parents=True, exist_ok=True)
-    prefix = "YangNing_TeacherVoice_" + manifest["job_id"]
+    prefix = "YangNing_TeacherVoice_" + manifest.setdefault("export_stamp",japan_stamp()) + "_" + manifest["job_id"]
     artifacts = {}
     for name, suffix in (("yangning_final.wav", ".wav"), ("yangning_raw.wav", "_raw.wav"),
                          ("voice_recipe.json", "_recipe.json"), ("script.txt", "_script.txt")):
@@ -395,7 +395,7 @@ def deliver_result(folder, manifest):
         shutil.copy2(src, temporary)
         os.replace(temporary, dst)
         artifacts[name] = str(dst)
-    for name, suffix in (("reading_text.txt", "_reading_text.txt"), ("pronunciation_plan.json", "_pronunciation_plan.json")):
+    for name, suffix in (("reading_text.txt", "_reading_text.txt"), ("pronunciation_plan.json", "_pronunciation_plan.json"),("timing_report.json","_timing_report.json"),("source.srt","_source.srt")):
         src = source/name if (source/name).is_file() else folder/name
         if src.is_file():
             dst = target/(prefix+suffix)
@@ -441,7 +441,7 @@ def prepare_resume_job(manifest_path):
     return folder/"manifest.json"
 
 
-def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60, audio_only=False):
+def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60, audio_only=False, cancel_event=None):
     manifest_path = Path(manifest_path)
     lock_key = str(manifest_path.resolve())
     with _ACTIVE_LOCK:
@@ -449,15 +449,28 @@ def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeo
             raise RuntimeError("这个任务正在本机后台处理中，请勿重复提交。")
         _ACTIVE.add(lock_key)
     try:
-        return _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only)
+        return _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only, cancel_event)
     finally:
         with _ACTIVE_LOCK:
             _ACTIVE.discard(lock_key)
 
 
-def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only=False):
+def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only=False, cancel_event=None):
     folder = manifest_path.parent
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    def check_cancel(env=None):
+        if cancel_event is None or not cancel_event.is_set(): return
+        if manifest["status"] in ("submitted","submitting"):
+            try:
+                cli(["kernels","delete",manifest["kernel"],"--yes"],env,timeout=180)
+                manifest["cleanup_status"]="delete_requested"
+            except Exception as exc:
+                manifest.update(status="cancel_pending",last_error="取消请求尚未确认："+redact(exc,secret));save_json(manifest_path,manifest)
+                raise RuntimeError(manifest["last_error"])
+        manifest["status"]="cancelled";save_json(manifest_path,manifest)
+        raise JobCancelled("已取消本次生成；原有音频和本机任务记录保留。" if env is None else "已提交本次云端作业的取消／删除请求；原有音频和数据集保留。")
+    if manifest["status"]=="prepared": check_cancel()
+    if manifest["status"] in ("cancelled","cancel_pending"): raise JobCancelled("任务已取消或取消待确认，不会重复提交。")
     if manifest.get("cloud_submitted") is False and manifest["status"] == "completed":
         if result_hashes(manifest["artifacts"]) != manifest.get("result_hashes"):
             raise ValueError("复用的音频已移动或改变，请重新生成；不会自动提交云端任务。")
@@ -472,6 +485,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
     env = auth_env(manifest["username"], secret, config_dir)
     kernel = manifest["kernel"]
     try:
+        check_cancel(env)
         if manifest["status"] == "prepared":
             if manifest.get("edit", {}).get("kind") == "audio":
                 from voice_clip_edit import preflight_audio_edit
@@ -482,6 +496,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             reference_bytes = ensure_teacher_reference(folder, manifest["dataset"], env, cli, emit)
             request = json.loads((folder / "request.json").read_text(encoding="utf-8"))
             save_json(folder / "voxcpm2.ipynb", build_notebook(request, reference_bytes))
+            check_cancel(env)
             # Save the identity before submission: a timed-out push may still start remotely.
             manifest["status"] = "submitting"
             save_json(manifest_path, manifest)
@@ -489,6 +504,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             cli(["kernels", "push", "-p", str(folder)], env, timeout=600)
             manifest["status"] = "submitted"
             save_json(manifest_path, manifest)
+            check_cancel(env)
         if manifest["status"] == "remote_failed":
             raise RuntimeError("最近的云端任务已失败或取消，恢复不会重复提交。请在更多设置查看日志，修正后点击生成音频提交新任务。")
         if manifest["status"] not in ("audio_ready", "completed"):
@@ -496,6 +512,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             next_log = 0
             last_stage = ""
             while time.monotonic() < deadline:
+                check_cancel(env)
                 state = state_from_output(cli(["kernels", "status", kernel], env, timeout=180))
                 if state in {"complete", "completed"}:
                     break
@@ -606,6 +623,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
     except Exception as exc:
         manifest["last_error"] = redact(exc, secret)
         save_json(manifest_path, manifest)
+        if isinstance(exc,JobCancelled): raise
         raise RuntimeError(manifest["last_error"]) from None
     finally:
         for key in ("KAGGLE_KEY", "KAGGLE_API_TOKEN"):

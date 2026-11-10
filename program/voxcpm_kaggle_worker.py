@@ -48,6 +48,91 @@ PROFILES = {
 }
 
 
+def parse_srt_cues(source):
+    """Strict numbered SRT parser; preserve IDs and integer millisecond timing."""
+    source=source.lstrip("\ufeff").replace("\r\n","\n").replace("\r","\n").strip()
+    pattern=re.compile(r"^(\d{2,}):([0-5]\d):([0-5]\d)[,.](\d{3})\s*-->\s*(\d{2,}):([0-5]\d):([0-5]\d)[,.](\d{3})(?:\s+.*)?$")
+    cues=[];seen=set()
+    for block in re.split(r"\n[ \t]*\n",source):
+        lines=block.strip().splitlines()
+        if len(lines)<3 or not lines[0].strip().isdigit(): raise ValueError("SRT每段必须包含字幕编号、时间码和正文。")
+        number=int(lines[0].strip());match=pattern.fullmatch(lines[1].strip())
+        if not match or number in seen: raise ValueError(f"SRT第{number}条时间码无效或编号重复。")
+        values=[int(v) for v in match.groups()]
+        start=(values[0]*3600+values[1]*60+values[2])*1000+values[3]
+        end=(values[4]*3600+values[5]*60+values[6])*1000+values[7]
+        if end<=start or (cues and start<cues[-1]["end_ms"]): raise ValueError(f"SRT第{number}条结束时间无效或与前条重叠。")
+        if end>6*3600*1000: raise ValueError("单次SRT时间轴上限6小时，请拆分文件；不会截断时间轴。")
+        text=" ".join(re.sub(r"<[^>]+>","",line).strip() for line in lines[2:]).strip()
+        if not text: raise ValueError(f"SRT第{number}条没有可朗读文本。")
+        cues.append(dict(index=number,start_ms=start,end_ms=end,start=start/1000,end=end/1000,text=text))
+        seen.add(number)
+    if not cues: raise ValueError("SRT没有字幕。")
+    return cues
+
+
+def text_pause_units(text):
+    """Retain punctuation, decimals and abbreviations; pause at clause/sentence boundaries."""
+    result=[];start=0
+    for mark in re.finditer(r'[，,、。！？!?；;]+[」』”\"]*|\.(?=\s|$)[”\"]*|\n+',text):
+        prefix=text[start:mark.end()].strip();symbol=mark.group()
+        if symbol.startswith(",") and mark.start()>0 and mark.end()<len(text) and text[mark.start()-1].isdigit() and text[mark.end()].isdigit(): continue
+        if symbol.startswith(".") and re.search(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|e\.g|i\.e)\.$",prefix,re.I): continue
+        if symbol[0] in ",，、" and len(prefix)<8: continue
+        pause=.65 if "\n" in symbol else (.18 if symbol[0] in ",，、" else (.32 if symbol[0] in ";；" else .45))
+        if prefix: result.append(dict(text=prefix,pause_after=pause))
+        elif result: result[-1]["pause_after"]=max(result[-1]["pause_after"],pause)
+        start=mark.end()
+    if text[start:].strip(): result.append(dict(text=text[start:].strip(),pause_after=0))
+    if not result: raise ValueError("朗读正文为空。")
+    return result
+
+
+def compose_timed_wav(request,pieces,output_dir,raw_path,rate,gain):
+    """Stream complete speech into an absolute SRT schedule; never truncate/overlap it."""
+    import numpy as np
+    cues=request.get("srt_cues");units=request.get("units",[])
+    cursor=0;segments=[];reports=[];previous_tail=0
+    def silence(out,frames):
+        while frames>0:
+            count=min(frames,rate);out.writeframes(b"\0\0"*count);frames-=count
+    def edge(values):
+        step=max(1,round(rate*.02));count=0
+        for pos in range(0,min(len(values),rate*5),step):
+            block=values[pos:pos+step]
+            if np.sqrt(np.mean(block.astype(np.float64)**2))>.0015: break
+            count+=len(block)
+        return count
+    with wave.open(str(raw_path),"wb") as out:
+        out.setparams((1,2,rate,0,"NONE","not compressed"))
+        for index,piece in enumerate(pieces):
+            with np.load(output_dir/piece["file"],allow_pickle=False) as data: values=np.asarray(data["audio"]*gain,dtype=np.float32)
+            if cues and request.get("tempo",1)!=1:
+                source=output_dir/"cue_speed_raw.wav";target=output_dir/"cue_speed_final.wav"
+                with wave.open(str(source),"wb") as wav:
+                    wav.setparams((1,2,rate,0,"NONE","not compressed"));wav.writeframes(np.rint(values*32768).clip(-32768,32767).astype("<i2").tobytes())
+                process_audio(source,target,request["tempo"],0,False)
+                with wave.open(str(target),"rb") as wav: values=np.frombuffer(wav.readframes(wav.getnframes()),dtype="<i2").astype(np.float32)/32768
+                source.unlink();target.unlink()
+            if cues:
+                cue=cues[index];gap=0 if index==0 else round((cue["start_ms"]-cues[index-1]["end_ms"])*rate/1000)
+                begin=max(round(cue["start_ms"]*rate/1000),cursor+gap)
+            else:
+                wanted=round(units[index-1].get("pause_after",0)*rate) if index else 0
+                begin=cursor+max(0,wanted-previous_tail-edge(values))
+            if begin+len(values)>6*3600*rate: raise ValueError("实际音频超过6小时，请拆分；所有已生成段落仍保留。")
+            silence(out,begin-cursor);out.writeframes(np.rint(values*32768).clip(-32768,32767).astype("<i2").tobytes())
+            cursor=begin+len(values);previous_tail=edge(values[::-1])
+            segments.append(dict(start=begin/rate,end=cursor/rate,text=units[index]["text"]))
+            if cues:
+                allocated=(cue["end_ms"]-cue["start_ms"])/1000
+                reports.append(dict(index=cue["index"],scheduled_start=cue["start"],scheduled_end=cue["end"],actual_start=begin/rate,actual_end=cursor/rate,
+                    speech_seconds=len(values)/rate,overflow_seconds=max(0,len(values)/rate-allocated),shift_seconds=max(0,begin/rate-cue["start"])))
+        if cues: silence(out,max(0,round(cues[-1]["end_ms"]*rate/1000)-cursor))
+    return segments,dict(mode="srt_absolute_no_truncation" if cues else "txt_minimum_punctuation_pauses",cues=reports,
+        overrun_count=sum(c["overflow_seconds"]>.01 for c in reports),shifted_count=sum(c["shift_seconds"]>.01 for c in reports),silence_trimmed=False)
+
+
 def profile_for(language, tempo=None):
     if language not in PROFILES:
         raise ValueError("请选择支持的配音语言。")
@@ -155,6 +240,7 @@ def request_fingerprint(request):
     data.update(reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
     if request.get("execution") == "local":
         data.update(execution="local", device=request.get("local_device", "auto"))
+    if request.get("srt_cues"): data["srt_cues"]=request["srt_cues"]
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
 
@@ -324,12 +410,10 @@ def run(request, local_context=None):
         print(f"已生成 {index+1}/{len(blocks)} 个完整语义段",flush=True)
     peak=max(peaks);gain=.99/peak if peak>=1 else 1.0
     # Stream one semantic unit at a time; preserve all samples and pauses.
-    with wave.open(str(raw_path),"wb") as destination:
-        destination.setparams((1,2,rate,0,"NONE","not compressed"))
-        for piece in checkpoint["pieces"]:
-            with np.load(output_dir/piece["file"],allow_pickle=False) as data:
-                values=np.rint(data["audio"]*gain*32768).clip(-32768,32767).astype("<i2")
-                destination.writeframes(values.tobytes())
+    if not request.get("units"):
+        request["units"]=[dict(text=block,reading_text=block,pause_after=0) for block in blocks]
+    if request.get("srt_cues") and len(request["srt_cues"])!=len(blocks): raise ValueError("SRT字幕数量与生成段落不一致。")
+    segments,timing_report=compose_timed_wav(request,checkpoint["pieces"],output_dir,raw_path,rate,gain)
     recipe = {
         "job_id": request["job_id"], "purpose":request.get("purpose","full"), "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
         "language": request["language"], "reference_sha256": reference_hash,
@@ -353,14 +437,13 @@ def run(request, local_context=None):
         gain_db=float(post.get("gain_db",0.0))
         if not math.isfinite(gain_db) or not -12 <= gain_db <= 6:
             raise ValueError("音量设置无效。")
-        recipe.update(process_audio(raw_path, final_path, profile["tempo"],gain_db,post.get("light_denoise",True)))
-        position=0
-        segments=[]
-        scale=recipe["final_seconds"]/(sum(lengths)/rate)
-        units=request.get("units") or [{"text":block,"reading_text":block} for block in blocks]
-        for unit,length in zip(units,lengths):
-            segments.append({"start":position/rate*scale,"end":(position+length)/rate*scale,"text":unit["text"]})
-            position+=length
+        recipe.update(process_audio(raw_path, final_path, 1.0 if request.get("srt_cues") else profile["tempo"],gain_db,post.get("light_denoise",True)))
+        scale=recipe["final_seconds"]/recipe["raw_seconds"]
+        segments=[{**item,"start":item["start"]*scale,"end":item["end"]*scale} for item in segments]
+        atomic_json(output_dir/"timing_report.json",timing_report)
+        recipe["timing_report"]=timing_report
+        recipe["srt_cues"]=request.get("srt_cues")
+        recipe["tempo_processing"]="per_cue_before_timeline" if request.get("srt_cues") else "whole_audio"
         atomic_json(output_dir/"segments.json",{"audio_sha256":hashlib.sha256(final_path.read_bytes()).hexdigest(),
                     "timing":"generated_units" if profile["tempo"]==1 else "estimated_after_tempo", "segments":segments})
         recipe["resumed_segments"]=len(available)

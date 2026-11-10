@@ -21,7 +21,7 @@ def payload(root,revision,destination):
             files={name:z.read(prefix+name) for name in tuple(FILES)+('preview_version.json',) if prefix+name in z.namelist()}
     version=json.loads(files['preview_version.json']);version['prosody_templates_bundled']=[];version['reference_audio_bundled']=False
     files['preview_version.json']=json.dumps(version,ensure_ascii=False,indent=2).encode()
-    value={'product':PRODUCT,'sequence':version['update_sequence'],'version':version['version'],'source_revision':revision,
+    value={'product':PRODUCT,'sequence':version['update_sequence'],'version':version['version'],'release_version':version['release_version'],'source_revision':revision,
            'files':{name:{'sha256':hashlib.sha256(content).hexdigest(),'content':base64.b64encode(content).decode()} for name,content in sorted(files.items())}}
     data=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
     target=destination/'cloud_voice_payload.json';target.write_bytes(data)
@@ -32,7 +32,7 @@ def descriptor(payload_path,payload_commit,notes):
     data=Path(payload_path).read_bytes();value=json.loads(data)
     result={key:value[key] for key in ('product','sequence','version','source_revision')}
     result.update(schema=1,payload_url=PREFIX+payload_commit+'/cloud_voice_payload.json',payload_size=len(data),
-                  payload_sha256=hashlib.sha256(data).hexdigest(),notes=notes)
+                  payload_sha256=hashlib.sha256(data).hexdigest(),notes=notes,release_version=value.get('release_version',value['version']))
     return validate_descriptor(result)
 
 

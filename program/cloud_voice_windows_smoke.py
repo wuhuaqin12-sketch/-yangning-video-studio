@@ -196,7 +196,7 @@ def main():
             script=next(w for w in widgets if isinstance(w,tk.Text) and on_main(w))
             script.delete("1.0","end");script.insert("1.0","金剛経。")
             routed=[]
-            def local_run(record,emit):
+            def local_run(record,emit,**kwargs):
                 routed.append(json.loads(Path(record).read_text(encoding="utf-8")))
                 emit(("local_ready","Local routing checked"))
             with patch.object(local_voice,"REFERENCE_SHA256",hashlib.sha256(reference.read_bytes()).hexdigest()),patch.object(kaggle_voice,"_vault",side_effect=AssertionError("Local must not request Kaggle credentials")),patch.object(kaggle_voice,"run_local_job",side_effect=local_run),patch.object(kaggle_voice.messagebox,"showerror",side_effect=AssertionError("Unexpected local submission dialog")):
