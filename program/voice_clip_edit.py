@@ -234,6 +234,8 @@ def preflight_audio_edit(edit, cache_dir):
     cache = Path(cache_dir)
     cache.mkdir(parents=True, exist_ok=True)
     snapshot = cache / "original_audio.wav"
+    if edit.get("_audio_fingerprint") and edit["_audio_fingerprint"]!=_fingerprint(source):
+        raise ValueError("原音频在断点任务后已变化，不能将旧断点接入新版本，请新建局部修改任务。")
     before = _fingerprint(source)
     command([tool("ffmpeg"), "-v", "error", "-y", "-i", str(source), "-vn", "-map", "0:a:0",
              "-ar", str(RATE), "-ac", "1", "-c:a", "pcm_s16le", str(snapshot)])

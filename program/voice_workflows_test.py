@@ -116,5 +116,9 @@ class NewWorkflowTests(unittest.TestCase):
             mapped=load_segments(result['edited_audio'])
             self.assertEqual([item['text'] for item in mapped['segments']],['A','New B','C'])
             self.assertTrue(source.is_file())
+            # A retry must not silently snapshot a changed source after interruption.
+            source.write_bytes(source.read_bytes()+b"changed")
+            with self.assertRaisesRegex(ValueError,"原音频在断点任务后已变化"):
+                preflight_audio_edit(edit,root/'retry_snapshot')
 
 if __name__=='__main__': unittest.main()
