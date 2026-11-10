@@ -117,9 +117,10 @@ class LocalEngine:
             for stream in (process.stdin,process.stdout):
                 if stream: stream.close()
 
-    def execute(self, request_file, emit):
+    def execute(self, request_file, emit, cancel_event=None):
         if not self.lock.acquire(blocking=False): raise RuntimeError("本机模型正在处理其他任务。")
         try:
+            if cancel_event is not None and cancel_event.is_set(): raise RuntimeError("本机生成已取消。")
             if not python_path().is_file() or not (local_root()/"ready.json").is_file():
                 raise ValueError("请先在更多设置安装本机模型环境。")
             if self.process is None or self.process.poll() is not None:
@@ -128,6 +129,8 @@ class LocalEngine:
                     stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding="utf-8",errors="replace",bufsize=1,env=env,
                     creationflags=0x08000000 if os.name=="nt" else 0)
             process=self.process
+            if cancel_event is not None and cancel_event.is_set():
+                self.stop();raise RuntimeError("本机生成已取消。")
             process.stdin.write(json.dumps({"request":str(Path(request_file).resolve())})+"\n");process.stdin.flush()
             from cloud_voice_core import stage_from_log
             log=Path(request_file).with_name("local_engine.log")
@@ -149,7 +152,7 @@ ENGINE=LocalEngine()
 atexit.register(ENGINE.stop)
 
 
-def run_local_job(manifest_path, emit, engine=None):
+def run_local_job(manifest_path, emit, engine=None, cancel_event=None):
     from cloud_voice_core import save_json,deliver_result,result_hashes,reuse_completed_result
     from voice_review import write_review
     engine=engine or ENGINE
@@ -180,7 +183,9 @@ def run_local_job(manifest_path, emit, engine=None):
         request["output_dir"]=str(download.resolve())
         save_json(request_path,request)
         manifest["status"]="local_running";save_json(path,manifest)
-        engine.execute(request_path,emit)
+        if cancel_event is None: engine.execute(request_path,emit)
+        else: engine.execute(request_path,emit,cancel_event=cancel_event)
+        if cancel_event is not None and cancel_event.is_set(): raise RuntimeError("本机生成已取消，原有结果保留。")
         manifest["artifacts"]=deliver_result(path.parent,manifest)
         if manifest.get("edit"):
             from voice_clip_edit import export_edited_audio

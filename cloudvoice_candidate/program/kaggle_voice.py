@@ -255,7 +255,7 @@ def open_kaggle_voice(app, parent=None):
     template_entry=ttk.Entry(template_row,textvariable=template)
     template_entry.grid(row=1,column=0,sticky="ew",pady=5)
     ttk.Button(template_row,text="选择模板",command=lambda: select_manual_template()).grid(row=1,column=1,padx=5)
-    ttk.Button(template_row,text="清除选择",command=lambda: clear_template()).grid(row=1,column=2,padx=5)
+    ttk.Button(template_row,text="清除模板",command=lambda: clear_template()).grid(row=1,column=2,padx=5)
     ttk.Label(template_row,textvariable=template_status,wraplength=650).grid(row=2,column=0,columnspan=2,sticky="w",pady=6)
     ttk.Button(language_tab,text="加入本语言模板库（以后自动选择）",command=lambda: register_template()).pack(anchor="w",pady=6)
     ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
@@ -334,6 +334,7 @@ def open_kaggle_voice(app, parent=None):
     resume.pack(side="left", padx=8)
     submit = ttk.Button(box, text="生成音频", command=lambda: start(False))
     submit.pack(fill="x",pady=8)
+    ttk.Button(box,text="取消生成",command=lambda: cancel_generation()).pack(pady=2)
 
     def options():
         return validate_options(tempo.get(),gain.get(),denoise.get(),[name for name,var in style_vars.items() if var.get()])
@@ -598,6 +599,14 @@ def open_kaggle_voice(app, parent=None):
         if value: progressbar.start(12)
         else: progressbar.stop()
 
+    cancel_event=threading.Event()
+
+    def cancel_generation():
+        if not running: return
+        cancel_event.set()
+        status.set("正在取消本机生成／停止云端等待；已有音频和任务记录保留…")
+        threading.Thread(target=ENGINE.stop,daemon=True).start()
+
     def start(recover, purpose="full", supplied_text=None, continuation=False):
         nonlocal active_purpose
         if running or getattr(app,"_cloud_update_busy",False): return
@@ -638,16 +647,20 @@ def open_kaggle_voice(app, parent=None):
         except Exception as exc:
             messagebox.showerror("还不能提交",str(exc) if isinstance(exc,(ValueError,OSError)) else "请检查连接和最近任务记录。",parent=win);return
         active_purpose=purpose
+        cancel_event.clear()
         set_running(True)
         status.set("正在恢复已有任务，不重复提交…" if recover else "正在检查正文、模板与修改范围…")
         def work():
             try:
                 record=prepare_resume_job(manifest) if continuation and selected_execution=="cloud" else (manifest if recover else prepare_job(**snapshot))
                 if not recover or continuation: events.put(("manifest",str(record)))
-                if selected_execution=="local": run_local_job(record,events.put)
-                else: run_job(record,secret,events.put,audio_only=True)
+                if cancel_event.is_set(): raise RuntimeError("已取消，未开始生成。")
+                if selected_execution=="local": run_local_job(record,events.put,cancel_event=cancel_event)
+                else: run_job(record,secret,events.put,audio_only=True,cancel_event=cancel_event)
             except Exception as exc:
-                events.put(("error",str(exc)))
+                if cancel_event.is_set():
+                    events.put(("cancelled", "本机生成已取消，已有记录保留。" if selected_execution=="local" else "已停止等待云端任务；Kaggle作业可能仍运行，可恢复结果，或在Kaggle任务页面点击停止。"))
+                else: events.put(("error",str(exc)))
         threading.Thread(target=work,daemon=True).start()
 
     def detect_hardware():
@@ -920,6 +933,7 @@ def open_kaggle_voice(app, parent=None):
             while True:
                 kind,payload=events.get_nowait()
                 if kind in ("status","warning"): status.set(payload)
+                elif kind=="cancelled": set_running(False);status.set(payload)
                 elif kind=="hardware": hardware_info.set(payload)
                 elif kind=="local_ready": set_running(False);status.set(payload)
                 elif kind=="manifest":

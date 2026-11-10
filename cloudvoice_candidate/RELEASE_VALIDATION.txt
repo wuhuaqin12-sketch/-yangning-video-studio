@@ -1,0 +1,5 @@
+CloudVoice 0.7.0
+51 automated tests PASS: original workflows, real FFmpeg with synthetic model audio, SRT parsing, absolute timing, overflow preservation, TXT pauses, data preservation, update failure rollback, and pre-submission cancellation.
+Live Windows installer/restart and real local/Kaggle model generation not verified.
+Six-language quality requires listening. Remote cancellation stops waiting; Kaggle session may continue.
+Public release excludes teacher reference audio. Existing reference, settings, templates, history, and model cache are preserved by managed-file updater.

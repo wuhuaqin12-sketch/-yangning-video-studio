@@ -80,7 +80,7 @@ def main():
     from cloud_voice_version import VERSION
 
     root = tk.Tk()
-    root.title("杨宁语音克隆 · 独立试用")
+    root.title("杨宁语音克隆 · CloudVoice")
     root.geometry("700x370")
     output = Path.home() / "Videos" / "YangNingCloudPreviewOutputs"
     app = SimpleNamespace(root=root, v={

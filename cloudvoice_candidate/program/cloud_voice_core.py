@@ -472,7 +472,18 @@ def prepare_resume_job(manifest_path):
     return folder/"manifest.json"
 
 
-def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60, audio_only=False):
+def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60, audio_only=False, cancel_event=None):
+    if cancel_event is not None:
+        original_cli=cli
+        def cancellable_cli(*args,**kwargs):
+            if cancel_event.is_set(): raise RuntimeError("已停止等待云端任务；任务身份保留。")
+            result=original_cli(*args,**kwargs)
+            if cancel_event.is_set(): raise RuntimeError("已停止等待云端任务；任务身份保留。")
+            return result
+        cli=cancellable_cli
+        def cancellable_sleep(seconds):
+            if cancel_event.wait(seconds): raise RuntimeError("已停止等待云端任务；任务身份保留。")
+        sleep=cancellable_sleep
     manifest_path = Path(manifest_path)
     lock_key = str(manifest_path.resolve())
     with _ACTIVE_LOCK:
