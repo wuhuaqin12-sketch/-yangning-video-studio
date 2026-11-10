@@ -163,7 +163,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     if not str(output_dir).strip():
         raise ValueError("请选择输出目录。")
     srt_cues = parse_srt_cues(text) if re.search(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s*-->", text) else None
-    text = script_from_text(text)
+    text = "\n".join(cue["text"] for cue in srt_cues) if srt_cues else script_from_text(text)
     requested_seed=int(seed)
     seed = int(seed)
     if not -1 <= seed < 2**31:
@@ -191,20 +191,15 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         request["pronunciation"] = plan
         save_json(folder / "pronunciation_plan.json", plan)
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
-    original_units=[cue["text"] for cue in srt_cues] if srt_cues else pause_units(text)
-    if srt_cues and purpose == "full" and not edit:
+    # One utterance for the entire supplied script, regardless of TXT/SRT boundaries.
+    request["generation_mode"] = "continuous_full_text"
+    request["timing_schema"] = 3
+    if srt_cues:
         request["srt_cues"] = srt_cues
-        request["srt_leading_silence"] = srt_cues[0]["start"]
-    if include_preview and purpose == "full" and not edit and not srt_cues:
-        from voice_workflows import audition_text
-        sentences = split_script(text, target_chars=1)
-        opening = audition_text(text, language)
-        count = len(split_script(opening, target_chars=1))
-        original_units = pause_units(opening) + (pause_units(" ".join(sentences[count:])) if count < len(sentences) else [])
-        request["include_preview"] = True
-    request["units"]=[{"text":unit,"reading_text":reading_plan(unit,japanese_readings)["reading_text"] if language=="日语" and pronunciation_enabled else unit} for unit in original_units]
-    request["unit_pauses"] = [natural_pause(unit) for unit in original_units]
-    split_script(request.get("reading_text",text))  # Reject oversized single sentences before paying GPU startup time.
+        request["srt_timing_policy"] = "source_reference_only"
+    if include_preview and purpose == "full" and not edit:
+        request["include_preview"] = True  # Extract preview from the one finished waveform.
+    request["units"]=[{"text":text,"reading_text":request.get("reading_text",text)}]
     if template_mode is not None:
         from voice_prosody import choose_template
         selection=choose_template(language,template_mode,prosody_template or "",template_root=template_library_dir)
@@ -227,6 +222,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "competition_sources": [], "kernel_sources": [], "model_sources": [],
     })
     manifest = {
+        "generation_mode": "continuous_full_text",
         "job_id": job_id, "username": username, "dataset": dataset, "kernel": kernel,
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
@@ -400,6 +396,10 @@ def deliver_result(folder, manifest):
             or recipe.get("template_audio_used") is not False or recipe.get("silence_trimmed") is not False
             or recipe.get("pitch_ratio") != 1.0 or recipe.get("profile", {}).get("tempo") != manifest.get("tempo", profile_for(manifest["language"])["tempo"])):
         raise ValueError("云端制作记录不完整或与任务不一致，保留云端文件以便检查。")
+    if manifest.get("generation_mode")=="continuous_full_text":
+        audit=recipe.get("generation_audit",{})
+        if (recipe.get("generation_mode")!="continuous_full_text" or audit.get("model_calls") not in (0,1) or audit.get("eos_observed") is not True):
+            raise ValueError("云端未确认全文单次生成并正常结束，未交付可能混入逐句生成的结果。")
     if manifest.get("purpose","full")!="full" and recipe.get("purpose")!=manifest["purpose"]:
         raise ValueError("试听任务类型记录不一致。")
     if manifest.get("pronunciation") and recipe.get("pronunciation") != manifest["pronunciation"]:
@@ -453,6 +453,7 @@ def prepare_resume_job(manifest_path):
     if not (original.parent/"request.json").is_file() or not (original.parent/"download"/"checkpoint_manifest.json").is_file():
         raise ValueError("这个作业没有平台保留的有效断点，无法续生成。请查看日志修正后重新生成。")
     request=json.loads((original.parent/"request.json").read_text(encoding="utf-8"))
+    if request.get("generation_mode") != "continuous_full_text": raise ValueError("旧版逐句断点不能用于全文连续生成，请点击生成音频重新生成全文。")
     from voxcpm_kaggle_worker import checkpoint_parts
     checkpoint,parts=checkpoint_parts(original.parent/"download"/"checkpoint_manifest.json",request)
     if not parts: raise ValueError("这个作业没有可恢复的已完成段落；请查看日志修正错误后重新生成。")

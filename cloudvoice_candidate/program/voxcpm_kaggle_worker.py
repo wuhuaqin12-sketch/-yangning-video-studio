@@ -189,10 +189,49 @@ def process_audio(raw_path, final_path, tempo, gain_db=0.0, light_denoise=True):
     return {"raw_seconds": before, "final_seconds": after, "filter": filter_graph(tempo,gain_db,light_denoise)}
 
 
+def generation_blocks(request):
+    text=request.get("reading_text",request["text"]).strip()
+    if not text: raise ValueError("朗读正文为空。")
+    return [text]
+
+
+def continuous_generate(model, text, reference, seed):
+    """One model call, one reference, one seed. Detect missing end-of-speech."""
+    import inspect
+    tts=model.tts_model
+    kwargs=dict(text=text,reference_wav_path=str(reference),prompt_wav_path=None,prompt_text=None,
+                cfg_value=2.0,inference_timesteps=10,normalize=False,denoise=False,retry_badcase=False,max_len=4096)
+    # Support the installed API without changing model/dependency versions.
+    parameters=inspect.signature(model.generate).parameters
+    inner=getattr(model,"_generate",None)
+    inner_parameters=inspect.signature(inner).parameters if inner is not None else {}
+    if "seed" in parameters or "seed" in inner_parameters: kwargs["seed"]=seed
+    tokens=None
+    tokenizer=getattr(tts,"text_tokenizer",None)
+    if callable(tokenizer):
+        tokens=len(tokenizer(text))
+        context_limit=int(getattr(getattr(tts,"config",None),"max_length",8192))
+        budget=context_limit-tokens-512  # Reserve reference/control tokens and context margin.
+        if budget<128: raise ValueError("全文超过当前模型单次上下文容量；未拆段、未截断，请缩短稿件后重试。")
+        kwargs["max_len"]=min(kwargs["max_len"],budget)
+    stopped=[]
+    head=getattr(tts,"stop_head",None)
+    if head is None or not hasattr(head,"register_forward_hook"):
+        raise RuntimeError("当前模型不能校验全文正常结束，已停止；不会把可能截断的声音标为完成。")
+    def observe_stop(module,inputs,output):
+        stopped.append(int(output.argmax(dim=-1)[0].cpu().item()))
+    hook=head.register_forward_hook(observe_stop)
+    try: audio=model.generate(**kwargs)
+    finally: hook.remove()
+    if not stopped or stopped[-1]!=1:
+        raise RuntimeError("全文生成达到模型长度上限或未正常结束；未拆段、未交付可能截断的音频。请缩短稿件重试。")
+    return audio,dict(max_len=kwargs["max_len"],eos_observed=True,model_calls=1)
+
+
 def request_fingerprint(request):
-    fields=("timing_schema","srt_cues","unit_pauses","text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
+    fields=("generation_mode","timing_schema","srt_cues","unit_pauses","text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
     data={key:request.get(key) for key in fields}
-    data.update(reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
+    data.update(generation_revision=3,reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
     if request.get("execution") == "local":
         data.update(execution="local", device=request.get("local_device", "auto"))
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -207,7 +246,7 @@ def checkpoint_parts(manifest_path,request):
     import numpy as np
     path=Path(manifest_path)
     record=json.loads(path.read_text(encoding="utf-8"))
-    blocks=[unit["reading_text"] for unit in request["units"]] if request.get("units") else split_script(request.get("reading_text",request["text"]))
+    blocks=generation_blocks(request)
     if (record.get("fingerprint")!=request_fingerprint(request) or record.get("total")!=len(blocks)
             or not isinstance(record.get("rate"),int) or not 8000<=record["rate"]<=96000):
         raise ValueError("断点记录与原文、音色或生成参数不一致。")
@@ -277,7 +316,7 @@ def run(request, local_context=None):
     if request.get("delivery_instruction"):
         profile["style"] += ", " + request["delivery_instruction"]
     spoken_text = request.get("reading_text", request["text"])
-    blocks = [unit["reading_text"] for unit in request["units"]] if request.get("units") else split_script(spoken_text)
+    blocks = generation_blocks(request)
     ensure_audio_tools(profile["tempo"])
     output_dir = Path(request.get("output_dir", "/kaggle/working"))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -332,11 +371,12 @@ def run(request, local_context=None):
                 if record["snapshot_revision"]!=snapshot.name or record["rate"]!=rate or record.get("model_dtype")!=dtype: raise ValueError("断点模型快照或采样率不一致。")
                 break
         if not available: raise ValueError("没有取得可校验的已完成段落；不会静默从头生成。")
+    generation_audit={"model_calls":0,"eos_observed":True,"max_len":4096}
     atomic_json(output_dir/"checkpoint_manifest.json",checkpoint)
     base_seed = int(request.get("seed", 16261109))
     print("YANGNING_STAGE=generation", flush=True)
     for index, block in enumerate(blocks):
-        seed = base_seed + index if base_seed >= 0 else None
+        seed = base_seed if base_seed >= 0 else None
         if seed is not None:
             torch.manual_seed(seed)
             if device == "cuda": torch.cuda.manual_seed_all(seed)
@@ -348,11 +388,8 @@ def run(request, local_context=None):
             with np.load(target,allow_pickle=False) as data: audio=data["audio"].astype(np.float32)
             print(f"复用已完成段落 {index+1}",flush=True)
         else:
-            audio = np.asarray(model.generate(
-                text=f"({profile['style']}){block}", reference_wav_path=str(reference),
-                prompt_wav_path=None, prompt_text=None, cfg_value=2.0, inference_timesteps=10,
-                normalize=False, denoise=False, retry_badcase=False, max_len=4096,
-            ), dtype=np.float32).reshape(-1)
+            generated,generation_audit=continuous_generate(model,f"({profile['style']}, single speaker, consistent voice throughout){block}",reference,seed)
+            audio = np.asarray(generated,dtype=np.float32).reshape(-1)
             if not audio.size or not np.isfinite(audio).all(): raise RuntimeError(f"第{index+1}段没有返回有效音频。")
             pending=target.with_suffix(".tmp")
             with pending.open("wb") as stream: np.savez(stream,audio=audio)
@@ -361,10 +398,9 @@ def run(request, local_context=None):
         checkpoint["pieces"].append({"index":index,"file":str(target.relative_to(output_dir)),
                                      "sha256":hashlib.sha256(target.read_bytes()).hexdigest(),"text_sha256":hashlib.sha256(block.encode()).hexdigest()})
         atomic_json(output_dir/"checkpoint_manifest.json",checkpoint)
-        print(f"已生成 {index+1}/{len(blocks)} 个完整语义段",flush=True)
-    cues=request.get("srt_cues")
-    if cues and len(cues)!=len(blocks):
-        raise ValueError("SRT字幕数量与生成段落不一致，无法安全对齐")
+        print("全文连续音频已生成，正在校验及保存…",flush=True)
+    source_cues=request.get("srt_cues")
+    cues=None  # Continuous speech has no measured per-cue alignment; never invent one.
     peak=max(peaks);gain=.99/peak if peak>=1 else 1.0
     # Load one checkpoint at a time; no waveform is truncated.
     class Pieces:
@@ -380,8 +416,10 @@ def run(request, local_context=None):
         print(f"字幕{warning['index']}超时{warning['overflow_seconds']:.2f}秒；保留完整声音，后续段落按需顺延。",flush=True)
     recipe = {
         "timing_warnings": timing_warnings,
-        "srt_cues": cues,
-        "srt_timing_mode": "absolute_starts_shift_on_overflow" if cues else "none",
+        "srt_cues": source_cues,
+        "generation_mode": "continuous_full_text",
+        "generation_audit": generation_audit,
+        "srt_timing_mode": "source_reference_only_continuous_speech" if source_cues else "natural_continuous_speech",
         "job_id": request["job_id"], "purpose":request.get("purpose","full"), "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
         "language": request["language"], "reference_sha256": reference_hash,
         "template_audio_used": False, "template_prosody_alignment": "not_implemented",
@@ -394,7 +432,7 @@ def run(request, local_context=None):
         "normalize": False, "model_denoise": False, "retry_badcase": False,
         "device": torch.cuda.get_device_name(0) if device == "cuda" else "cpu", "model_dtype": dtype,
         "execution": "local" if local else "cloud",
-        "blocks": blocks, "block_peaks": peaks, "headroom_gain": gain,
+        "blocks": blocks, "voice_consistency_listening": "pending", "block_peaks": peaks, "headroom_gain": gain,
         "silence_trimmed": False, "pitch_ratio": 1.0, "tempo_applications": 1,
         "review": {name: "待听检" for name in ("音色", "读音与全文完整性", "语感", "重点", "问句", "停顿", "声音")},
     }
@@ -407,11 +445,11 @@ def run(request, local_context=None):
         recipe.update(process_audio(raw_path, final_path, profile["tempo"],gain_db,post.get("light_denoise",True)))
         segments=[]
         scale=recipe["final_seconds"]/(total_samples/rate/profile["tempo"])
-        units=request.get("units") or [{"text":block,"reading_text":block} for block in blocks]
+        units=[{"text":request["text"],"reading_text":spoken_text}]
         for unit,timing in zip(units,segment_times):
             segments.append({"start":timing["start"]*scale,"end":timing["end"]*scale,"text":unit["text"]})
         atomic_json(output_dir/"segments.json",{"audio_sha256":hashlib.sha256(final_path.read_bytes()).hexdigest(),
-                    "timing":"generated_units" if profile["tempo"]==1 else "estimated_after_tempo", "segments":segments})
+                    "timing":"whole_utterance_only", "segments":segments})
         recipe["resumed_segments"]=len(available)
         recipe["status"] = "generated_pending_review"
     except Exception as exc:

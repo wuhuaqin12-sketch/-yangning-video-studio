@@ -66,6 +66,7 @@ class WorkflowTests(unittest.TestCase):
                     write_wave(folder/name, sound(1, [(0.2, 0.8, 0.1)]))
                 (folder/"script.txt").write_text("完整讲稿。")
                 recipe = {"job_id": manifest["job_id"], "status": "generated_pending_review", "language": "日语",
+                          "generation_mode":"continuous_full_text","generation_audit":{"model_calls":1,"eos_observed":True},
                           "reference_sha256": "wrong" if invalid_recipe else REFERENCE_SHA256,
                           "template_audio_used": False, "silence_trimmed": False, "pitch_ratio": 1.0,
                           "profile": {"tempo": manifest["tempo"]}, "pronunciation":manifest.get("pronunciation")}
@@ -143,8 +144,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(Path(pointer["path"]),manifest.resolve())
         for kwargs in ({"style_options":["停顿长一点","停顿短一点"]},{"gain_db":float('nan')}):
             with self.assertRaises(ValueError): self.job(**kwargs)
-        with self.assertRaises(ValueError):
-            prepare_job(self.root/"invalid","member","owner/private-reference","字"*3001,"日语",1,self.root/"output")
+        long_job=prepare_job(self.root/"long","member","owner/private-reference","字"*3001,"日语",1,self.root/"output")
+        long_request=json.loads((long_job.parent/"request.json").read_text())
+        self.assertEqual(long_request["text"],"字"*3001)
+        self.assertEqual(len(long_request["units"]),1)
 
     def test_custom_postprocess_record_cannot_be_omitted(self):
         manifest=self.job(gain_db=-2,light_denoise=False)
@@ -280,10 +283,16 @@ class WorkflowTests(unittest.TestCase):
         def load(path, **kwargs):
             self.assertEqual(json.loads((Path(path)/"config.json").read_text())["dtype"],"float32")
             self.assertFalse(kwargs["load_denoiser"])
+            class StopHead:
+                def register_forward_hook(self,callback):
+                    self.callback=callback
+                    return SimpleNamespace(remove=lambda:None)
+            head=StopHead()
             def generate(**parameters):
+                head.callback(None,None,SimpleNamespace(argmax=lambda **k:[SimpleNamespace(cpu=lambda:SimpleNamespace(item=lambda:1))]))
                 calls.append(parameters)
                 return sound(1,[(0.2,0.8,0.1)])
-            return SimpleNamespace(tts_model=SimpleNamespace(sample_rate=48000),generate=generate)
+            return SimpleNamespace(tts_model=SimpleNamespace(sample_rate=48000,stop_head=head),generate=generate)
         modules={
             "torch":SimpleNamespace(manual_seed=lambda n:None,cuda=SimpleNamespace(manual_seed_all=lambda n:None,is_available=lambda:True,is_bf16_supported=lambda:False,get_device_name=lambda n:"TEST GPU")),
             "huggingface_hub":SimpleNamespace(snapshot_download=lambda *a,**k:str(snapshot)),

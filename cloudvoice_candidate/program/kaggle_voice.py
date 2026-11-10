@@ -166,7 +166,7 @@ def open_kaggle_voice(app, parent=None):
     active_language=language.get()
     previous_mode="generate"
     drafts=settings.get("drafts",{})
-    mode_info=tk.StringVar(value="生成新音频 · 只需正文，无需视频")
+    mode_info=tk.StringVar(value="全文一次生成 · 固定老师原声 · SRT时间轴仅作参考")
     option_summary=tk.StringVar()
     previous_audio=settings.get("previous_audio","")
     more = tk.Toplevel(win)
@@ -318,7 +318,7 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(results_row,text="试听上一版",command=lambda: play_path(previous_audio)).pack(side="left")
     ttk.Button(results_row,text="版本与输出文件",command=lambda: result_history()).pack(side="left",padx=6)
     ttk.Button(connection_tab,text="查看最近任务日志",command=lambda: show_log()).pack(anchor="w",pady=8)
-    ttk.Button(connection_tab,text="续生成未完成段（已有断点时）",command=lambda: start(True,continuation=True)).pack(anchor="w",pady=8)
+    ttk.Button(connection_tab,text="恢复全文任务（不复用旧版逐句断点）",command=lambda: start(True,continuation=True)).pack(anchor="w",pady=8)
     ttk.Button(connection_tab,text="检查本机环境",command=lambda: local_check()).pack(anchor="w",pady=8)
     actions = ttk.Frame(box)
     actions.pack(fill="x", pady=5)
@@ -398,7 +398,7 @@ def open_kaggle_voice(app, parent=None):
             correction.pack_forget()
             script_label.configure(text="修改后的完整正文" if mode.get() == "full" else "朗读正文")
             submit.configure(text="全文重新生成" if mode.get() == "full" else "生成音频")
-            mode_info.set("当前：全文重做 · 旧版保留" if mode.get()=="full" else "生成新音频 · 只需正文，无需视频")
+            mode_info.set("当前：全文连续重做 · 旧版保留" if mode.get()=="full" else "全文一次生成 · 固定老师原声 · SRT时间轴仅作参考")
         update_count()
 
     def update_template_status():
@@ -500,7 +500,7 @@ def open_kaggle_voice(app, parent=None):
             text_box.delete("1.0", "end")
             text_box.insert("1.0", content)
             update_count()
-            status.set("已导入；SRT时间轴将用于句间停顿（字幕时长不强制压缩语音），请校对读音。")
+            status.set("已导入；全文连续生成、固定老师原声。SRT时间轴仅保留作参考，不再逐条生成或强制对齐。")
         except (OSError, UnicodeError, ValueError) as exc:
             messagebox.showerror("导入失败", str(exc), parent=win)
 
@@ -733,7 +733,7 @@ def open_kaggle_voice(app, parent=None):
         except (OSError,ValueError,KeyError) as exc:
             messagebox.showinfo("没有配套句段表","请选择本版生成的完整音频。外部或普通微调音频可在更多设置通过配套SRT或时间范围修改。",parent=win);return
         popup=tk.Toplevel(win);popup.title("按生成句段试听与修改");_fit_window(popup,800,550)
-        ttk.Label(popup,text="选择一句段或连续几段。按生成语义段定位，不是逐词识别；变速后的时间近似，拼接前仍检查静音接点。",wraplength=720).pack(padx=12,pady=10)
+        ttk.Label(popup,text="全文连续生成仅保存整段实测时长，不提供推测的逐句位置。局部修改可在更多设置中使用校对后的SRT或时间范围。",wraplength=720).pack(padx=12,pady=10)
         listing=tk.Listbox(popup,selectmode="extended",exportselection=False)
         listing.pack(fill="both",expand=True,padx=12,pady=10)
         for item in record["segments"]: listing.insert("end",f"{item['start']:.2f}–{item['end']:.2f}  {item['text']}")
