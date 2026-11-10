@@ -14,6 +14,11 @@ from voice_workflows import audition_text,terminology_text,load_segments
 from voice_clip_edit import preflight_audio_edit,export_edited_audio
 
 class NewWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        preflight = patch("cloud_voice_core.ensure_teacher_reference", return_value=None)
+        preflight.start()
+        self.addCleanup(preflight.stop)
+
     def test_audition_keeps_complete_sentences_and_terms(self):
         text='First complete sentence. Second complete sentence. '+('Third complete sentence. '*20)
         preview=audition_text(text,'英语')

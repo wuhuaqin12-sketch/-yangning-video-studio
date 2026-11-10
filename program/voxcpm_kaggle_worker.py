@@ -185,6 +185,31 @@ def checkpoint_parts(manifest_path,request):
     return record,valid
 
 
+def resolve_teacher_reference(request, input_root="/kaggle/input", embedded=None, fallback_dir="/tmp"):
+    """Resolve by content, including renamed files and missing Kaggle mounts."""
+    paths = [Path(request["reference_path"])]
+    paths.extend(p for p in Path(input_root).rglob("*.wav") if p.is_file())
+    found = False
+    for path in paths:
+        if path.is_file() and 0 < path.stat().st_size <= 8*1024*1024:
+            found = True
+            if hashlib.sha256(path.read_bytes()).hexdigest() == REFERENCE_SHA256:
+                return path
+    if embedded:
+        import base64
+        if len(embedded) > 12*1024*1024:
+            raise ValueError("老师原声备用文件过大。")
+        data = base64.b64decode(embedded, validate=True)
+        if hashlib.sha256(data).hexdigest() != REFERENCE_SHA256:
+            raise ValueError("老师原声备用文件校验失败。")
+        target = Path(fallback_dir) / ("yangning_teacher_" + REFERENCE_SHA256 + ".wav")
+        target.write_bytes(data)
+        return target
+    if found:
+        raise ValueError("参考文件与已确认的老师原声不一致。请保留原始参考文件，不要重新编码。")
+    raise FileNotFoundError("老师原声未挂载，且缺少已校验的备用文件。请检查更新后重新生成。")
+
+
 def run(request):
     import numpy as np
     import soundfile as sf
@@ -195,10 +220,7 @@ def run(request):
     print("YANGNING_STAGE=preflight", flush=True)
     if not torch.cuda.is_available():
         raise RuntimeError("此Kaggle作业没有分配到GPU；请检查账号GPU权限及剩余额度。")
-    candidates = [p for p in Path("/kaggle/input").rglob("*") if p.is_file() and p.name in ("1626_reference.wav", "1626_reference.wav.wav")]
-    reference = next((p for p in candidates if hashlib.sha256(p.read_bytes()).hexdigest() == REFERENCE_SHA256), Path(request["reference_path"]))
-    if not reference.is_file():
-        raise FileNotFoundError("私有数据集中找不到已配置的老师原声参考文件。")
+    reference = resolve_teacher_reference(request, embedded=globals().get("TEACHER_REFERENCE_B64"))
     reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
     if reference_hash != REFERENCE_SHA256:
         raise ValueError("参考文件与已确认的老师原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")

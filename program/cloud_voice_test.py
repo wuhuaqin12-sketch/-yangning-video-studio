@@ -36,6 +36,9 @@ class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.reference_preflight = patch("cloud_voice_core.ensure_teacher_reference", return_value=None)
+        self.reference_preflight.start()
+        self.addCleanup(self.reference_preflight.stop)
 
     def tearDown(self):
         self.temp.cleanup()

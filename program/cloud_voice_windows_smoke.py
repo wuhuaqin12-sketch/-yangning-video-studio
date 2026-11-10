@@ -57,6 +57,18 @@ def main():
                     result.extend(descendants(child))
                 return result
             widgets = descendants(window)
+            def on_main(widget):
+                current = widget
+                while current is not window:
+                    if isinstance(current, tk.Toplevel):
+                        return False
+                    current = current.master
+                return True
+            main_labels = [str(w.cget("text")) for w in widgets if isinstance(w,ttk.Label) and on_main(w)]
+            assert "老师音色" in main_labels
+            assert not any("语气模板只提供" in label or "输出WAV音频" in label for label in main_labels)
+            main_buttons = [str(w.cget("text")) for w in widgets if isinstance(w,ttk.Button) and on_main(w)]
+            assert "生成音频" in main_buttons and "全文重新生成" not in main_buttons
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert not any("1626" in str(w.cget("text")) for w in widgets if isinstance(w,(ttk.Label,ttk.Button,ttk.LabelFrame)))
             assert "生成音频" in labels and "恢复最近任务" in labels

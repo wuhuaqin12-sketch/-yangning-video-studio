@@ -23,14 +23,14 @@ def main():
         with patch.dict(os.environ,env):
             (private/'user-settings.marker').write_text('preserved')
             personal=root/'program/templates/team.wav';personal.parent.mkdir(exist_ok=True);personal.write_bytes(b'private template')
-            version={**original,'version':'0.5-preview.2','update_sequence':6,'source_revision':'b'*40}
+            version={**original,'version':'0.5-preview.3','update_sequence':7,'source_revision':'b'*40}
             files={name:(root/name).read_bytes() for name in update.MANAGED if (root/name).is_file()}
             files['preview_version.json']=json.dumps(version).encode()
-            files['program/cloud_voice_version.py']=b'VERSION="0.5-preview.2"\nUPDATE_SEQUENCE=6\nPRODUCT="YangNing Cloud Voice Independent Preview"\n'
-            value={'product':update.PRODUCT,'version':version['version'],'sequence':6,'source_revision':'b'*40,
+            files['program/cloud_voice_version.py']=b'VERSION="0.5-preview.3"\nUPDATE_SEQUENCE=7\nPRODUCT="YangNing Cloud Voice Independent Preview"\n'
+            value={'product':update.PRODUCT,'version':version['version'],'sequence':7,'source_revision':'b'*40,
                    'files':{name:{'content':base64.b64encode(content).decode(),'sha256':update.sha(content)} for name,content in files.items()}}
             data=json.dumps(value).encode()
-            descriptor={'product':update.PRODUCT,'schema':1,'version':version['version'],'sequence':6,'source_revision':'b'*40,
+            descriptor={'product':update.PRODUCT,'schema':1,'version':version['version'],'sequence':7,'source_revision':'b'*40,
                         'payload_url':update.PREFIX+'c'*40+'/cloud_voice_payload.json','payload_size':len(data),'payload_sha256':update.sha(data),'notes':'CI update'}
             plan=update.prepare_update(root,descriptor,lambda url,limit:data,prepare_environment=True)
             # Real Windows PID handle wait.
@@ -43,10 +43,10 @@ def main():
                 with patch.object(update,'launch',side_effect=launch),patch.object(update,'wait_process',return_value=None):
                     update.installer(plan,os.getpid())
                 assert update.load_plan(plan)['status']=='committed'
-                assert update.read_current(root)['version']=='0.5-preview.2'
+                assert update.read_current(root)['version']=='0.5-preview.3'
                 assert personal.read_bytes()==b'private template'
                 assert (private/'user-settings.marker').read_text()=='preserved'
-                assert json.loads((Path(update.load_plan(plan)['tx'])/'boot_ok.json').read_text())['version']=='0.5-preview.2'
+                assert json.loads((Path(update.load_plan(plan)['tx'])/'boot_ok.json').read_text())['version']=='0.5-preview.3'
                 for process in launches:
                     if process.poll() is None: subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],capture_output=True)
                 launches.clear()

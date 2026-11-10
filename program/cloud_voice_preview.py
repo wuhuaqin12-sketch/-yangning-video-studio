@@ -90,7 +90,6 @@ def main():
     frame = ttk.Frame(root, padding=18)
     frame.pack(fill="both", expand=True)
     ttk.Label(frame, text="杨宁云端语音克隆 · "+VERSION, font=("Microsoft YaHei UI", 17, "bold")).pack(anchor="w")
-    ttk.Label(frame, text="独立目录运行，不替换已安装的12.11。首次需要联网准备小型客户端依赖，本机不安装语音模型。", wraplength=630).pack(anchor="w", pady=10)
     def open_voice():
         open_kaggle_voice(app)
         acknowledge_boot(Path(__file__).resolve().parent.parent)
@@ -100,7 +99,6 @@ def main():
     ttk.Button(actions,text="检查更新",command=app.check_updates).pack(side="left",padx=10)
     ttk.Label(frame, text="最近生成的WAV音频").pack(anchor="w")
     ttk.Entry(frame, textvariable=app.v["audio"]).pack(fill="x", pady=4)
-    ttk.Label(frame, text="生成结果需检查音色和术语读音。音画同步、字幕和成片合成请在杨宁工作室完成。", wraplength=630).pack(anchor="w", pady=8)
     root.after(200, open_voice)
     root.mainloop()
 

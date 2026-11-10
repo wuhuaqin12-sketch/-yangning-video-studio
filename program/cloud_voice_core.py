@@ -1,5 +1,7 @@
 """Small desktop-side Kaggle job client; no TTS/model dependency on this PC."""
 import json
+import base64
+import hashlib
 import os
 import re
 import shutil
@@ -9,6 +11,8 @@ import threading
 import time
 import uuid
 import wave
+import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,7 +49,41 @@ def script_from_text(text):
     return text
 
 
-def build_notebook(request):
+def ensure_teacher_reference(folder, dataset, env, cli, emit):
+    """Fetch approved original bytes before paying GPU startup cost; never re-encode."""
+    cache = Path(folder).parent / "teacher_reference_cache" / (REFERENCE_SHA256 + ".wav")
+    if cache.is_file():
+        data = cache.read_bytes()
+        if hashlib.sha256(data).hexdigest() == REFERENCE_SHA256:
+            return data
+    emit(("status", "正在校验老师音色…"))
+    with tempfile.TemporaryDirectory(prefix="teacher_ref_", dir=folder) as temp:
+        cli(["datasets", "download", "-d", dataset, "-p", temp, "--force", "--quiet"], env, timeout=600)
+        candidates = []
+        for path in Path(temp).rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() == ".zip":
+                with zipfile.ZipFile(path) as archive:
+                    for member in archive.infolist():
+                        if not member.is_dir() and member.filename.lower().endswith(".wav") and 0 < member.file_size <= 8*1024*1024:
+                            data = archive.read(member)
+                            if hashlib.sha256(data).hexdigest() == REFERENCE_SHA256:
+                                candidates.append(data)
+            elif path.name.lower().endswith(".wav") and 0 < path.stat().st_size <= 8*1024*1024:
+                data = path.read_bytes()
+                if hashlib.sha256(data).hexdigest() == REFERENCE_SHA256:
+                    candidates.append(data)
+        if not candidates:
+            raise ValueError("老师原声校验失败：数据集中没有已确认的原始参考音频。请保留原文件内容；改名或重复.wav扩展名不影响识别。尚未提交云端生成。")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        pending = cache.with_name(cache.name + "." + uuid.uuid4().hex + ".tmp")
+        pending.write_bytes(candidates[0])
+        os.replace(pending, cache)
+        return candidates[0]
+
+
+def build_notebook(request, teacher_reference_bytes=None):
     worker = Path(__file__).with_name("voxcpm_kaggle_worker.py").read_text(encoding="utf-8")
     install = (
         "import subprocess, sys\nprint('YANGNING_STAGE=dependencies', flush=True)\n"
@@ -53,6 +91,11 @@ def build_notebook(request):
     )
     # Data is parsed as JSON, never interpolated into executable Python source.
     setup = "import json\nREQUEST = json.loads(" + repr(json.dumps(request, ensure_ascii=False)) + ")\n"
+    if teacher_reference_bytes is not None:
+        if hashlib.sha256(teacher_reference_bytes).hexdigest() != REFERENCE_SHA256:
+            raise ValueError("老师原声校验失败，不能提交其他音色。")
+        # Private job only. Public update packages contain no reference waveform.
+        setup += "TEACHER_REFERENCE_B64 = " + repr(base64.b64encode(teacher_reference_bytes).decode("ascii")) + "\n"
     cells = [
         {"cell_type": "markdown", "metadata": {}, "source": [
             "# 私有VoxCPM2生成作业\n", "老师音色；文字语气指令；自然停顿保留；结果待听检。\n"
@@ -323,6 +366,9 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             elif manifest.get("edit") and not audio_only:
                 from voice_clip_edit import preflight_edit
                 preflight_edit(manifest["edit"], folder / "edit_source_snapshot")
+            reference_bytes = ensure_teacher_reference(folder, manifest["dataset"], env, cli, emit)
+            request = json.loads((folder / "request.json").read_text(encoding="utf-8"))
+            save_json(folder / "voxcpm2.ipynb", build_notebook(request, reference_bytes))
             # Save the identity before submission: a timed-out push may still start remotely.
             manifest["status"] = "submitting"
             save_json(manifest_path, manifest)
@@ -387,7 +433,8 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
                     manifest["completed_segments"]=len(parts);manifest["total_segments"]=checkpoint["total"]
                 save_json(manifest_path,manifest)
                 (folder/"remote_error.log").write_text(redact(failed.get("error","未知错误"),secret),encoding="utf-8")
-                raise RuntimeError(f"生成中断，已保存{manifest['completed_segments']}段。请查看日志；有断点时可点击续生成未完成段。")
+                reason = redact(failed.get("error", "未知错误"), secret)
+                raise RuntimeError(f"生成中断，已保存{manifest['completed_segments']}段。\n{reason}\n有断点时可点击续生成未完成段。")
             manifest["artifacts"] = deliver_result(folder, manifest)
             manifest["status"] = "audio_ready"
             manifest.pop("last_error", None)

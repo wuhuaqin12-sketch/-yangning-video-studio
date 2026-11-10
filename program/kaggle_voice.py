@@ -146,7 +146,7 @@ def open_kaggle_voice(app, parent=None):
     token = tk.StringVar()
     seed = tk.StringVar(value=str(settings.get("seed", 16261109)))
     profile_info = tk.StringVar()
-    status = tk.StringVar(value="准备就绪。音色和读音需听检确认。" if settings.get("username") and settings.get("reference_dataset") else "首次使用：点击右上方更多设置 → 连接与输出，安全保存本人连接信息。")
+    status = tk.StringVar(value="准备就绪" if settings.get("username") and settings.get("reference_dataset") else "请先在更多设置中保存连接信息")
     last_audio = settings.get("last_audio", "")
     prefs=settings.get("generation_by_language",{}).get(language.get(),{})
     gain=tk.StringVar(value=str(prefs.get("gain_db",0)))
@@ -174,11 +174,12 @@ def open_kaggle_voice(app, parent=None):
     def check_updates():
         from cloud_voice_update import open_update_window
         open_update_window(app)
-    ttk.Button(box,text="检查更新",command=check_updates).pack(anchor="e",pady=(0,4))
-    ttk.Button(box,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(anchor="e")
-
-    ttk.Label(box, text="老师音色 · 自然停顿保留", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
-    ttk.Label(box, text="语气模板只提供节奏提示，音色参考使用老师原声。生成后请试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
+    header = ttk.Frame(box)
+    header.pack(fill="x",pady=(0,10))
+    ttk.Label(header, text="老师音色", font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
+    ttk.Button(header,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(side="right")
+    ttk.Button(header,text="检查更新",command=check_updates).pack(side="right",padx=6)
+    ttk.Label(language_tab, text="语气模板只提供节奏提示，音色参考使用老师原声。生成后请试听确认。", wraplength=680).pack(anchor="w", pady=6)
     connection = ttk.LabelFrame(connection_tab, text="首次连接Kaggle", padding=10)
     connection.pack(fill="x", pady=(0, 10))
     connection.columnconfigure(1, weight=1)
@@ -200,10 +201,8 @@ def open_kaggle_voice(app, parent=None):
     preset_combo.pack(side="left",padx=8)
     preset_combo.bind("<<ComboboxSelected>>",lambda event: apply_preset())
     ttk.Button(line,text="详细调节",command=lambda: open_generation()).pack(side="left")
-    ttk.Label(box,textvariable=option_summary,wraplength=730).pack(anchor="w",pady=3)
-    ttk.Label(box,textvariable=template_status,wraplength=730).pack(anchor="w",pady=3)
-    ttk.Label(box,textvariable=mode_info,wraplength=730).pack(anchor="w",pady=3)
-    ttk.Button(box,text="修改已有音频 / 全文重做",command=lambda: (more.deiconify(),tabs.select(pages[3]),more.lift())).pack(anchor="w",pady=3)
+    ttk.Label(generation_tab,textvariable=option_summary,wraplength=680).pack(anchor="w",pady=3)
+    ttk.Label(edit_tab,textvariable=mode_info,wraplength=680).pack(anchor="w",pady=3)
     ttk.Label(generation_tab,text="生成前调节：语气是模型提示，速度/音量/降噪是生成后的自动处理。",wraplength=680).pack(anchor="w",pady=6)
     style_grid=ttk.Frame(generation_tab);style_grid.pack(fill="x")
     for i,(name,var) in enumerate(style_vars.items()):
@@ -231,7 +230,7 @@ def open_kaggle_voice(app, parent=None):
     ttk.Label(template_row,textvariable=template_status,wraplength=650).grid(row=2,column=0,columnspan=2,sticky="w",pady=6)
     ttk.Button(language_tab,text="加入本语言模板库（以后自动选择）",command=lambda: register_template()).pack(anchor="w",pady=6)
     ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
-    ttk.Label(box, text="输出WAV音频 · 普通生成只需正文，无需视频或原音频。", wraplength=740).pack(anchor="w", pady=6)
+    ttk.Label(connection_tab, text="输出WAV音频；生成新音频只需正文。", wraplength=680).pack(anchor="w", pady=6)
     choices = ttk.Frame(edit_tab)
     choices.pack(fill="x", pady=6)
     for label, value in (("生成新音频", "generate"), ("修改全文后重新生成", "full"), ("局部改读音并接回原音频", "partial")):
@@ -262,6 +261,7 @@ def open_kaggle_voice(app, parent=None):
     script_label = ttk.Label(buttons, text="朗读正文")
     script_label.pack(side="left")
     ttk.Button(buttons, text="导入TXT / SRT", command=lambda: import_script()).pack(side="right")
+    ttk.Button(buttons,text="修改已有音频",command=lambda: (more.deiconify(),tabs.select(pages[3]),more.lift())).pack(side="right",padx=6)
     script_frame=ttk.Frame(box);script_frame.pack(fill="both",expand=True,pady=(0,8))
     text_box = tk.Text(script_frame, height=10, wrap="word", undo=True)
     text_scroll=ttk.Scrollbar(script_frame,command=text_box.yview)
@@ -349,7 +349,7 @@ def open_kaggle_voice(app, parent=None):
 
     def update_count():
         raw=text_box.get("1.0","end").strip()
-        count.set(f"正文 {len(raw)} 字符 · 长文按完整语义段生成 · 日语读音稿可在更多设置预览")
+        count.set(f"{len(raw)} 字符")
 
     def update_mode():
         nonlocal previous_mode
