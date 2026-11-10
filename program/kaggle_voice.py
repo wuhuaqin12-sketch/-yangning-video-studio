@@ -223,7 +223,7 @@ def open_kaggle_voice(app, parent=None):
     template_entry.grid(row=1,column=0,sticky="ew",pady=5)
     ttk.Button(template_row,text="选择模板",command=lambda: select_manual_template()).grid(row=1,column=1,padx=5)
     ttk.Label(template_row,textvariable=template_status,wraplength=650).grid(row=2,column=0,columnspan=2,sticky="w",pady=6)
-    ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
+    ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、越南语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
     ttk.Label(box, text="输出WAV音频 · 普通生成只需正文，无需视频或原音频。", wraplength=740).pack(anchor="w", pady=6)
     choices = ttk.Frame(edit_tab)
     choices.pack(fill="x", pady=6)

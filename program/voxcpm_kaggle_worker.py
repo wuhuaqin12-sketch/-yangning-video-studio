@@ -40,6 +40,11 @@ PROFILES = {
         "tempo": 1.0,
         "basis": "Provisional natural delivery; no additional slowdown confirmed",
     },
+    "越南语": {
+        "style": "Natural Vietnamese narration, calm relaxed delivery, smooth phrasing, natural Vietnamese lexical tones and gentle emphasis",
+        "tempo": 1.0,
+        "basis": "Model-listed language; local configuration enabled, teacher-voice and Vietnamese pronunciation audition pending",
+    },
     "粤语": {
         "style": "Natural Cantonese narration, relaxed and flowing delivery, gentle emphasis, subtle intonation and natural pauses",
         "tempo": 1.0,
