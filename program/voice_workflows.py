@@ -44,6 +44,25 @@ def load_segments(audio):
     return value
 
 
+def export_opening_preview(audio, target):
+    """Export the opening generated unit, without another TTS call or pause removal."""
+    record = load_segments(audio)
+    end = record["segments"][0]["end"]
+    target = Path(target)
+    pending = target.with_suffix(".wav.tmp")
+    with wave.open(str(audio), "rb") as source, wave.open(str(pending), "wb") as destination:
+        frames = min(source.getnframes(), round(end * source.getframerate()))
+        destination.setparams(source.getparams())
+        while frames:
+            block = source.readframes(min(frames, 48000))
+            if not block:
+                raise ValueError("完整音频不足以导出试听。")
+            destination.writeframes(block)
+            frames -= len(block) // (source.getnchannels() * source.getsampwidth())
+    pending.replace(target)
+    return str(target)
+
+
 def update_edited_segments(edit,replacement,target,timing):
     original=Path(edit.get("_prepared_segments",""))
     if not original.is_file(): return None

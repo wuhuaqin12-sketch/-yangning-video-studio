@@ -69,6 +69,7 @@ def main():
             assert not any("语气模板只提供" in label or "输出WAV音频" in label for label in main_labels)
             main_buttons = [str(w.cget("text")) for w in widgets if isinstance(w,ttk.Button) and on_main(w)]
             assert "生成音频" in main_buttons and "全文重新生成" not in main_buttons
+            assert "详细调节" not in main_buttons
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert not any("1626" in str(w.cget("text")) for w in widgets if isinstance(w,(ttk.Label,ttk.Button,ttk.LabelFrame)))
             assert "生成音频" in labels and "恢复最近任务" in labels
@@ -105,7 +106,7 @@ def main():
             adjustment.destroy()
             assert "预览实际朗读稿" in labels and "编辑术语读音表" in labels
             # All changes are selectable before generation and persist by language.
-            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="详细调节").invoke()
+            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="更多设置 ⋯").invoke()
             root.update()
             assert more.state()=="normal"
             softer=next(w for w in widgets if isinstance(w,ttk.Checkbutton) and w.cget("text")=="更柔和")
@@ -121,7 +122,9 @@ def main():
             assert softer.instate(["selected"])
             template_selector=next(w for w in widgets if isinstance(w,ttk.Combobox) and "自动选择" in tuple(w.cget("values")))
             assert template_selector.get()=="自动选择"
-            template_selector.set("自然语气（无模板）");template_selector.event_generate("<<ComboboxSelected>>");root.update()
+            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="清除选择").invoke()
+            root.update()
+            assert template_selector.get()=="自然语气（无模板）"
             assert any(isinstance(w,ttk.Label) and "未使用音频模板" in str(w.cget("text")) for w in widgets)
             template_selector.set("自动选择");template_selector.event_generate("<<ComboboxSelected>>");root.update()
             more.withdraw()

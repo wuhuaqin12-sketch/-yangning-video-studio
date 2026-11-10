@@ -117,7 +117,7 @@ def build_notebook(request, teacher_reference_bytes=None):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None, purpose="full", template_library_dir=None):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None, purpose="full", template_library_dir=None, reuse_completed=False, include_preview=False):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
@@ -154,6 +154,13 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         save_json(folder / "pronunciation_plan.json", plan)
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
     original_units=split_script(text,target_chars=240)
+    if include_preview and purpose == "full" and not edit:
+        from voice_workflows import audition_text
+        sentences = split_script(text, target_chars=1)
+        opening = audition_text(text, language)
+        count = len(split_script(opening, target_chars=1))
+        original_units = [opening] + (split_script(" ".join(sentences[count:]), target_chars=240) if count < len(sentences) else [])
+        request["include_preview"] = True
     request["units"]=[{"text":unit,"reading_text":reading_plan(unit,japanese_readings)["reading_text"] if language=="日语" and pronunciation_enabled else unit} for unit in original_units]
     split_script(request.get("reading_text",text))  # Reject oversized single sentences before paying GPU startup time.
     if template_mode is not None:
@@ -183,15 +190,95 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
         "postprocess": request["postprocess"], "delivery_instruction": request.get("delivery_instruction", ""),
         "template_selection": request.get("template_selection"), "purpose":purpose,
+        "include_preview": request.get("include_preview", False),
     }
     if request.get("pronunciation"):
         manifest["pronunciation"] = request["pronunciation"]
     if edit:
         manifest["edit"] = {**edit, "text": text}
+    if reuse_completed and not edit:
+        cached = find_completed_result(root, request, manifest)
+        if cached:
+            manifest["reuse_from"] = str(cached)
     save_json(folder / "manifest.json", manifest)
     # Durable discovery does not depend on a later GUI event being processed.
     save_json(Path(root) / "latest_manifest.json", {"path": str((folder / "manifest.json").resolve())})
     return folder / "manifest.json"
+
+
+def result_hashes(artifacts):
+    from voice_review import file_sha256
+    return {name:file_sha256(path) for name,path in artifacts.items() if Path(path).is_file()}
+
+
+def reusable_result(source, request, manifest):
+    from voxcpm_kaggle_worker import request_fingerprint
+    source = Path(source)
+    old = json.loads(source.read_text(encoding="utf-8"))
+    if old.get("status") != "completed" or old.get("edit"):
+        return None
+    if any(old.get(key) != manifest.get(key) for key in ("username", "dataset", "purpose")):
+        return None
+    previous = json.loads((source.parent / "request.json").read_text(encoding="utf-8"))
+    if request_fingerprint(previous) != request_fingerprint(request):
+        return None
+    hashes = old.get("result_hashes", {})
+    required = ("yangning_final.wav", "yangning_raw.wav", "voice_recipe.json", "script.txt")
+    if any(name not in hashes or name not in old.get("artifacts",{}) for name in required):
+        return None
+    if result_hashes(old["artifacts"]) != hashes:
+        return None
+    for name in ("yangning_final.wav", "yangning_raw.wav"):
+        validate_wav(old["artifacts"][name])
+    return old
+
+
+def find_completed_result(root, request, manifest):
+    candidates = sorted(Path(root).glob("*/manifest.json"), key=lambda p:p.stat().st_mtime, reverse=True)[:100]
+    for candidate in candidates:
+        try:
+            if reusable_result(candidate, request, manifest):
+                return candidate
+        except (OSError, ValueError, KeyError, wave.Error):
+            continue  # Missing or edited outputs must never count as a cache hit.
+    return None
+
+
+def reuse_completed_result(manifest_path, manifest, emit):
+    """Copy a verified local result under a new version name; no cloud request."""
+    source = Path(manifest["reuse_from"])
+    request = json.loads((manifest_path.parent / "request.json").read_text(encoding="utf-8"))
+    try:
+        if source.resolve().parent.parent != manifest_path.resolve().parent.parent:
+            return None
+        old = reusable_result(source, request, manifest)
+    except (OSError, ValueError, KeyError, wave.Error):
+        return None
+    if old is None:
+        return None
+    emit(("status", "正文和设置相同，正在复用已校验音频，无需排队…"))
+    download = manifest_path.parent / "download"
+    download.mkdir(exist_ok=True)
+    for name in ("yangning_final.wav", "yangning_raw.wav", "script.txt", "reading_text.txt", "pronunciation_plan.json"):
+        if name in old["artifacts"]:
+            shutil.copy2(old["artifacts"][name], download / name)
+    if "segments" in old["artifacts"]:
+        shutil.copy2(old["artifacts"]["segments"], download / "segments.json")
+    recipe = json.loads(Path(old["artifacts"]["voice_recipe.json"]).read_text(encoding="utf-8"))
+    recipe.update(job_id=manifest["job_id"], reused_from_job_id=old["job_id"], execution="verified_local_reuse")
+    save_json(download / "voice_recipe.json", recipe)
+    manifest["artifacts"] = deliver_result(manifest_path.parent, manifest)
+    from voice_review import write_review
+    review = manifest["artifacts"]["yangning_final.wav"] + ".review.json"
+    write_review(manifest["artifacts"]["yangning_final.wav"], review)
+    manifest["artifacts"]["audio_review"] = review
+    manifest.update(status="completed", cleanup_status="not_submitted", cloud_submitted=False,
+                    reused_from_job_id=old["job_id"], result_hashes=result_hashes(manifest["artifacts"]))
+    save_json(manifest_path, manifest)
+    for name in ("voxcpm2.ipynb", "kernel-metadata.json"):
+        (manifest_path.parent / name).unlink(missing_ok=True)
+    emit(("done", manifest["artifacts"]))
+    return manifest["artifacts"]
 
 
 def redact(message, secret):
@@ -308,6 +395,11 @@ def deliver_result(folder, manifest):
         shutil.copy2(source/"segments.json",dst)
         load_segments(artifacts["yangning_final.wav"])
         artifacts["segments"]=str(dst)
+        if manifest.get("include_preview") and not manifest.get("edit"):
+            from voice_workflows import export_opening_preview
+            preview_path=target/(prefix+"_preview.wav")
+            export_opening_preview(artifacts["yangning_final.wav"],preview_path)
+            artifacts["preview_audio"]=str(preview_path)
     return artifacts
 
 
@@ -329,7 +421,7 @@ def prepare_resume_job(manifest_path):
     save_json(folder/"kernel-metadata.json",{"id":kernel,"title":"YangNing Resume "+job_id,"code_file":"voxcpm2.ipynb",
               "language":"python","kernel_type":"notebook","is_private":True,"enable_gpu":True,"enable_internet":True,
               "dataset_sources":[old["dataset"]],"kernel_sources":[old["kernel"]],"competition_sources":[],"model_sources":[]})
-    record={key:value for key,value in old.items() if key in ("username","dataset","language","tempo","output_dir","postprocess","delivery_instruction","template_selection","pronunciation","edit","purpose")}
+    record={key:value for key,value in old.items() if key in ("username","dataset","language","tempo","output_dir","postprocess","delivery_instruction","template_selection","pronunciation","edit","purpose","include_preview")}
     record.update(job_id=job_id,kernel=kernel,status="prepared",cleanup_status="not_requested",created_utc=datetime.now(timezone.utc).isoformat(),
                   retained_kernels=list(dict.fromkeys(old.get("retained_kernels",[])+[old["kernel"]])),resume_from=str(original))
     save_json(folder/"manifest.json",record)
@@ -354,6 +446,15 @@ def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeo
 def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_only=False):
     folder = manifest_path.parent
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("cloud_submitted") is False and manifest["status"] == "completed":
+        if result_hashes(manifest["artifacts"]) != manifest.get("result_hashes"):
+            raise ValueError("复用的音频已移动或改变，请重新生成；不会自动提交云端任务。")
+        emit(("done", manifest["artifacts"]))
+        return manifest["artifacts"]
+    if manifest["status"] == "prepared" and manifest.get("reuse_from"):
+        cached = reuse_completed_result(manifest_path, manifest, emit)
+        if cached is not None:
+            return cached
     config_dir = folder / "auth_config"
     config_dir.mkdir(exist_ok=True)
     env = auth_env(manifest["username"], secret, config_dir)
@@ -414,7 +515,7 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
                     except Exception: pass  # Status remains authoritative if live logs are unavailable.
                     next_log=time.monotonic()+60
                 emit(("status", "正在等待Kaggle分配资源（排队）…" if state in {"queued","pending"} else (last_stage or "云端正在运行：可能在安装依赖、下载模型或生成音频；不是排队。")))
-                sleep(20)
+                sleep(10)
             else:
                 raise TimeoutError("等待云端超时，任务身份已保存，可稍后恢复，未重复提交。")
             download = folder / "download"
@@ -486,6 +587,8 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             save_json(manifest_path,manifest)
         for name in ("voxcpm2.ipynb", "kernel-metadata.json"):
             (folder / name).unlink(missing_ok=True)
+        manifest["result_hashes"] = result_hashes(manifest["artifacts"])
+        save_json(manifest_path, manifest)
         emit(("done", manifest["artifacts"]))
         return manifest["artifacts"]
     except Exception as exc:

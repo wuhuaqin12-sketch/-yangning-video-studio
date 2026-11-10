@@ -151,6 +151,8 @@ def open_kaggle_voice(app, parent=None):
     prefs=settings.get("generation_by_language",{}).get(language.get(),{})
     gain=tk.StringVar(value=str(prefs.get("gain_db",0)))
     denoise=tk.BooleanVar(value=prefs.get("denoise",True))
+    reuse_completed=tk.BooleanVar(value=settings.get("reuse_completed",True))
+    include_preview=tk.BooleanVar(value=settings.get("include_preview",True))
     style_vars={name:tk.BooleanVar(value=name in prefs.get("styles",[])) for name in STYLE_OPTIONS}
     preset=tk.StringVar(value=next((label for label,names in PRESETS.items() if names==prefs.get("styles",[])),"自定义"))
     active_language=language.get()
@@ -200,7 +202,6 @@ def open_kaggle_voice(app, parent=None):
     preset_combo=ttk.Combobox(line,textvariable=preset,values=tuple(PRESETS),state="readonly",width=12)
     preset_combo.pack(side="left",padx=8)
     preset_combo.bind("<<ComboboxSelected>>",lambda event: apply_preset())
-    ttk.Button(line,text="详细调节",command=lambda: open_generation()).pack(side="left")
     ttk.Label(generation_tab,textvariable=option_summary,wraplength=680).pack(anchor="w",pady=3)
     ttk.Label(edit_tab,textvariable=mode_info,wraplength=680).pack(anchor="w",pady=3)
     ttk.Label(generation_tab,text="生成前调节：语气是模型提示，速度/音量/降噪是生成后的自动处理。",wraplength=680).pack(anchor="w",pady=6)
@@ -212,6 +213,9 @@ def open_kaggle_voice(app, parent=None):
     ttk.Combobox(audio_row,textvariable=gain,values=("-6","-2","0","2","4"),width=8).pack(side="left",padx=8)
     ttk.Checkbutton(audio_row,text="轻度降噪（默认开）",variable=denoise).pack(side="left")
     ttk.Button(generation_tab,text="恢复1倍 / 自然语气 / 轻度降噪",command=lambda: reset_generation()).pack(anchor="w",pady=8)
+    ttk.Checkbutton(generation_tab,text="全文同时导出短试听（同一次生成）",variable=include_preview).pack(anchor="w",pady=4)
+    ttk.Checkbutton(generation_tab,text="正文和设置相同时复用已完成音频",variable=reuse_completed).pack(anchor="w",pady=4)
+    ttk.Label(generation_tab,text="短试听随全文一起返回，不需要再生成一次。要获得不同的新版本，请关闭复用或更换随机种子。单独预听后再生成全文，仍会启动新作业。",wraplength=680).pack(anchor="w",pady=6)
     generation_command=tk.StringVar()
     ttk.Label(generation_tab,text="快捷指令（用逗号分隔；仅支持已列选项）",wraplength=680).pack(anchor="w",pady=6)
     ttk.Entry(generation_tab,textvariable=generation_command).pack(fill="x",pady=4)
@@ -227,6 +231,7 @@ def open_kaggle_voice(app, parent=None):
     template_entry=ttk.Entry(template_row,textvariable=template)
     template_entry.grid(row=1,column=0,sticky="ew",pady=5)
     ttk.Button(template_row,text="选择模板",command=lambda: select_manual_template()).grid(row=1,column=1,padx=5)
+    ttk.Button(template_row,text="清除选择",command=lambda: clear_template()).grid(row=1,column=2,padx=5)
     ttk.Label(template_row,textvariable=template_status,wraplength=650).grid(row=2,column=0,columnspan=2,sticky="w",pady=6)
     ttk.Button(language_tab,text="加入本语言模板库（以后自动选择）",command=lambda: register_template()).pack(anchor="w",pady=6)
     ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
@@ -392,6 +397,11 @@ def open_kaggle_voice(app, parent=None):
         settings.setdefault("template_modes",{})[name]=template_mode.get()
         settings.setdefault("generation_by_language",{})[name]=opt
 
+    def clear_template():
+        template_mode.set("自然语气（无模板）")
+        template.set("")
+        update_template_status()
+
     def update_profile(reset=False):
         nonlocal active_language
         if reset:
@@ -422,6 +432,7 @@ def open_kaggle_voice(app, parent=None):
         drafts[mode.get()]=text_box.get("1.0","end").strip()
         settings.update(username=username.get().strip(),reference_dataset=dataset.get().strip(),language=language.get(),
                         output_dir=output.get(),seed=seed.get(),drafts=drafts,
+                        reuse_completed=reuse_completed.get(),include_preview=include_preview.get(),
                         japanese_pronunciation_enabled=pronunciation_enabled.get(),japanese_pronunciation_overrides=japanese_readings)
         save_json(SETTINGS,settings)
 
@@ -585,6 +596,7 @@ def open_kaggle_voice(app, parent=None):
                               edit=edit if purpose=="full" else None,purpose=purpose,template_library_dir=DATA/"templates",
                               prosody_template=template.get().strip() or None,template_mode=template_mode.get(),
                               pronunciation_enabled=pronunciation_enabled.get(),japanese_readings=dict(japanese_readings),style_options=opt["styles"])
+                snapshot.update(reuse_completed=reuse_completed.get(), include_preview=include_preview.get())
                 if purpose=="preview": snapshot["text"]=audition_text(snapshot["text"],language.get())
                 remember()
             if token.get().strip():
@@ -830,6 +842,9 @@ def open_kaggle_voice(app, parent=None):
                     if not path: raise ValueError("生成记录没有音频路径。")
                     if active_purpose=="full":
                         install_result(path,"局部修改" if payload.get("edited_audio") else "云端生成")
+                        if payload.get("preview_audio"):
+                            settings["last_preview_audio"]=payload["preview_audio"]
+                            save_json(SETTINGS,settings)
                     else:
                         settings["last_preview_audio"]=path
                         settings.setdefault("audio_history",[]).append({"result":path,"kind":"术语试听" if active_purpose=="terminology" else "约15秒预听"})
@@ -838,7 +853,7 @@ def open_kaggle_voice(app, parent=None):
                         continue
                     # Old SRT belongs to old audio; never silently reuse it after another result.
                     source_srt.set(payload.get("edited_srt",""))
-                    status.set("已导出新WAV，原版保留。请试听音色、全文完整性、术语读音和接缝。")
+                    status.set("音频已保存，可点击试听预听或试听最近WAV。" if payload.get("preview_audio") else "音频已保存，请试听确认。")
                 elif kind=="adjusted":
                     set_running(False);install_result(payload["result"],"普通音频微调",payload["source"])
                     source_srt.set("")
