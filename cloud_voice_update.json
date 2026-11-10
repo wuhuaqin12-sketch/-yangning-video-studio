@@ -1,0 +1,11 @@
+{
+  "product": "YangNing Cloud Voice Independent Preview",
+  "sequence": 5,
+  "version": "0.5-preview.1",
+  "source_revision": "98a45d0f203f3092557d220398b967de6373b8e7",
+  "schema": 1,
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/5bf3d7a3e812253295c10d2f71d7c55ce10de5ab/cloud_voice_payload.json",
+  "payload_size": 312507,
+  "payload_sha256": "f380f6d5f1ea798f5dfd8cc76fad16b4b50f0487d6f711ce2762bf44ccb212d2",
+  "notes": "新增检查更新、下载校验、独立环境准备、自动重启与恢复上一版本。保留连接设置、老师音色配置、语气模板和历史音频。"
+}
