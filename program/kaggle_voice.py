@@ -173,8 +173,8 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(more,text="保存当前语言设置",command=lambda: save_preferences()).pack(pady=(0,8))
     ttk.Button(box,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(anchor="e")
 
-    ttk.Label(box, text="1626老师原声 · 自然停顿保留", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
-    ttk.Label(box, text="语气模板只提供节奏提示，音色参考保持1626。生成后请试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
+    ttk.Label(box, text="老师音色 · 自然停顿保留", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
+    ttk.Label(box, text="语气模板只提供节奏提示，音色参考使用老师原声。生成后请试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
     connection = ttk.LabelFrame(connection_tab, text="首次连接Kaggle", padding=10)
     connection.pack(fill="x", pady=(0, 10))
     connection.columnconfigure(1, weight=1)
@@ -182,7 +182,7 @@ def open_kaggle_voice(app, parent=None):
         ttk.Label(connection, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
         ttk.Entry(connection, textvariable=variable, show="•" if row == 2 else "").grid(row=row, column=1, sticky="ew", pady=4)
     ttk.Button(connection, text="安全保存连接", command=lambda: save_connection()).grid(row=3, column=1, sticky="e", pady=4)
-    ttk.Label(connection, text="令牌仅保存在这台电脑的Windows凭据库。1626参考文件需命名为1626_reference.wav，保留原始文件内容。", wraplength=720).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
+    ttk.Label(connection, text="令牌仅保存在这台电脑的Windows凭据库。老师原声参考文件由云端数据集提供，请保留原始文件内容。", wraplength=720).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
 
     line = ttk.Frame(box)
     line.pack(fill="x", pady=5)
@@ -213,9 +213,9 @@ def open_kaggle_voice(app, parent=None):
     ttk.Label(generation_tab,text="快捷指令（用逗号分隔；仅支持已列选项）",wraplength=680).pack(anchor="w",pady=6)
     ttk.Entry(generation_tab,textvariable=generation_command).pack(fill="x",pady=4)
     ttk.Button(generation_tab,text="识别并应用到生成设置",command=lambda: apply_generation_command()).pack(anchor="w",pady=6)
-    ttk.Label(generation_tab,text="不改变1626音色参考；不强制抬高音调；停顿不会自动剪掉。模型语气提示的实际效果需试听。",wraplength=680).pack(anchor="w",pady=6)
+    ttk.Label(generation_tab,text="不更换老师音色参考；不强制抬高音调；停顿不会自动剪掉。模型语气提示的实际效果需试听。",wraplength=680).pack(anchor="w",pady=6)
     combo.bind("<<ComboboxSelected>>", lambda e: update_profile(True))
-    template_row = ttk.LabelFrame(language_tab, text="语气参考（音色始终使用1626）", padding=8)
+    template_row = ttk.LabelFrame(language_tab, text="语气参考（始终使用老师音色）", padding=8)
     template_row.pack(fill="x", pady=5)
     template_row.columnconfigure(0,weight=1)
     template_mode_combo=ttk.Combobox(template_row,textvariable=template_mode,values=TEMPLATE_MODES,state="readonly",width=24)
@@ -626,7 +626,7 @@ def open_kaggle_voice(app, parent=None):
             except ValueError as exc:
                 messagebox.showinfo("没有术语",str(exc),parent=popup);return
             popup.destroy();start(False,purpose="terminology",supplied_text=content)
-        ttk.Button(popup,text="生成术语试听（使用当前语气与1626音色）",command=generate).pack(pady=10)
+        ttk.Button(popup,text="生成术语试听（使用当前语气与老师音色）",command=generate).pack(pady=10)
 
     def segment_dialog():
         audio=last_audio
@@ -847,7 +847,7 @@ def open_kaggle_voice(app, parent=None):
                     settings.setdefault("template_modes",{})[payload["language"]]="自动选择"
                     if language.get()==payload["language"]:
                         template_mode.set("自动选择");update_template_status()
-                    save_json(SETTINGS,settings);status.set("本语言模板已加入，自动模式以后优先选择它；音色参考仍为1626。")
+                    save_json(SETTINGS,settings);status.set("本语言模板已加入，自动模式以后优先选择它；音色参考仍为老师原声。")
                 elif kind=="play": play_path(payload)
                 elif kind=="listen_error": messagebox.showerror("句段试听未完成",payload,parent=win)
                 elif kind=="check_done": messagebox.showinfo("本机环境检查",payload,parent=more)

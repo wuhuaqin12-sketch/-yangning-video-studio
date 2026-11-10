@@ -55,7 +55,7 @@ def build_notebook(request):
     setup = "import json\nREQUEST = json.loads(" + repr(json.dumps(request, ensure_ascii=False)) + ")\n"
     cells = [
         {"cell_type": "markdown", "metadata": {}, "source": [
-            "# 私有VoxCPM2生成作业\n", "1626原声音色；文字语气指令；自然停顿保留；结果待听检。\n"
+            "# 私有VoxCPM2生成作业\n", "老师音色；文字语气指令；自然停顿保留；结果待听检。\n"
         ]}
     ]
     guarded_run = (
@@ -203,7 +203,7 @@ def stage_from_log(log):
             text="\n".join(str(item.get("data","")) for item in events if isinstance(item,dict))
     except (ValueError,TypeError): pass
     matches=re.findall(r"YANGNING_STAGE=([a-z_]+)",text)
-    stages={"dependencies":"云端正在安装依赖…","preflight":"云端正在检查GPU和1626参考文件…",
+    stages={"dependencies":"云端正在安装依赖…","preflight":"云端正在检查GPU和老师原声参考文件…",
             "model_download":"云端正在下载或载入模型…","generation":"云端正在生成音频…",
             "postprocess":"云端正在执行速度、音量和降噪处理…"}
     label=stages.get(matches[-1],"") if matches else ""
@@ -241,7 +241,7 @@ def deliver_result(folder, manifest):
         raise ValueError("缺少自定义音量和降噪的执行记录。")
     target = Path(manifest["output_dir"])
     target.mkdir(parents=True, exist_ok=True)
-    prefix = "YangNing_VoxCPM2_1626_" + manifest["job_id"]
+    prefix = "YangNing_TeacherVoice_" + manifest["job_id"]
     artifacts = {}
     for name, suffix in (("yangning_final.wav", ".wav"), ("yangning_raw.wav", "_raw.wav"),
                          ("voice_recipe.json", "_recipe.json"), ("script.txt", "_script.txt")):

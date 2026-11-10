@@ -198,10 +198,10 @@ def run(request):
     candidates = [p for p in Path("/kaggle/input").rglob("*") if p.is_file() and p.name in ("1626_reference.wav", "1626_reference.wav.wav")]
     reference = next((p for p in candidates if hashlib.sha256(p.read_bytes()).hexdigest() == REFERENCE_SHA256), Path(request["reference_path"]))
     if not reference.is_file():
-        raise FileNotFoundError("私有数据集中找不到1626_reference.wav。")
+        raise FileNotFoundError("私有数据集中找不到已配置的老师原声参考文件。")
     reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
     if reference_hash != REFERENCE_SHA256:
-        raise ValueError("参考文件与已确认的1626原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")
+        raise ValueError("参考文件与已确认的老师原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")
     profile = profile_for(request["language"], request.get("tempo"))
     prosody = request.get("prosody_reference")
     if prosody:

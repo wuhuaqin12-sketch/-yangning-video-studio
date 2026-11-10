@@ -56,6 +56,7 @@ def main():
                 return result
             widgets = descendants(window)
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
+            assert not any("1626" in str(w.cget("text")) for w in widgets if isinstance(w,(ttk.Label,ttk.Button,ttk.LabelFrame)))
             assert "生成音频" in labels and "恢复最近任务" in labels
             assert "更多设置 ⋯" in labels and "音频微调" in labels
             for control in ("先预听约15秒","试听预听","按句段试听 / 修改","术语集中试听","续生成未完成段（已有断点时）","加入本语言模板库（以后自动选择）"):
