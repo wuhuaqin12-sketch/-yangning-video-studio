@@ -58,6 +58,7 @@ def main():
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert not any("1626" in str(w.cget("text")) for w in widgets if isinstance(w,(ttk.Label,ttk.Button,ttk.LabelFrame)))
             assert "生成音频" in labels and "恢复最近任务" in labels
+            assert "检查更新" in labels
             assert "更多设置 ⋯" in labels and "音频微调" in labels
             for control in ("先预听约15秒","试听预听","按句段试听 / 修改","术语集中试听","续生成未完成段（已有断点时）","加入本语言模板库（以后自动选择）"):
                 assert control in labels, control
@@ -70,6 +71,19 @@ def main():
             assert more.state()=="withdrawn"
             notebook=next(w for w in more.winfo_children() if isinstance(w,ttk.Notebook))
             assert len(notebook.tabs())==4
+            from unittest.mock import patch
+            import time
+            import cloud_voice_update
+            fake={"available":False,"current":"0.5-preview.1","update":{"version":"0.5-preview.1","notes":"已通过检查"}}
+            with patch.object(cloud_voice_update,"check_update",return_value=fake):
+                next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="检查更新").invoke()
+                deadline=time.monotonic()+4
+                while time.monotonic()<deadline:
+                    root.update();time.sleep(.03)
+                    update_window=getattr(app,"_cloud_update_window",None)
+                    if update_window and any(isinstance(w,ttk.Label) and "已是当前渠道最新版" in str(w.cget("text")) for w in descendants(update_window)): break
+                else: raise AssertionError("Update dialog did not finish checking")
+                update_window.destroy()
             next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="音频微调").invoke()
             root.update()
             adjustment=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="音频微调 · 保留原版")

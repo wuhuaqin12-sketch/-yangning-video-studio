@@ -73,6 +73,7 @@ jobs:
           python -m unittest discover -s program -p cloud_voice_test.py -v
           python -m unittest discover -s program -p voice_adjust_test.py -v
           python -m unittest discover -s program -p voice_workflows_test.py -v
+          python -m unittest discover -s program -p cloud_voice_update_test.py -v
       - name: Check PowerShell launcher syntax
         shell: pwsh
         run: |

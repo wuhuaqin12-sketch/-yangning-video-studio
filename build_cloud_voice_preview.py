@@ -3,6 +3,7 @@ import argparse
 import ast
 import hashlib
 import json
+import runpy
 import zipfile
 from pathlib import Path
 
@@ -11,13 +12,14 @@ FILES = (
     "README_CLOUD_PREVIEW.zh-CN.md", "KAGGLE_VOXCPM2_SETUP.md", "CLOUD_VOICE_EDITING_REQUIREMENTS.md",
     "program/cloud_voice_preview.py", "program/preview_python_check.py", "program/cloud_voice_core.py", "program/kaggle_voice.py",
     "program/voxcpm_kaggle_worker.py", "program/voice_clip_edit.py", "program/cloud_voice_test.py",
-    "program/voice_workflows.py", "program/voice_review.py", "program/voice_adjust.py", "program/voice_prosody.py", "program/japanese_pronunciation.py",
+    "program/cloud_voice_update.py", "program/cloud_voice_version.py", "program/voice_workflows.py", "program/voice_review.py", "program/voice_adjust.py", "program/voice_prosody.py", "program/japanese_pronunciation.py",
 )
 TEMPLATE_FILES = ("program/templates/japanese.wav", "program/templates/english.wav")
 
 
 def build(root, output, revision):
     root, output = Path(root), Path(output)
+    version_info=runpy.run_path(str(root/"program/cloud_voice_version.py"))
     payloads = {}
     prefix = "YangNing_CloudVoice_Independent_Preview"
     for name in FILES:
@@ -34,7 +36,7 @@ def build(root, output, revision):
         if (root / name).is_file():
             payloads[name] = (root / name).read_bytes()
     payloads["preview_version.json"] = json.dumps({
-        "name": "YangNing Cloud Voice Independent Preview", "version": "0.4-preview.1",
+        "name": "YangNing Cloud Voice Independent Preview", "version": version_info["VERSION"], "update_sequence": version_info["UPDATE_SEQUENCE"],
         "source_revision": revision, "formal_studio_release": False,
         "local_validation": "Local workflow and FFmpeg tests; Windows setup and UI checked separately in CI; prior GPU pipeline generated a verified WAV",
         "pending_validation": ["new generation controls GPU audition", "template-conditioned GPU audition", "teacher-voice and join listening"],

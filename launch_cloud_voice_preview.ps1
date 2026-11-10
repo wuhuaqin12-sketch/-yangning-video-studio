@@ -1,4 +1,4 @@
-param([switch]$SetupOnly)
+param([switch]$SetupOnly, [string]$RuntimeDir)
 $ErrorActionPreference = 'Stop'
 $previewRoot = $PSScriptRoot
 $probeScript = Join-Path $previewRoot 'program\preview_python_check.py'
@@ -49,7 +49,19 @@ try {
         $basePython = Find-PreviewPython
         if (-not $basePython) { throw 'Python was installed but could not be validated. Close this window and run the preview again.' }
     }
-    $runtimeDir = Join-Path $previewRoot '.preview_runtime'
+    if ($RuntimeDir) {
+        $runtimeDir = $RuntimeDir
+    } else {
+        $selector = Join-Path $previewRoot '.runtime_selector.json'
+        if (Test-Path -LiteralPath $selector) {
+            $selection = Get-Content -LiteralPath $selector -Raw | ConvertFrom-Json
+            $runtimeDir = [string]$selection.runtime
+            $runtimeBase = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'YangNingCloudVoicePreview\runtimes')) + [IO.Path]::DirectorySeparatorChar
+            if (-not ([IO.Path]::GetFullPath($runtimeDir)).StartsWith($runtimeBase, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid independent runtime selection.' }
+        } else {
+            $runtimeDir = Join-Path $previewRoot '.preview_runtime'
+        }
+    }
     $runtimePython = Join-Path $runtimeDir 'Scripts\python.exe'
     $healthy = $false
     if ((Test-Path $runtimePython) -and (Test-Path (Join-Path $runtimeDir 'pyvenv.cfg'))) {

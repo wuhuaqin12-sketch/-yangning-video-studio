@@ -171,6 +171,10 @@ def open_kaggle_voice(app, parent=None):
         tabs.add(pane,text=label)
     connection_tab,generation_tab,language_tab,edit_tab=[_scroll_pane(page) for page in pages]
     ttk.Button(more,text="保存当前语言设置",command=lambda: save_preferences()).pack(pady=(0,8))
+    def check_updates():
+        from cloud_voice_update import open_update_window
+        open_update_window(app)
+    ttk.Button(box,text="检查更新",command=check_updates).pack(anchor="e",pady=(0,4))
     ttk.Button(box,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(anchor="e")
 
     ttk.Label(box, text="老师音色 · 自然停顿保留", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
@@ -549,13 +553,14 @@ def open_kaggle_voice(app, parent=None):
     def set_running(value):
         nonlocal running
         running=value
+        app._cloud_voice_busy=value
         for button in (submit,resume): button.state(["disabled"] if value else ["!disabled"])
         if value: progressbar.start(12)
         else: progressbar.stop()
 
     def start(recover, purpose="full", supplied_text=None, continuation=False):
         nonlocal active_purpose
-        if running: return
+        if running or getattr(app,"_cloud_update_busy",False): return
         try:
             if recover:
                 record=settings.get("last_manifest","")
@@ -601,7 +606,7 @@ def open_kaggle_voice(app, parent=None):
         threading.Thread(target=work,daemon=True).start()
 
     def register_template():
-        if running: return
+        if running or getattr(app,"_cloud_update_busy",False): return
         source=filedialog.askopenfilename(parent=more,filetypes=[("音频","*.wav *.mp3 *.m4a *.flac")])
         if not source: return
         selected_language=language.get()
@@ -657,7 +662,7 @@ def open_kaggle_voice(app, parent=None):
                 except Exception as exc: events.put(("listen_error",str(exc)))
             threading.Thread(target=work,daemon=True).start()
         def modify():
-            if running: return
+            if running or getattr(app,"_cloud_update_busy",False): return
             try: indices=selected()
             except ValueError as exc: messagebox.showinfo("请选择句段",str(exc),parent=popup);return
             mode.set("partial");update_mode()
@@ -706,7 +711,7 @@ def open_kaggle_voice(app, parent=None):
             return True
         ttk.Button(area,text="识别指令并预览动作",command=parse).pack(anchor="w",pady=6)
         def local_apply():
-            if running:
+            if running or getattr(app,"_cloud_update_busy",False):
                 messagebox.showinfo("任务进行中","请等待当前任务结束。",parent=popup);return
             if instructions.get().strip() and not parse(): return
             try:
@@ -781,7 +786,7 @@ def open_kaggle_voice(app, parent=None):
         view.insert("1.0",content);view.configure(state="disabled")
 
     def local_check():
-        if running: return
+        if running or getattr(app,"_cloud_update_busy",False): return
         def work():
             try:
                 from cloud_voice_preview import ensure_media_tools

@@ -61,6 +61,10 @@ def main():
     if sys.version_info < (3, 11):
         raise RuntimeError("This preview requires Python 3.11 or newer; Python 3.12 is recommended.")
     ensure_media_tools()
+    if "--health-check" in sys.argv:
+        import cloud_voice_core, kaggle_voice, voice_workflows, voice_adjust, cloud_voice_update
+        print("Independent voice modules and media checks passed.")
+        return
     if "--setup-only" in sys.argv:
         print("Standalone media tools check passed.")
         return
@@ -72,10 +76,12 @@ def main():
     os.environ["YANGNING_CLOUD_DATA_DIR"] = str(base)
     os.environ["YANGNING_CLOUD_CREDENTIAL_SERVICE"] = "YangNingStudio-Kaggle-Preview"
     from kaggle_voice import open_kaggle_voice
+    from cloud_voice_update import open_update_window, acknowledge_boot
+    from cloud_voice_version import VERSION
 
     root = tk.Tk()
     root.title("杨宁云端语音 · 独立试用")
-    root.geometry("680x300")
+    root.geometry("700x370")
     output = Path.home() / "Videos" / "YangNingCloudPreviewOutputs"
     app = SimpleNamespace(root=root, v={
         "video": tk.StringVar(), "audio": tk.StringVar(), "output": tk.StringVar(value=str(output)),
@@ -83,13 +89,19 @@ def main():
     }, auto_cut=tk.BooleanVar(value=False))
     frame = ttk.Frame(root, padding=18)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="杨宁云端语音克隆 · 独立试用", font=("Microsoft YaHei UI", 17, "bold")).pack(anchor="w")
+    ttk.Label(frame, text="杨宁云端语音克隆 · "+VERSION, font=("Microsoft YaHei UI", 17, "bold")).pack(anchor="w")
     ttk.Label(frame, text="独立目录运行，不替换已安装的12.11。首次需要联网准备小型客户端依赖，本机不安装语音模型。", wraplength=630).pack(anchor="w", pady=10)
-    ttk.Button(frame, text="打开语音克隆", command=lambda: open_kaggle_voice(app)).pack(anchor="w", pady=8)
+    def open_voice():
+        open_kaggle_voice(app)
+        acknowledge_boot(Path(__file__).resolve().parent.parent)
+    app.check_updates=lambda:open_update_window(app)
+    actions=ttk.Frame(frame);actions.pack(fill="x",pady=8)
+    ttk.Button(actions, text="打开语音克隆", command=open_voice).pack(side="left")
+    ttk.Button(actions,text="检查更新",command=app.check_updates).pack(side="left",padx=10)
     ttk.Label(frame, text="最近生成的WAV音频").pack(anchor="w")
     ttk.Entry(frame, textvariable=app.v["audio"]).pack(fill="x", pady=4)
     ttk.Label(frame, text="生成结果需检查音色和术语读音。音画同步、字幕和成片合成请在杨宁工作室完成。", wraplength=630).pack(anchor="w", pady=8)
-    root.after(200, lambda: open_kaggle_voice(app))
+    root.after(200, open_voice)
     root.mainloop()
 
 
