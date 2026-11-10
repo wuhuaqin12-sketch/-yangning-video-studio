@@ -14,7 +14,7 @@ def default_template(language):
 
 
 NATIVE_NAMES={"日语":"japanese.wav","英语":"english.wav","法语":"french.wav","德语":"german.wav",
-              "粤语":"cantonese.wav","印尼语":"indonesian.wav","越南语":"vietnamese.wav"}
+              "粤语":"cantonese.wav","印尼语":"indonesian.wav"}
 TEMPLATE_MODES=("自动选择","手动指定","自然语气（无模板）")
 
 

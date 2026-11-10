@@ -191,7 +191,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text())["tempo"], 0.95)
 
     def test_language_default_and_tempo_validation(self):
-        for lang in ("日语", "英语", "法语", "德语", "印尼语", "粤语", "越南语"):
+        for lang in ("日语", "英语", "法语", "德语", "印尼语", "粤语"):
             self.assertEqual(profile_for(lang)["tempo"], 1.0)
         for value in (0, 3, float("nan"), float("inf")):
             with self.assertRaises(ValueError):
@@ -319,7 +319,7 @@ class WorkflowTests(unittest.TestCase):
         native=choose_template("法语",template_root=templates)
         self.assertEqual(native["source_kind"],"language_labelled")
         self.assertTrue(native["path"].endswith("french.wav"))
-        for language in ("粤语","印尼语","越南语"):
+        for language in ("粤语","印尼语"):
             chosen=choose_template(language,template_root=templates)
             self.assertEqual(chosen["source_kind"],"natural_preset")
             self.assertFalse(chosen["path"])
