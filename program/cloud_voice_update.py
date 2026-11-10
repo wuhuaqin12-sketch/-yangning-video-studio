@@ -308,7 +308,7 @@ def open_update_window(app,install_root=None):
     body=ttk.Frame(window,padding=16);body.pack(fill="both",expand=True)
     def wrap(event):
         for child in body.winfo_children():
-            if isinstance(child,ttk.Label) and int(child.cget("wraplength"))>0: child.configure(wraplength=max(350,event.width-32))
+            if isinstance(child,ttk.Label) and int(child.cget("wraplength") or 0)>0: child.configure(wraplength=max(350,event.width-32))
     body.bind("<Configure>",wrap)
     state=tk.StringVar(value="正在检查语音工具更新…")
     ttk.Label(body,text="语音工具更新",font=("Microsoft YaHei UI",14,"bold")).pack(anchor="w")

@@ -38,6 +38,8 @@ def main():
         assert not list(Path(directory).rglob("*.json")), "Credential check must not create plaintext JSON."
         ensure_media_tools()
         root = tk.Tk()
+        callback_errors=[]
+        root.report_callback_exception=lambda kind,value,trace:callback_errors.append(str(value))
         root.withdraw()
         app = SimpleNamespace(root=root, v={
             "video": tk.StringVar(), "audio": tk.StringVar(), "output": tk.StringVar(value=directory),
@@ -162,6 +164,7 @@ def main():
             open_kaggle_voice(app)
             assert app._cloud_voice_window is window, "Repeated open should reuse one window."
             root.update()
+            assert not callback_errors, callback_errors
         finally:
             root.destroy()
     print("Windows preview GUI, media tools and credential-vault checks passed. No Kaggle account used.")

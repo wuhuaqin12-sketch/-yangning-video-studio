@@ -54,7 +54,7 @@ try {
     } else {
         $selector = Join-Path $previewRoot '.runtime_selector.json'
         if (Test-Path -LiteralPath $selector) {
-            $selection = Get-Content -LiteralPath $selector -Raw | ConvertFrom-Json
+            $selection = Get-Content -LiteralPath $selector -Raw -Encoding UTF8 | ConvertFrom-Json
             $runtimeDir = [string]$selection.runtime
             $runtimeBase = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'YangNingCloudVoicePreview\runtimes')) + [IO.Path]::DirectorySeparatorChar
             if (-not ([IO.Path]::GetFullPath($runtimeDir)).StartsWith($runtimeBase, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid independent runtime selection.' }
