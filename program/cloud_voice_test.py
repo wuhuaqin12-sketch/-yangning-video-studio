@@ -146,6 +146,17 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): run_job(manifest,"legacy",lambda e:None,cli=self.fake_cli(manifest))
         self.assertFalse(any(args[:2]==["kernels","delete"] for args,env in self.calls))
 
+    def test_partial_stereo_rejected_before_gpu_not_silently_downmixed(self):
+        source=self.root/"stereo.wav"
+        with wave.open(str(source),"wb") as w:
+            w.setparams((2,2,48000,0,"NONE","not compressed"));w.writeframes(bytes(48000*4))
+        manifest=self.job(edit={"kind":"audio","mode":"partial","audio":str(source),"start":0,"end":.5})
+        calls=[]
+        def no_gpu(*args,**kwargs): calls.append(args);raise AssertionError("Must reject before GPU")
+        with self.assertRaises(RuntimeError): run_job(manifest,"legacy",lambda e:None,cli=no_gpu)
+        self.assertEqual(calls,[])
+        self.assertEqual(json.loads(manifest.read_text())["status"],"prepared")
+
     def test_actual_stage_parser_and_missing_completed_result(self):
         self.assertIn("安装依赖",stage_from_log("YANGNING_STAGE=dependencies"))
         log=json.dumps([{"data":"YANGNING_STAGE=generation\n已生成 2/5 个完整语义段"}])

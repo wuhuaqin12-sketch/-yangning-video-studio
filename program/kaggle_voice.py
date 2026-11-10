@@ -45,6 +45,14 @@ def _vault():
     return WinVaultKeyring()
 
 
+def _wrap_labels(parent,width):
+    for child in parent.winfo_children():
+        if isinstance(child,ttk.Label):
+            try:
+                if int(child.cget("wraplength"))>0: child.configure(wraplength=max(220,width-32))
+            except (tk.TclError,ValueError): pass
+
+
 def _fit_window(window, width, height):
     window.geometry(f"{min(width,max(600,window.winfo_screenwidth()-60))}x{min(height,max(460,window.winfo_screenheight()-100))}")
 
@@ -59,7 +67,7 @@ def _scroll_pane(parent):
     pane=ttk.Frame(canvas,padding=10)
     item=canvas.create_window((0,0),window=pane,anchor="nw")
     pane.bind("<Configure>",lambda event:canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.bind("<Configure>",lambda event:canvas.itemconfigure(item,width=event.width))
+    canvas.bind("<Configure>",lambda event:(canvas.itemconfigure(item,width=event.width),_wrap_labels(pane,event.width-20)))
     def wheel(event):
         canvas.yview_scroll(-1 if event.delta>0 or getattr(event,"num",0)==4 else 1,"units")
     # No bind_all: wheel over another window/text must retain its own scrolling.
@@ -99,7 +107,7 @@ def open_kaggle_voice(app, parent=None):
     box = ttk.Frame(canvas, padding=14)
     item = canvas.create_window((0, 0), window=box, anchor="nw")
     box.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(item, width=e.width))
+    canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(item, width=e.width), _wrap_labels(box,e.width-28)))
     events = queue.Queue()
     running = False
 
@@ -122,7 +130,7 @@ def open_kaggle_voice(app, parent=None):
     token = tk.StringVar()
     seed = tk.StringVar(value=str(settings.get("seed", 16261109)))
     profile_info = tk.StringVar()
-    status = tk.StringVar(value="准备就绪。生成结果按试听保存，音色和读音需听检确认。")
+    status = tk.StringVar(value="准备就绪。音色和读音需听检确认。" if settings.get("username") and settings.get("reference_dataset") else "首次使用：点击右上方更多设置 → 连接与输出，安全保存本人连接信息。")
     last_audio = settings.get("last_audio", "")
     prefs=settings.get("generation_by_language",{}).get(language.get(),{})
     gain=tk.StringVar(value=str(prefs.get("gain_db",0)))
@@ -150,7 +158,7 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(box,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(anchor="e")
 
     ttk.Label(box, text="1626老师原声 · 自然停顿保留", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
-    ttk.Label(box, text="模板只分析停顿和相对起伏，再转成语气提示；不作为音色或续写音频。逐句语调复刻尚未实现。", wraplength=740).pack(anchor="w", pady=(4, 10))
+    ttk.Label(box, text="语气模板只提供节奏提示，音色参考保持1626。生成后请试听确认。", wraplength=740).pack(anchor="w", pady=(4, 10))
     connection = ttk.LabelFrame(connection_tab, text="首次连接Kaggle", padding=10)
     connection.pack(fill="x", pady=(0, 10))
     connection.columnconfigure(1, weight=1)
@@ -196,7 +204,7 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(template_row, text="选择模板", command=lambda: choose_media(template, [("音频", "*.wav *.mp3 *.m4a")])).pack(side="left", padx=5)
     ttk.Button(template_row, text="恢复本语言模板", command=lambda: template.set(default_template(language.get()))).pack(side="left")
     ttk.Label(language_tab, text="日语用日语模板；英语、法语、德语用英语模板。粤语、印尼语可另选模板；留空使用自然语气。模板不会改变所选倍数。", wraplength=740).pack(anchor="w")
-    ttk.Label(box, text="这里只生成WAV音频；音画同步和成片合成请在杨宁工作室完成。", wraplength=740).pack(anchor="w", pady=6)
+    ttk.Label(box, text="输出WAV音频 · 普通生成只需正文，无需视频或原音频。", wraplength=740).pack(anchor="w", pady=6)
     choices = ttk.Frame(edit_tab)
     choices.pack(fill="x", pady=6)
     for label, value in (("生成新音频", "generate"), ("修改全文后重新生成", "full"), ("局部改读音并接回原音频", "partial")):
@@ -258,11 +266,11 @@ def open_kaggle_voice(app, parent=None):
     actions.pack(fill="x", pady=5)
     preview = ttk.Button(actions, text="试听最近WAV", command=lambda: play_last())
     preview.pack(side="left")
-    ttk.Button(actions,text="音频微调 / 语气重生成",command=lambda: adjustment_dialog()).pack(side="left",padx=6)
+    ttk.Button(actions,text="音频微调",command=lambda: adjustment_dialog()).pack(side="left",padx=6)
     resume = ttk.Button(actions, text="恢复最近任务", command=lambda: start(True))
     resume.pack(side="left", padx=8)
-    submit = ttk.Button(actions, text="生成音频", command=lambda: start(False))
-    submit.pack(side="right")
+    submit = ttk.Button(box, text="生成音频", command=lambda: start(False))
+    submit.pack(fill="x",pady=8)
 
     def options():
         return validate_options(tempo.get(),gain.get(),denoise.get(),[name for name,var in style_vars.items() if var.get()])

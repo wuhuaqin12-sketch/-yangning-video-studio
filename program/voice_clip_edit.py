@@ -225,6 +225,9 @@ def preflight_audio_edit(edit, cache_dir):
     source = Path(edit["audio"])
     if not source.is_file():
         raise ValueError("请选择需要修改的原音频WAV。")
+    streams=[item for item in probe(source).get("streams",[]) if item.get("codec_type")=="audio"]
+    if not streams or int(streams[0].get("channels",0)) != 1:
+        raise ValueError("局部克隆连接目前需要单声道独立配音，避免把立体声或背景音乐静默混成单声道。普通音频微调支持保留双声道。")
     a, b = float(edit["start"]), float(edit["end"])
     if not math.isfinite(a+b) or not 0 <= a < b:
         raise ValueError("请输入有效的句段起止时间。")
