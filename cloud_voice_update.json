@@ -1,11 +1,11 @@
 {
   "product": "YangNing Cloud Voice Independent Preview",
-  "sequence": 7,
-  "version": "0.5-preview.3",
-  "source_revision": "da597de9db1f093eec7d3e3ea83dfc325a678e07",
+  "sequence": 8,
+  "version": "0.6-preview.1",
+  "source_revision": "5aff527ce154e3f323b740c09e86897f565b4ff8",
   "schema": 1,
-  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/30ae348f40dfe56b1e3418f652f7c3881878eb76/cloud_voice_payload.json",
-  "payload_size": 330175,
-  "payload_sha256": "7bf49a10bafe9d66a69b0955f2854f0c2288ffbe0c4ca38badd579632f5ea4fd",
-  "notes": "减少重复等待：默认全文附带开头短试听；相同正文和设置的已完成结果经校验后直接复用，不提交GPU。两项均可在更多设置关闭。单独预听后再生成全文仍是新作业，尚不支持跨作业常驻模型。移除重复的详细调节按钮，模板新增清除选择。"
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/262bfd0bebf045ff70f230b42963a08ae43e46cd/cloud_voice_payload.json",
+  "payload_size": 360939,
+  "payload_sha256": "c16ff4a342b33d7f4441b213e5818223a5d5f35b52f1465b03e598f9f40db0f3",
+  "notes": "新增本机／云端两种生成方式。原用户保留云端；更多设置可检测配置并安装独立本机环境，本机不需要Kaggle凭据。连续本机生成复用模型，可释放内存，保留原声校验、模板、读音、微调和局部修改。首次本机安装需要下载较大依赖和模型；速度与CUDA兼容性需短试听实测。公开更新不包含老师原声，旧电脑没有缓存时需选择原文件或使用私下完整包。"
 }
