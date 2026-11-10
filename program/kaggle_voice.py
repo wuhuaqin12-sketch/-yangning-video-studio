@@ -15,6 +15,7 @@ from voice_prosody import default_template, choose_template, TEMPLATE_MODES, res
 from japanese_pronunciation import READINGS, parse_overrides, reading_plan
 from voice_workflows import audition_text, terminology_text, load_segments
 from voice_adjust import STYLE_OPTIONS, PRESETS, interpret_instruction, adjust_audio, validate_options
+from local_voice import ENGINE,default_reference,hardware_report,describe_hardware,prepare_environment,run_local_job
 
 DATA = Path(os.environ.get("YANGNING_CLOUD_DATA_DIR", str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio")))
 SETTINGS = DATA / "kaggle_voice_settings.json"
@@ -104,7 +105,7 @@ def open_kaggle_voice(app, parent=None):
         save_json(SETTINGS, settings)
     win = tk.Toplevel(app.root)
     app._cloud_voice_window = win
-    win.title("免费云端语音克隆 · VoxCPM2")
+    win.title("老师语音克隆 · VoxCPM2")
     _fit_window(win, 850, 760)
     win.minsize(720, 480)
     outer = ttk.Frame(win)
@@ -153,6 +154,12 @@ def open_kaggle_voice(app, parent=None):
     denoise=tk.BooleanVar(value=prefs.get("denoise",True))
     reuse_completed=tk.BooleanVar(value=settings.get("reuse_completed",True))
     include_preview=tk.BooleanVar(value=settings.get("include_preview",True))
+    execution=tk.StringVar(value=settings.get("execution_mode","云端生成"))
+    if execution.get() not in ("云端生成","本机生成"): execution.set("云端生成")
+    local_device=tk.StringVar(value=settings.get("local_device","auto"))
+    local_reference=tk.StringVar(value=settings.get("local_reference","") or default_reference(DATA))
+    engine_title=tk.StringVar(value="老师音色 · "+execution.get().replace("生成",""))
+    hardware_info=tk.StringVar(value="正在检测电脑配置…")
     style_vars={name:tk.BooleanVar(value=name in prefs.get("styles",[])) for name in STYLE_OPTIONS}
     preset=tk.StringVar(value=next((label for label,names in PRESETS.items() if names==prefs.get("styles",[])),"自定义"))
     active_language=language.get()
@@ -178,11 +185,27 @@ def open_kaggle_voice(app, parent=None):
         open_update_window(app)
     header = ttk.Frame(box)
     header.pack(fill="x",pady=(0,10))
-    ttk.Label(header, text="老师音色", font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
+    ttk.Label(header, textvariable=engine_title, font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
     ttk.Button(header,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(side="right")
     ttk.Button(header,text="检查更新",command=check_updates).pack(side="right",padx=6)
     ttk.Label(language_tab, text="语气模板只提供节奏提示，音色参考使用老师原声。生成后请试听确认。", wraplength=680).pack(anchor="w", pady=6)
-    connection = ttk.LabelFrame(connection_tab, text="首次连接Kaggle", padding=10)
+    engine_box=ttk.LabelFrame(connection_tab,text="生成方式",padding=10)
+    engine_box.pack(fill="x",pady=6)
+    mode_combo=ttk.Combobox(engine_box,textvariable=execution,values=("云端生成","本机生成"),state="readonly",width=18)
+    mode_combo.grid(row=0,column=0,sticky="w",pady=5)
+    ttk.Button(engine_box,text="检测电脑配置",command=lambda: detect_hardware()).grid(row=0,column=1,padx=8)
+    ttk.Label(engine_box,textvariable=hardware_info,wraplength=680).grid(row=1,column=0,columnspan=3,sticky="w",pady=6)
+    local_box=ttk.LabelFrame(connection_tab,text="本机模型（首次安装，以后复用）",padding=10)
+    local_box.pack(fill="x",pady=6)
+    ttk.Button(local_box,text="安装本机模型环境",command=lambda: install_local()).grid(row=0,column=0,sticky="w",pady=5)
+    ttk.Button(local_box,text="释放本机模型",command=lambda: release_local()).grid(row=0,column=1,padx=8)
+    ttk.Label(local_box,text="设备").grid(row=1,column=0,sticky="w")
+    ttk.Combobox(local_box,textvariable=local_device,values=("auto","cuda","cpu"),state="readonly",width=12).grid(row=1,column=1,sticky="w",pady=5)
+    ttk.Label(local_box,text="老师原声").grid(row=2,column=0,sticky="w")
+    ttk.Entry(local_box,textvariable=local_reference,width=40).grid(row=2,column=1,sticky="ew")
+    ttk.Button(local_box,text="选择原声",command=lambda: choose_local_reference()).grid(row=2,column=2,padx=5)
+    ttk.Label(local_box,text="auto优先使用可用的NVIDIA显卡，否则用CPU；CPU速度需实测。首次安装下载较大依赖和模型，不影响工作室；本机生成不需要Kaggle账号。",wraplength=680).grid(row=3,column=0,columnspan=3,sticky="w",pady=6)
+    connection = ttk.LabelFrame(connection_tab, text="云端连接Kaggle", padding=10)
     connection.pack(fill="x", pady=(0, 10))
     connection.columnconfigure(1, weight=1)
     for row, label, variable in ((0, "本人Kaggle用户名", username), (1, "私有数据集（用户名/slug）", dataset), (2, "访问令牌 / API Key", token)):
@@ -433,6 +456,7 @@ def open_kaggle_voice(app, parent=None):
         settings.update(username=username.get().strip(),reference_dataset=dataset.get().strip(),language=language.get(),
                         output_dir=output.get(),seed=seed.get(),drafts=drafts,
                         reuse_completed=reuse_completed.get(),include_preview=include_preview.get(),
+                        execution_mode=execution.get(),local_device=local_device.get(),local_reference=local_reference.get(),
                         japanese_pronunciation_enabled=pronunciation_enabled.get(),japanese_pronunciation_overrides=japanese_readings)
         save_json(SETTINGS,settings)
 
@@ -580,7 +604,9 @@ def open_kaggle_voice(app, parent=None):
                 job=json.loads(manifest.read_text(encoding="utf-8"))
                 user=job["username"]
                 purpose=job.get("purpose","full")
+                selected_execution=job.get("execution","cloud")
             else:
+                selected_execution="local" if execution.get()=="本机生成" else "cloud"
                 user=username.get().strip()
                 if generation_command.get().strip():
                     raise ValueError("生成指令框有未应用内容，请先识别并应用，或清空。")
@@ -597,12 +623,13 @@ def open_kaggle_voice(app, parent=None):
                               prosody_template=template.get().strip() or None,template_mode=template_mode.get(),
                               pronunciation_enabled=pronunciation_enabled.get(),japanese_readings=dict(japanese_readings),style_options=opt["styles"])
                 snapshot.update(reuse_completed=reuse_completed.get(), include_preview=include_preview.get())
+                snapshot.update(execution=selected_execution,local_reference=local_reference.get(),local_device=local_device.get())
                 if purpose=="preview": snapshot["text"]=audition_text(snapshot["text"],language.get())
                 remember()
-            if token.get().strip():
+            if selected_execution=="cloud" and token.get().strip():
                 raise ValueError("令牌输入框有未保存内容，请先点击安全保存连接。")
-            secret=_vault().get_password(KEYRING_SERVICE,user)
-            if not secret: raise ValueError("请先在更多设置为本人Kaggle用户名安全保存令牌。")
+            secret=_vault().get_password(KEYRING_SERVICE,user) if selected_execution=="cloud" else ""
+            if selected_execution=="cloud" and not secret: raise ValueError("请先在更多设置为本人Kaggle用户名安全保存令牌。")
         except Exception as exc:
             messagebox.showerror("还不能提交",str(exc) if isinstance(exc,(ValueError,OSError)) else "请检查连接和最近任务记录。",parent=win);return
         active_purpose=purpose
@@ -610,12 +637,48 @@ def open_kaggle_voice(app, parent=None):
         status.set("正在恢复已有任务，不重复提交…" if recover else "正在检查正文、模板与修改范围…")
         def work():
             try:
-                record=prepare_resume_job(manifest) if continuation else (manifest if recover else prepare_job(**snapshot))
+                record=prepare_resume_job(manifest) if continuation and selected_execution=="cloud" else (manifest if recover else prepare_job(**snapshot))
                 if not recover or continuation: events.put(("manifest",str(record)))
-                run_job(record,secret,events.put,audio_only=True)
+                if selected_execution=="local": run_local_job(record,events.put)
+                else: run_job(record,secret,events.put,audio_only=True)
             except Exception as exc:
                 events.put(("error",str(exc)))
         threading.Thread(target=work,daemon=True).start()
+
+    def detect_hardware():
+        def work():
+            try: events.put(("hardware",describe_hardware(hardware_report())))
+            except Exception as exc: events.put(("hardware","配置检测未完成："+str(exc)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def update_execution(event=None):
+        engine_title.set("老师音色 · "+execution.get().replace("生成",""))
+        if execution.get()=="本机生成":
+            connection.pack_forget();local_box.pack(fill="x",pady=6,after=engine_box)
+        else:
+            local_box.pack_forget();connection.pack(fill="x",pady=6,after=engine_box)
+
+    def install_local():
+        if running or getattr(app,"_cloud_update_busy",False): return
+        set_running(True)
+        def work():
+            try:
+                ENGINE.stop()
+                prepare_environment(events.put)
+                events.put(("local_ready","本机环境和模型已准备，可选择本机生成并先做15秒试听。"))
+            except Exception as exc: events.put(("error",str(exc)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def release_local():
+        if running: return
+        ENGINE.stop();status.set("本机模型已释放，下次本机生成会重新加载。")
+
+    def choose_local_reference():
+        value=filedialog.askopenfilename(parent=more,filetypes=[("老师原声WAV","*.wav")])
+        if value:
+            from local_voice import validate_reference
+            try: local_reference.set(str(validate_reference(value)))
+            except ValueError as exc: messagebox.showerror("原声不一致",str(exc),parent=more)
 
     def register_template():
         if running or getattr(app,"_cloud_update_busy",False): return
@@ -791,7 +854,7 @@ def open_kaggle_voice(app, parent=None):
         folder=Path(record).parent
         job=json.loads(Path(record).read_text(encoding="utf-8"))
         content=f"状态：{job.get('status')}\n已保存段落：{job.get('completed_segments',0)}/{job.get('total_segments','?')}\n最近错误：{job.get('last_error','无')}\n"
-        log=folder/"remote_error.log"
+        log=folder/("local_engine.log" if job.get("execution")=="local" else "remote_error.log")
         if log.is_file(): content+="\n"+log.read_text(encoding="utf-8",errors="replace")[-30000:]
         popup=tk.Toplevel(win);popup.title("最近任务日志");_fit_window(popup,780,580)
         view=tk.Text(popup,wrap="word");view.pack(fill="both",expand=True,padx=10,pady=10)
@@ -834,6 +897,8 @@ def open_kaggle_voice(app, parent=None):
             while True:
                 kind,payload=events.get_nowait()
                 if kind in ("status","warning"): status.set(payload)
+                elif kind=="hardware": hardware_info.set(payload)
+                elif kind=="local_ready": set_running(False);status.set(payload)
                 elif kind=="manifest":
                     settings["last_manifest"]=payload;save_json(SETTINGS,settings)
                 elif kind=="done":
@@ -861,7 +926,7 @@ def open_kaggle_voice(app, parent=None):
                 elif kind in ("error","adjust_error"):
                     set_running(False)
                     status.set("任务未完成，原文件与任务记录保留；查看更多设置中的日志确认原因。")
-                    messagebox.showerror("云端任务未完成" if kind=="error" else "微调未完成",payload,parent=win)
+                    messagebox.showerror("任务未完成" if kind=="error" else "微调未完成",payload,parent=win)
                 elif kind=="template_added":
                     set_running(False)
                     settings.setdefault("template_modes",{})[payload["language"]]="自动选择"
@@ -883,7 +948,7 @@ def open_kaggle_voice(app, parent=None):
         more.withdraw()
         # Keep event handling alive while work is in flight; reopening reuses it.
         if running: win.withdraw()
-        else: win.destroy()
+        else: ENGINE.stop();win.destroy()
     win.protocol("WM_DELETE_WINDOW",close_window)
     for var in (tempo,gain,denoise): var.trace_add("write",update_summary)
     template.trace_add("write",lambda *args: update_template_status())
@@ -891,4 +956,7 @@ def open_kaggle_voice(app, parent=None):
         source_srt.set("");range_start.set("");range_end.set("")
     source_audio.trace_add("write",source_changed)
     update_profile();update_mode();update_summary()
+    mode_combo.bind("<<ComboboxSelected>>",update_execution)
+    update_execution()
+    detect_hardware()
     win.after(150,poll)

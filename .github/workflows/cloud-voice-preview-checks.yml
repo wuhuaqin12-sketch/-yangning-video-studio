@@ -23,6 +23,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  optional-local-cpu-imports:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install matching local CPU dependencies in a separate environment
+        shell: pwsh
+        run: |
+          python -m venv '${{ runner.temp }}/local-engine-test'
+          $engine = '${{ runner.temp }}/local-engine-test/Scripts/python.exe'
+          & $engine -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $engine -m pip install voxcpm==2.0.3 soundfile 'numpy>=1.26,<3'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $engine -c "import torch, torchaudio; from voxcpm import VoxCPM; print('LOCAL_CPU_IMPORTS_OK',torch.__version__)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   windows-preview-setup:
     runs-on: windows-latest
     timeout-minutes: 18
@@ -79,6 +98,7 @@ jobs:
           python -m unittest discover -s program -p cloud_voice_test.py -v
           python -m unittest discover -s program -p teacher_reference_test.py -v
           python -m unittest discover -s program -p latency_workflows_test.py -v
+          python -m unittest discover -s program -p local_voice_test.py -v
           python -m unittest discover -s program -p voice_adjust_test.py -v
           python -m unittest discover -s program -p voice_workflows_test.py -v
           python -m unittest discover -s program -p cloud_voice_update_test.py -v

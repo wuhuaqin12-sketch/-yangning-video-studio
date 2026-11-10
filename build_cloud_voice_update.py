@@ -19,7 +19,7 @@ def payload(root,revision,destination):
         with zipfile.ZipFile(archive) as z:
             prefix='YangNing_CloudVoice_Independent_Preview/'
             files={name:z.read(prefix+name) for name in tuple(FILES)+('preview_version.json',) if prefix+name in z.namelist()}
-    version=json.loads(files['preview_version.json']);version['prosody_templates_bundled']=[]
+    version=json.loads(files['preview_version.json']);version['prosody_templates_bundled']=[];version['reference_audio_bundled']=False
     files['preview_version.json']=json.dumps(version,ensure_ascii=False,indent=2).encode()
     value={'product':PRODUCT,'sequence':version['update_sequence'],'version':version['version'],'source_revision':revision,
            'files':{name:{'sha256':hashlib.sha256(content).hexdigest(),'content':base64.b64encode(content).decode()} for name,content in sorted(files.items())}}

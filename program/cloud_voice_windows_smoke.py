@@ -65,11 +65,19 @@ def main():
                     current = current.master
                 return True
             main_labels = [str(w.cget("text")) for w in widgets if isinstance(w,ttk.Label) and on_main(w)]
-            assert "老师音色" in main_labels
+            assert any(label.startswith("老师音色") for label in main_labels)
             assert not any("语气模板只提供" in label or "输出WAV音频" in label for label in main_labels)
             main_buttons = [str(w.cget("text")) for w in widgets if isinstance(w,ttk.Button) and on_main(w)]
             assert "生成音频" in main_buttons and "全文重新生成" not in main_buttons
             assert "详细调节" not in main_buttons
+            engine_selector=next(w for w in widgets if isinstance(w,ttk.Combobox) and "本机生成" in tuple(w.cget("values")))
+            assert engine_selector.get()=="云端生成", "Existing users must stay on cloud by default"
+            engine_selector.set("本机生成");engine_selector.event_generate("<<ComboboxSelected>>");root.update()
+            local_panel=next(w for w in widgets if isinstance(w,ttk.LabelFrame) and str(w.cget("text")).startswith("本机模型"))
+            cloud_panel=next(w for w in widgets if isinstance(w,ttk.LabelFrame) and w.cget("text")=="云端连接Kaggle")
+            assert local_panel.winfo_manager()=="pack" and cloud_panel.winfo_manager()==""
+            engine_selector.set("云端生成");engine_selector.event_generate("<<ComboboxSelected>>");root.update()
+            assert cloud_panel.winfo_manager()=="pack" and local_panel.winfo_manager()==""
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert not any("1626" in str(w.cget("text")) for w in widgets if isinstance(w,(ttk.Label,ttk.Button,ttk.LabelFrame)))
             assert "生成音频" in labels and "恢复最近任务" in labels
@@ -176,6 +184,28 @@ def main():
             generate=next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="生成音频")
             assert generate.winfo_rooty()>=main_canvas.winfo_rooty()
             assert generate.winfo_rooty()+generate.winfo_height()<=main_canvas.winfo_rooty()+main_canvas.winfo_height()+2
+            # Local submission must bypass the Windows Kaggle vault entirely.
+            import hashlib,wave
+            import local_voice,kaggle_voice
+            reference=Path(directory)/"teacher-fixture.wav"
+            with wave.open(str(reference),"wb") as audio:
+                audio.setparams((1,2,48000,0,"NONE","not compressed"));audio.writeframes(b'\x01\x00'*4800)
+            engine_selector.set("本机生成");engine_selector.event_generate("<<ComboboxSelected>>");root.update()
+            reference_entry=next(w for w in local_panel.winfo_children() if isinstance(w,ttk.Entry))
+            reference_entry.delete(0,"end");reference_entry.insert(0,str(reference))
+            script=next(w for w in widgets if isinstance(w,tk.Text) and on_main(w))
+            script.delete("1.0","end");script.insert("1.0","金剛経。")
+            routed=[]
+            def local_run(record,emit):
+                routed.append(json.loads(Path(record).read_text(encoding="utf-8")))
+                emit(("local_ready","Local routing checked"))
+            with patch.object(local_voice,"REFERENCE_SHA256",hashlib.sha256(reference.read_bytes()).hexdigest()),patch.object(kaggle_voice,"_vault",side_effect=AssertionError("Local must not request Kaggle credentials")),patch.object(kaggle_voice,"run_local_job",side_effect=local_run):
+                generate.invoke()
+                deadline=time.monotonic()+5
+                while time.monotonic()<deadline and not routed:
+                    root.update();time.sleep(.03)
+                root.update()
+                assert routed and routed[0]["execution"]=="local" and routed[0]["username"]=="local"
             open_kaggle_voice(app)
             assert app._cloud_voice_window is window, "Repeated open should reuse one window."
             root.update()

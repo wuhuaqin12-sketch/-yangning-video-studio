@@ -52,6 +52,9 @@ def script_from_text(text):
 def ensure_teacher_reference(folder, dataset, env, cli, emit):
     """Fetch approved original bytes before paying GPU startup cost; never re-encode."""
     cache = Path(folder).parent / "teacher_reference_cache" / (REFERENCE_SHA256 + ".wav")
+    bundled = Path(__file__).parent / "references" / "teacher_reference.wav"
+    if bundled.is_file() and hashlib.sha256(bundled.read_bytes()).hexdigest() == REFERENCE_SHA256:
+        return bundled.read_bytes()
     if cache.is_file():
         data = cache.read_bytes()
         if hashlib.sha256(data).hexdigest() == REFERENCE_SHA256:
@@ -117,7 +120,13 @@ def build_notebook(request, teacher_reference_bytes=None):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None, purpose="full", template_library_dir=None, reuse_completed=False, include_preview=False):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None, purpose="full", template_library_dir=None, reuse_completed=False, include_preview=False, execution="cloud", local_reference=None, local_device="auto"):
+    if execution not in ("cloud", "local"): raise ValueError("生成模式无效。")
+    if execution == "local":
+        from local_voice import validate_reference
+        local_reference = validate_reference(local_reference)
+        if local_device not in ("auto", "cuda", "cpu"): raise ValueError("本机设备选项无效。")
+        username, dataset = "local", "local/reference"
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
@@ -146,6 +155,8 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
         "postprocess": {"gain_db": options["gain_db"], "light_denoise": options["denoise"]},
     }
+    if execution == "local":
+        request.update(execution="local", local_device=local_device, reference_path=str(local_reference))
     if language == "日语" and pronunciation_enabled:
         from japanese_pronunciation import reading_plan
         plan = reading_plan(text, japanese_readings)
@@ -191,6 +202,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "postprocess": request["postprocess"], "delivery_instruction": request.get("delivery_instruction", ""),
         "template_selection": request.get("template_selection"), "purpose":purpose,
         "include_preview": request.get("include_preview", False),
+        "execution": execution,
     }
     if request.get("pronunciation"):
         manifest["pronunciation"] = request["pronunciation"]

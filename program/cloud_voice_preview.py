@@ -80,7 +80,7 @@ def main():
     from cloud_voice_version import VERSION
 
     root = tk.Tk()
-    root.title("杨宁云端语音 · 独立试用")
+    root.title("杨宁语音克隆 · 独立试用")
     root.geometry("700x370")
     output = Path.home() / "Videos" / "YangNingCloudPreviewOutputs"
     app = SimpleNamespace(root=root, v={
@@ -89,7 +89,7 @@ def main():
     }, auto_cut=tk.BooleanVar(value=False))
     frame = ttk.Frame(root, padding=18)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="杨宁云端语音克隆 · "+VERSION, font=("Microsoft YaHei UI", 17, "bold")).pack(anchor="w")
+    ttk.Label(frame, text="杨宁语音克隆 · "+VERSION, font=("Microsoft YaHei UI", 17, "bold")).pack(anchor="w")
     def open_voice():
         open_kaggle_voice(app)
         acknowledge_boot(Path(__file__).resolve().parent.parent)

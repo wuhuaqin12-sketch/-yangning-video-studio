@@ -153,6 +153,8 @@ def request_fingerprint(request):
     fields=("text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
     data={key:request.get(key) for key in fields}
     data.update(reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
+    if request.get("execution") == "local":
+        data.update(execution="local", device=request.get("local_device", "auto"))
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
 
@@ -210,7 +212,7 @@ def resolve_teacher_reference(request, input_root="/kaggle/input", embedded=None
     raise FileNotFoundError("老师原声未挂载，且缺少已校验的备用文件。请检查更新后重新生成。")
 
 
-def run(request):
+def run(request, local_context=None):
     import numpy as np
     import soundfile as sf
     import torch
@@ -218,7 +220,9 @@ def run(request):
     from voxcpm import VoxCPM
 
     print("YANGNING_STAGE=preflight", flush=True)
-    if not torch.cuda.is_available():
+    local = local_context is not None
+    device = local_context.get("device", "cpu") if local else "cuda"
+    if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("此Kaggle作业没有分配到GPU；请检查账号GPU权限及剩余额度。")
     reference = resolve_teacher_reference(request, embedded=globals().get("TEACHER_REFERENCE_B64"))
     reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
@@ -245,18 +249,34 @@ def run(request):
 
     # Cache weights outside /kaggle/working so they are not saved as job outputs.
     print("YANGNING_STAGE=model_download", flush=True)
-    snapshot = Path(snapshot_download(MODEL_ID, cache_dir="/tmp/yangning_hf_cache", **({"revision":request["model_revision"]} if request.get("model_revision") else {})))
-    config = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
-    dtype = config.get("dtype", "bfloat16")
-    if dtype in ("bfloat16", "bf16") and not torch.cuda.is_bf16_supported():
-        dtype = "float32"
-    config["dtype"] = dtype
-    runtime = Path(tempfile.mkdtemp(prefix="yangning_voxcpm2_"))
-    for entry in snapshot.iterdir():
-        if entry.name != "config.json":
-            (runtime / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
-    (runtime / "config.json").write_text(json.dumps(config), encoding="utf-8")
-    model = VoxCPM.from_pretrained(str(runtime), load_denoiser=False, optimize=False, device="cuda")
+    revision = request.get("model_revision")
+    if local and local_context.get("model") is not None:
+        if revision and revision != local_context["snapshot"].name:
+            raise ValueError("本机已加载的模型快照与断点不同，请先释放本机模型再恢复。")
+        model, snapshot, dtype = (local_context[key] for key in ("model", "snapshot", "dtype"))
+        runtime = local_context["runtime"]
+        print("YANGNING_STAGE=model_reused", flush=True)
+    else:
+        snapshot = Path(snapshot_download(MODEL_ID, cache_dir=local_context["cache_dir"] if local else "/tmp/yangning_hf_cache", **({"revision":revision} if revision else {})))
+        config = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
+        dtype = config.get("dtype", "bfloat16")
+        if device == "cpu" or (dtype in ("bfloat16", "bf16") and not torch.cuda.is_bf16_supported()):
+            dtype = "float32"
+        config["dtype"] = dtype
+        runtime = Path(tempfile.mkdtemp(prefix="yangning_voxcpm2_"))
+        for entry in snapshot.iterdir():
+            if entry.name != "config.json":
+                if local:
+                    if entry.is_dir(): shutil.copytree(entry, runtime / entry.name)
+                    else:
+                        try: os.link(entry.resolve(), runtime / entry.name)
+                        except OSError: shutil.copy2(entry, runtime / entry.name)
+                else:
+                    (runtime / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+        (runtime / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        model = VoxCPM.from_pretrained(str(runtime), load_denoiser=False, optimize=False, device=device)
+        if local:
+            local_context.update(model=model, snapshot=snapshot, dtype=dtype, runtime=runtime)
     rate = int(model.tts_model.sample_rate)
     seeds, peaks, lengths = [], [], []
     folder=output_dir/"checkpoints";folder.mkdir(exist_ok=True)
@@ -264,7 +284,8 @@ def run(request):
                 "rate":rate,"model_dtype":dtype,"total":len(blocks),"pieces":[]}
     available={}
     if request.get("resume_checkpoint_job_id"):
-        for candidate in Path("/kaggle/input").rglob("checkpoint_manifest.json"):
+        candidates = [Path(request["local_checkpoint"])] if local and request.get("local_checkpoint") else Path("/kaggle/input").rglob("checkpoint_manifest.json")
+        for candidate in candidates:
             record=json.loads(candidate.read_text(encoding="utf-8"))
             if record.get("job_id")==request["resume_checkpoint_job_id"]:
                 record,available=checkpoint_parts(candidate,request)
@@ -277,11 +298,13 @@ def run(request):
     for index, block in enumerate(blocks):
         seed = base_seed + index if base_seed >= 0 else None
         if seed is not None:
-            torch.manual_seed(seed);torch.cuda.manual_seed_all(seed);np.random.seed(seed % (2**32))
+            torch.manual_seed(seed)
+            if device == "cuda": torch.cuda.manual_seed_all(seed)
+            np.random.seed(seed % (2**32))
         target=folder/f"part_{index:05d}.npz"
         if index in available:
             old,source=available[index]
-            shutil.copy2(source,target)
+            if source.resolve() != target.resolve(): shutil.copy2(source,target)
             with np.load(target,allow_pickle=False) as data: audio=data["audio"].astype(np.float32)
             print(f"复用已完成段落 {index+1}",flush=True)
         else:
@@ -318,7 +341,8 @@ def run(request):
         "style_control": "text_instruction", "profile": profile, "seed_per_block": seeds,
         "cfg_value": 2.0, "inference_timesteps": 10, "max_len": 4096,
         "normalize": False, "model_denoise": False, "retry_badcase": False,
-        "device": torch.cuda.get_device_name(0), "model_dtype": dtype,
+        "device": torch.cuda.get_device_name(0) if device == "cuda" else "cpu", "model_dtype": dtype,
+        "execution": "local" if local else "cloud",
         "blocks": blocks, "block_peaks": peaks, "headroom_gain": gain,
         "silence_trimmed": False, "pitch_ratio": 1.0, "tempo_applications": 1,
         "review": {name: "待听检" for name in ("音色", "读音与全文完整性", "语感", "重点", "问句", "停顿", "声音")},
@@ -346,6 +370,6 @@ def run(request):
         raise
     finally:
         (output_dir / "voice_recipe.json").write_text(json.dumps(recipe, ensure_ascii=False, indent=2), encoding="utf-8")
-        shutil.rmtree(runtime, ignore_errors=True)
+        if not local: shutil.rmtree(runtime, ignore_errors=True)
     print(f"WAV={final_path}", flush=True)
 
