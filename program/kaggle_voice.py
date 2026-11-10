@@ -51,6 +51,8 @@ def _wrap_labels(parent,width):
             try:
                 if int(child.cget("wraplength"))>0: child.configure(wraplength=max(220,width-32))
             except (tk.TclError,ValueError): pass
+        elif isinstance(child,(ttk.Frame,ttk.LabelFrame)):
+            _wrap_labels(child,max(240,width-20))
 
 
 def _fit_window(window, width, height):
