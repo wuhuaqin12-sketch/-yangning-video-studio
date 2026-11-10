@@ -1,0 +1,23 @@
+{
+  "name": "YangNing Cloud Voice Independent Preview",
+  "version": "0.7-preview.1",
+  "update_sequence": 9,
+  "source_revision": "5aff527ce154e3f323b740c09e86897f565b4ff8",
+  "formal_studio_release": false,
+  "local_validation": "46 automated tests; real FFmpeg; synthetic model output only",
+  "pending_validation": [
+    "Windows automatic update and restart",
+    "Mac launch and reveal",
+    "Local real model generation",
+    "Kaggle live generation",
+    "Six-language voice and pronunciation listening"
+  ],
+  "reference_audio_bundled": true,
+  "prosody_templates_bundled": [
+    "japanese.wav",
+    "english.wav"
+  ],
+  "template_waveform_sent_to_model": false,
+  "default_tempo_all_languages": 1.0,
+  "release_status": "candidate_not_published"
+}
