@@ -1,0 +1,458 @@
+"""Embedded in a private Kaggle notebook. Heavy imports occur only in run()."""
+import copy
+import hashlib
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import wave
+from pathlib import Path
+
+MODEL_ID = "openbmb/VoxCPM2"
+PACKAGE_VERSION = "2.0.3"
+REFERENCE_SHA256 = "9be7f58bb98d61e33a3255a7fd963eda850219f8c8596e716675c078a2d0f0f6"
+PROFILES = {
+    "日语": {
+        "style": "Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation",
+        "tempo": 1.0,
+        "basis": "Natural model speed; template rhythm summary only, no automatic slowdown",
+    },
+    "英语": {
+        "style": "Calm, natural English narration, warm and gentle, smoothly connected phrases, subtle intonation and natural pauses",
+        "tempo": 1.0,
+        "basis": "Natural model speed; optional template acoustic-summary instructions",
+    },
+    "法语": {
+        "style": "Natural French narration, calm and flowing, gentle emphasis, subtle intonation and natural pauses",
+        "tempo": 1.0,
+        "basis": "Natural speed with French phrasing; English-template rhythm summary optional",
+    },
+    "德语": {
+        "style": "Natural German narration, calm and flowing, gentle emphasis, subtle intonation and natural pauses",
+        "tempo": 1.0,
+        "basis": "Natural speed with German phrasing; English-template rhythm summary optional",
+    },
+    "印尼语": {
+        "style": "Natural Indonesian narration, calm and flowing, gentle emphasis, subtle intonation and natural pauses",
+        "tempo": 1.0,
+        "basis": "Provisional natural delivery; no additional slowdown confirmed",
+    },
+    "粤语": {
+        "style": "Natural Cantonese narration, relaxed and flowing delivery, gentle emphasis, subtle intonation and natural pauses",
+        "tempo": 1.0,
+        "basis": "Provisional natural Cantonese delivery; audition pending",
+    },
+}
+
+
+def parse_srt_cues(source):
+    """Strict numbered SRT parser; preserve IDs and integer millisecond timing."""
+    source=source.lstrip("\ufeff").replace("\r\n","\n").replace("\r","\n").strip()
+    pattern=re.compile(r"^(\d{2,}):([0-5]\d):([0-5]\d)[,.](\d{3})\s*-->\s*(\d{2,}):([0-5]\d):([0-5]\d)[,.](\d{3})(?:\s+.*)?$")
+    cues=[];seen=set()
+    for block in re.split(r"\n[ \t]*\n",source):
+        lines=block.strip().splitlines()
+        if len(lines)<3 or not lines[0].strip().isdigit(): raise ValueError("SRT每段必须包含字幕编号、时间码和正文。")
+        number=int(lines[0].strip());match=pattern.fullmatch(lines[1].strip())
+        if not match or number in seen: raise ValueError(f"SRT第{number}条时间码无效或编号重复。")
+        values=[int(v) for v in match.groups()]
+        start=(values[0]*3600+values[1]*60+values[2])*1000+values[3]
+        end=(values[4]*3600+values[5]*60+values[6])*1000+values[7]
+        if end<=start or (cues and start<cues[-1]["end_ms"]): raise ValueError(f"SRT第{number}条结束时间无效或与前条重叠。")
+        if end>6*3600*1000: raise ValueError("单次SRT时间轴上限6小时，请拆分文件；不会截断时间轴。")
+        text=" ".join(re.sub(r"<[^>]+>","",line).strip() for line in lines[2:]).strip()
+        if not text: raise ValueError(f"SRT第{number}条没有可朗读文本。")
+        cues.append(dict(index=number,start_ms=start,end_ms=end,start=start/1000,end=end/1000,text=text))
+        seen.add(number)
+    if not cues: raise ValueError("SRT没有字幕。")
+    return cues
+
+
+def text_pause_units(text):
+    """Retain punctuation, decimals and abbreviations; pause at clause/sentence boundaries."""
+    result=[];start=0
+    for mark in re.finditer(r'[，,、。！？!?；;]+[」』”\"]*|\.(?=\s|$)[”\"]*|\n+',text):
+        prefix=text[start:mark.end()].strip();symbol=mark.group()
+        if symbol.startswith(",") and mark.start()>0 and mark.end()<len(text) and text[mark.start()-1].isdigit() and text[mark.end()].isdigit(): continue
+        if symbol.startswith(".") and re.search(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|e\.g|i\.e)\.$",prefix,re.I): continue
+        if symbol[0] in ",，、" and len(prefix)<8: continue
+        pause=.65 if "\n" in symbol else (.18 if symbol[0] in ",，、" else (.32 if symbol[0] in ";；" else .45))
+        if prefix: result.append(dict(text=prefix,pause_after=pause))
+        elif result: result[-1]["pause_after"]=max(result[-1]["pause_after"],pause)
+        start=mark.end()
+    if text[start:].strip(): result.append(dict(text=text[start:].strip(),pause_after=0))
+    if not result: raise ValueError("朗读正文为空。")
+    return result
+
+
+def compose_timed_wav(request,pieces,output_dir,raw_path,rate,gain):
+    """Stream complete speech into an absolute SRT schedule; never truncate/overlap it."""
+    import numpy as np
+    cues=request.get("srt_cues");units=request.get("units",[])
+    cursor=0;segments=[];reports=[];previous_tail=0
+    def silence(out,frames):
+        while frames>0:
+            count=min(frames,rate);out.writeframes(b"\0\0"*count);frames-=count
+    def edge(values):
+        step=max(1,round(rate*.02));count=0
+        for pos in range(0,min(len(values),rate*5),step):
+            block=values[pos:pos+step]
+            if np.sqrt(np.mean(block.astype(np.float64)**2))>.0015: break
+            count+=len(block)
+        return count
+    with wave.open(str(raw_path),"wb") as out:
+        out.setparams((1,2,rate,0,"NONE","not compressed"))
+        for index,piece in enumerate(pieces):
+            with np.load(output_dir/piece["file"],allow_pickle=False) as data: values=np.asarray(data["audio"]*gain,dtype=np.float32)
+            if cues and request.get("tempo",1)!=1:
+                source=output_dir/"cue_speed_raw.wav";target=output_dir/"cue_speed_final.wav"
+                with wave.open(str(source),"wb") as wav:
+                    wav.setparams((1,2,rate,0,"NONE","not compressed"));wav.writeframes(np.rint(values*32768).clip(-32768,32767).astype("<i2").tobytes())
+                process_audio(source,target,request["tempo"],0,False)
+                with wave.open(str(target),"rb") as wav: values=np.frombuffer(wav.readframes(wav.getnframes()),dtype="<i2").astype(np.float32)/32768
+                source.unlink();target.unlink()
+            if cues:
+                cue=cues[index];gap=0 if index==0 else round((cue["start_ms"]-cues[index-1]["end_ms"])*rate/1000)
+                begin=max(round(cue["start_ms"]*rate/1000),cursor+gap)
+            else:
+                wanted=round(units[index-1].get("pause_after",0)*rate) if index else 0
+                begin=cursor+max(0,wanted-previous_tail-edge(values))
+            if begin+len(values)>6*3600*rate: raise ValueError("实际音频超过6小时，请拆分；所有已生成段落仍保留。")
+            silence(out,begin-cursor);out.writeframes(np.rint(values*32768).clip(-32768,32767).astype("<i2").tobytes())
+            cursor=begin+len(values);previous_tail=edge(values[::-1])
+            segments.append(dict(start=begin/rate,end=cursor/rate,text=units[index]["text"]))
+            if cues:
+                allocated=(cue["end_ms"]-cue["start_ms"])/1000
+                reports.append(dict(index=cue["index"],scheduled_start=cue["start"],scheduled_end=cue["end"],actual_start=begin/rate,actual_end=cursor/rate,
+                    speech_seconds=len(values)/rate,overflow_seconds=max(0,len(values)/rate-allocated),shift_seconds=max(0,begin/rate-cue["start"])))
+        if cues: silence(out,max(0,round(cues[-1]["end_ms"]*rate/1000)-cursor))
+    return segments,dict(mode="srt_absolute_no_truncation" if cues else "txt_minimum_punctuation_pauses",cues=reports,
+        overrun_count=sum(c["overflow_seconds"]>.01 for c in reports),shifted_count=sum(c["shift_seconds"]>.01 for c in reports),silence_trimmed=False)
+
+
+def profile_for(language, tempo=None):
+    if language not in PROFILES:
+        raise ValueError("请选择支持的配音语言。")
+    profile = copy.deepcopy(PROFILES[language])
+    if tempo is not None:
+        tempo = float(tempo)
+        if not math.isfinite(tempo) or not 0.5 <= tempo <= 2.0:
+            raise ValueError("倍数须在0.5到2.0之间。")
+        profile["tempo"] = tempo
+    return profile
+
+
+def split_script(text, target_chars=900):
+    """Keep complete sentences/paragraphs together. Never split at a comma."""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    result = []
+    for paragraph in paragraphs:
+        if len(paragraph) <= target_chars:
+            result.append(paragraph)
+            continue
+        boundaries = list(re.finditer(r"[。！？!?](?:[」』”\"])?\s*|\.(?:[”\"])?\s+(?=[A-Z“\"])", paragraph))
+        sentences, start = [], 0
+        for match in boundaries:
+            prefix = paragraph[start:match.end()].strip()
+            if re.search(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr)\.$", prefix):
+                continue
+            sentences.append(prefix)
+            start = match.end()
+        if paragraph[start:].strip():
+            sentences.append(paragraph[start:].strip())
+        block = ""
+        for sentence in sentences or [paragraph]:
+            if len(sentence) > 3000:
+                raise ValueError("有一个超过3000字的连续语句。请按完整句意添加句号或段落；正文不会被截断。")
+            if block and len(block) + len(sentence) > target_chars:
+                result.append(block)
+                block = ""
+            block = (block + " " + sentence).strip()
+        if block:
+            result.append(block)
+    if not result:
+        raise ValueError("朗读正文为空。")
+    return result
+
+
+def filter_graph(tempo, gain_db=0.0, light_denoise=True):
+    tempo = float(tempo)
+    if not math.isfinite(tempo) or not 0.5 <= tempo <= 2.0:
+        raise ValueError("倍数须在0.5到2.0之间。")
+    chain = "afftdn=nr=6:nf=-55:tn=1:gs=8" if light_denoise else "anull"
+    if tempo != 1.0:
+        chain += (
+            f",rubberband=tempo={tempo}:pitch=1:formant=preserved:"
+            "pitchq=quality:transients=crisp:detector=soft:phase=laminar"
+        )
+    if gain_db:
+        chain += f",volume={gain_db}dB"
+        if gain_db > 0:
+            chain += ",alimiter=limit=0.95:level=0:latency=1"
+    return chain
+
+
+def check_audio_tools(tempo):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("云端缺少 FFmpeg，无法按确认标准进行降噪及保音高处理。")
+    available = subprocess.run([ffmpeg, "-hide_banner", "-filters"], capture_output=True, text=True, check=True).stdout
+    required = ["afftdn"] + (["rubberband"] if tempo != 1.0 else [])
+    if any(not re.search(r"\b" + name + r"\b", available) for name in required):
+        raise RuntimeError("云端 FFmpeg 缺少所需音频滤镜；保留原始 WAV，未用其他变速方式替代。")
+    return ffmpeg
+
+
+def ensure_audio_tools(tempo):
+    try:
+        return check_audio_tools(tempo)
+    except RuntimeError:
+        if getattr(os, "geteuid", lambda: -1)() != 0 or not shutil.which("apt-get"):
+            raise
+        # Repair the cloud-only dependency before downloading/initializing the model.
+        subprocess.run(["apt-get", "update", "-qq"], check=True, capture_output=True, timeout=300)
+        subprocess.run(["apt-get", "install", "-y", "ffmpeg"], check=True, capture_output=True, timeout=300)
+        return check_audio_tools(tempo)
+
+
+def process_audio(raw_path, final_path, tempo, gain_db=0.0, light_denoise=True):
+    ffmpeg = check_audio_tools(tempo)
+    subprocess.run([
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(raw_path),
+        "-af", filter_graph(tempo,gain_db,light_denoise), "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(final_path),
+    ], check=True, capture_output=True)
+    with wave.open(str(raw_path), "rb") as source, wave.open(str(final_path), "rb") as final:
+        before = source.getnframes() / source.getframerate()
+        after = final.getnframes() / final.getframerate()
+        if (final.getnchannels(), final.getsampwidth(), final.getframerate()) != (1, 2, 48000):
+            raise RuntimeError("输出不是48kHz单声道PCM16 WAV。")
+    if abs(after - before / tempo) > max(0.08, before / tempo * 0.002):
+        raise RuntimeError("处理后的时长不符合整段保音高变速，未交付该结果。")
+    return {"raw_seconds": before, "final_seconds": after, "filter": filter_graph(tempo,gain_db,light_denoise)}
+
+
+def request_fingerprint(request):
+    fields=("text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
+    data={key:request.get(key) for key in fields}
+    data.update(reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
+    if request.get("execution") == "local":
+        data.update(execution="local", device=request.get("local_device", "auto"))
+    if request.get("srt_cues"): data["srt_cues"]=request["srt_cues"]
+    return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+
+def atomic_json(path,value):
+    path=Path(path);pending=path.with_suffix(path.suffix+".tmp")
+    pending.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding="utf-8");pending.replace(path)
+
+
+def checkpoint_parts(manifest_path,request):
+    import numpy as np
+    path=Path(manifest_path)
+    record=json.loads(path.read_text(encoding="utf-8"))
+    blocks=[unit["reading_text"] for unit in request["units"]] if request.get("units") else split_script(request.get("reading_text",request["text"]))
+    if (record.get("fingerprint")!=request_fingerprint(request) or record.get("total")!=len(blocks)
+            or not isinstance(record.get("rate"),int) or not 8000<=record["rate"]<=96000):
+        raise ValueError("断点记录与原文、音色或生成参数不一致。")
+    valid={}
+    for piece in record.get("pieces",[]):
+        index=piece.get("index")
+        if not isinstance(index,int) or not 0<=index<len(blocks) or index in valid: raise ValueError("断点段号无效。")
+        relative=Path(piece.get("file",""))
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix!=".npz": raise ValueError("断点文件路径无效。")
+        audio_path=path.parent/relative
+        if hashlib.sha256(audio_path.read_bytes()).hexdigest()!=piece.get("sha256"): raise ValueError("断点音频校验不一致。")
+        if hashlib.sha256(blocks[index].encode()).hexdigest()!=piece.get("text_sha256"): raise ValueError("断点文字校验不一致。")
+        with np.load(audio_path,allow_pickle=False) as data:
+            audio=data["audio"]
+            if audio.ndim!=1 or not 0<audio.size<=record["rate"]*1200 or not np.isfinite(audio).all(): raise ValueError("断点音频无效。")
+        valid[index]=(piece,audio_path)
+    return record,valid
+
+
+def resolve_teacher_reference(request, input_root="/kaggle/input", embedded=None, fallback_dir="/tmp"):
+    """Resolve by content, including renamed files and missing Kaggle mounts."""
+    paths = [Path(request["reference_path"])]
+    paths.extend(p for p in Path(input_root).rglob("*.wav") if p.is_file())
+    found = False
+    for path in paths:
+        if path.is_file() and 0 < path.stat().st_size <= 8*1024*1024:
+            found = True
+            if hashlib.sha256(path.read_bytes()).hexdigest() == REFERENCE_SHA256:
+                return path
+    if embedded:
+        import base64
+        if len(embedded) > 12*1024*1024:
+            raise ValueError("老师原声备用文件过大。")
+        data = base64.b64decode(embedded, validate=True)
+        if hashlib.sha256(data).hexdigest() != REFERENCE_SHA256:
+            raise ValueError("老师原声备用文件校验失败。")
+        target = Path(fallback_dir) / ("yangning_teacher_" + REFERENCE_SHA256 + ".wav")
+        target.write_bytes(data)
+        return target
+    if found:
+        raise ValueError("参考文件与已确认的老师原声不一致。请保留原始参考文件，不要重新编码。")
+    raise FileNotFoundError("老师原声未挂载，且缺少已校验的备用文件。请检查更新后重新生成。")
+
+
+def run(request, local_context=None):
+    import numpy as np
+    import soundfile as sf
+    import torch
+    from huggingface_hub import snapshot_download
+    from voxcpm import VoxCPM
+
+    print("YANGNING_STAGE=preflight", flush=True)
+    local = local_context is not None
+    device = local_context.get("device", "cpu") if local else "cuda"
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("此Kaggle作业没有分配到GPU；请检查账号GPU权限及剩余额度。")
+    reference = resolve_teacher_reference(request, embedded=globals().get("TEACHER_REFERENCE_B64"))
+    reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
+    if reference_hash != REFERENCE_SHA256:
+        raise ValueError("参考文件与已确认的老师原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")
+    profile = profile_for(request["language"], request.get("tempo"))
+    prosody = request.get("prosody_reference")
+    if prosody:
+        if prosody.get("method") != "aggregate_acoustic_summary_to_text" or prosody.get("template_waveform_sent_to_model") is not False:
+            raise ValueError("语气模板必须只提供节奏摘要，不能作为音色或续写音频。")
+        profile["style"] += ", " + prosody["instruction"]
+    if request.get("delivery_instruction"):
+        profile["style"] += ", " + request["delivery_instruction"]
+    spoken_text = request.get("reading_text", request["text"])
+    blocks = [unit["reading_text"] for unit in request["units"]] if request.get("units") else split_script(spoken_text)
+    ensure_audio_tools(profile["tempo"])
+    output_dir = Path(request.get("output_dir", "/kaggle/working"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_path, final_path = output_dir / "yangning_raw.wav", output_dir / "yangning_final.wav"
+    (output_dir / "script.txt").write_text(request["text"], encoding="utf-8")
+    (output_dir / "reading_text.txt").write_text(spoken_text, encoding="utf-8")
+    if request.get("pronunciation"):
+        (output_dir / "pronunciation_plan.json").write_text(json.dumps(request["pronunciation"],ensure_ascii=False,indent=2),encoding="utf-8")
+
+    # Cache weights outside /kaggle/working so they are not saved as job outputs.
+    print("YANGNING_STAGE=model_download", flush=True)
+    revision = request.get("model_revision")
+    if local and local_context.get("model") is not None:
+        if revision and revision != local_context["snapshot"].name:
+            raise ValueError("本机已加载的模型快照与断点不同，请先释放本机模型再恢复。")
+        model, snapshot, dtype = (local_context[key] for key in ("model", "snapshot", "dtype"))
+        runtime = local_context["runtime"]
+        print("YANGNING_STAGE=model_reused", flush=True)
+    else:
+        snapshot = Path(snapshot_download(MODEL_ID, cache_dir=local_context["cache_dir"] if local else "/tmp/yangning_hf_cache", **({"revision":revision} if revision else {})))
+        config = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
+        dtype = config.get("dtype", "bfloat16")
+        if device == "cpu" or (dtype in ("bfloat16", "bf16") and not torch.cuda.is_bf16_supported()):
+            dtype = "float32"
+        config["dtype"] = dtype
+        runtime = Path(tempfile.mkdtemp(prefix="yangning_voxcpm2_"))
+        for entry in snapshot.iterdir():
+            if entry.name != "config.json":
+                if local:
+                    if entry.is_dir(): shutil.copytree(entry, runtime / entry.name)
+                    else:
+                        try: os.link(entry.resolve(), runtime / entry.name)
+                        except OSError: shutil.copy2(entry, runtime / entry.name)
+                else:
+                    (runtime / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+        (runtime / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        model = VoxCPM.from_pretrained(str(runtime), load_denoiser=False, optimize=False, device=device)
+        if local:
+            local_context.update(model=model, snapshot=snapshot, dtype=dtype, runtime=runtime)
+    rate = int(model.tts_model.sample_rate)
+    seeds, peaks, lengths = [], [], []
+    folder=output_dir/"checkpoints";folder.mkdir(exist_ok=True)
+    checkpoint={"version":1,"job_id":request["job_id"],"fingerprint":request_fingerprint(request),"snapshot_revision":snapshot.name,
+                "rate":rate,"model_dtype":dtype,"total":len(blocks),"pieces":[]}
+    available={}
+    if request.get("resume_checkpoint_job_id"):
+        candidates = [Path(request["local_checkpoint"])] if local and request.get("local_checkpoint") else Path("/kaggle/input").rglob("checkpoint_manifest.json")
+        for candidate in candidates:
+            record=json.loads(candidate.read_text(encoding="utf-8"))
+            if record.get("job_id")==request["resume_checkpoint_job_id"]:
+                record,available=checkpoint_parts(candidate,request)
+                if record["snapshot_revision"]!=snapshot.name or record["rate"]!=rate or record.get("model_dtype")!=dtype: raise ValueError("断点模型快照或采样率不一致。")
+                break
+        if not available: raise ValueError("没有取得可校验的已完成段落；不会静默从头生成。")
+    atomic_json(output_dir/"checkpoint_manifest.json",checkpoint)
+    base_seed = int(request.get("seed", 16261109))
+    print("YANGNING_STAGE=generation", flush=True)
+    for index, block in enumerate(blocks):
+        seed = base_seed + index if base_seed >= 0 else None
+        if seed is not None:
+            torch.manual_seed(seed)
+            if device == "cuda": torch.cuda.manual_seed_all(seed)
+            np.random.seed(seed % (2**32))
+        target=folder/f"part_{index:05d}.npz"
+        if index in available:
+            old,source=available[index]
+            if source.resolve() != target.resolve(): shutil.copy2(source,target)
+            with np.load(target,allow_pickle=False) as data: audio=data["audio"].astype(np.float32)
+            print(f"复用已完成段落 {index+1}",flush=True)
+        else:
+            audio = np.asarray(model.generate(
+                text=f"({profile['style']}){block}", reference_wav_path=str(reference),
+                prompt_wav_path=None, prompt_text=None, cfg_value=2.0, inference_timesteps=10,
+                normalize=False, denoise=False, retry_badcase=False, max_len=4096,
+            ), dtype=np.float32).reshape(-1)
+            if not audio.size or not np.isfinite(audio).all(): raise RuntimeError(f"第{index+1}段没有返回有效音频。")
+            pending=target.with_suffix(".tmp")
+            with pending.open("wb") as stream: np.savez(stream,audio=audio)
+            pending.replace(target)
+        seeds.append(seed);peaks.append(float(np.max(np.abs(audio))));lengths.append(int(audio.size))
+        checkpoint["pieces"].append({"index":index,"file":str(target.relative_to(output_dir)),
+                                     "sha256":hashlib.sha256(target.read_bytes()).hexdigest(),"text_sha256":hashlib.sha256(block.encode()).hexdigest()})
+        atomic_json(output_dir/"checkpoint_manifest.json",checkpoint)
+        print(f"已生成 {index+1}/{len(blocks)} 个完整语义段",flush=True)
+    peak=max(peaks);gain=.99/peak if peak>=1 else 1.0
+    # Stream one semantic unit at a time; preserve all samples and pauses.
+    if not request.get("units"):
+        request["units"]=[dict(text=block,reading_text=block,pause_after=0) for block in blocks]
+    if request.get("srt_cues") and len(request["srt_cues"])!=len(blocks): raise ValueError("SRT字幕数量与生成段落不一致。")
+    segments,timing_report=compose_timed_wav(request,checkpoint["pieces"],output_dir,raw_path,rate,gain)
+    recipe = {
+        "job_id": request["job_id"], "purpose":request.get("purpose","full"), "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
+        "language": request["language"], "reference_sha256": reference_hash,
+        "template_audio_used": False, "template_prosody_alignment": "not_implemented",
+        "prosody_reference": prosody, "template_selection": request.get("template_selection"),
+        "pronunciation": request.get("pronunciation"),
+        "delivery_instruction": request.get("delivery_instruction", ""),
+        "postprocess": request.get("postprocess", {"gain_db":0.0,"light_denoise":True}),
+        "style_control": "text_instruction", "profile": profile, "seed_per_block": seeds,
+        "cfg_value": 2.0, "inference_timesteps": 10, "max_len": 4096,
+        "normalize": False, "model_denoise": False, "retry_badcase": False,
+        "device": torch.cuda.get_device_name(0) if device == "cuda" else "cpu", "model_dtype": dtype,
+        "execution": "local" if local else "cloud",
+        "blocks": blocks, "block_peaks": peaks, "headroom_gain": gain,
+        "silence_trimmed": False, "pitch_ratio": 1.0, "tempo_applications": 1,
+        "review": {name: "待听检" for name in ("音色", "读音与全文完整性", "语感", "重点", "问句", "停顿", "声音")},
+    }
+    try:
+        print("YANGNING_STAGE=postprocess", flush=True)
+        post = request.get("postprocess",{})
+        gain_db=float(post.get("gain_db",0.0))
+        if not math.isfinite(gain_db) or not -12 <= gain_db <= 6:
+            raise ValueError("音量设置无效。")
+        recipe.update(process_audio(raw_path, final_path, 1.0 if request.get("srt_cues") else profile["tempo"],gain_db,post.get("light_denoise",True)))
+        scale=recipe["final_seconds"]/recipe["raw_seconds"]
+        segments=[{**item,"start":item["start"]*scale,"end":item["end"]*scale} for item in segments]
+        atomic_json(output_dir/"timing_report.json",timing_report)
+        recipe["timing_report"]=timing_report
+        recipe["srt_cues"]=request.get("srt_cues")
+        recipe["tempo_processing"]="per_cue_before_timeline" if request.get("srt_cues") else "whole_audio"
+        atomic_json(output_dir/"segments.json",{"audio_sha256":hashlib.sha256(final_path.read_bytes()).hexdigest(),
+                    "timing":"generated_units" if profile["tempo"]==1 else "estimated_after_tempo", "segments":segments})
+        recipe["resumed_segments"]=len(available)
+        recipe["status"] = "generated_pending_review"
+    except Exception as exc:
+        recipe.update(status="postprocess_failed", error=str(exc))
+        raise
+    finally:
+        (output_dir / "voice_recipe.json").write_text(json.dumps(recipe, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not local: shutil.rmtree(runtime, ignore_errors=True)
+    print(f"WAV={final_path}", flush=True)
+

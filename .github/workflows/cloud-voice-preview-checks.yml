@@ -1,0 +1,129 @@
+name: Cloud voice preview checks
+
+on:
+  pull_request:
+    paths:
+      - 'program/*voice*.py'
+      - 'program/voice_clip_edit.py'
+      - 'program/voxcpm_kaggle_worker.py'
+      - 'program/requirements.txt'
+      - 'program/preview_python_check.py'
+      - 'program/japanese_pronunciation.py'
+      - '*cloud_voice_preview*'
+      - '*CLOUD*'
+      - 'preview_requirements.txt'
+      - '.github/workflows/cloud-voice-preview-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-voice-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  optional-local-cpu-imports:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install matching local CPU dependencies in a separate environment
+        shell: pwsh
+        run: |
+          python -m venv '${{ runner.temp }}/local-engine-test'
+          $engine = '${{ runner.temp }}/local-engine-test/Scripts/python.exe'
+          & $engine -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $engine -m pip install voxcpm==2.0.3 soundfile 'numpy>=1.26,<3'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $engine -c "import torch, torchaudio; from voxcpm import VoxCPM; print('LOCAL_CPU_IMPORTS_OK',torch.__version__)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  windows-preview-setup:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare FFmpeg in the clean Windows validation machine
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise independent environment installation
+        shell: powershell
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'CloudVoicePreview.zip'
+          python build_cloud_voice_preview.py --revision '${{ github.sha }}' --output $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unpack = Join-Path $env:RUNNER_TEMP 'cloud-voice-extracted'
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpack -Force
+          $previewRoot = Join-Path $unpack 'YangNing_CloudVoice_Independent_Preview'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CLOUD_VOICE_PREVIEW_ROOT=$previewRoot"
+          & (Join-Path $previewRoot 'launch_cloud_voice_preview.ps1') -SetupOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Open Windows GUI and check private credential storage
+        shell: powershell
+        run: |
+          $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
+          & $previewPython .\program\cloud_voice_windows_smoke.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Apply, restart and roll back a real extracted package
+        shell: powershell
+        run: |
+          $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
+          & $previewPython .\program\cloud_voice_windows_update_test.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upgrade using the actual original 0.6 updater and acknowledge stable boot
+        shell: powershell
+        run: |
+          $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
+          & $previewPython .\program\cloud_voice_legacy_windows_test.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  local-assembly-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare local validation dependencies
+        run: |
+          python -m pip install 'numpy>=1.26,<3'
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Check syntax and exercise voice workflows and audio processing
+        run: |
+          python -m compileall -q program/cloud_voice_core.py program/voxcpm_kaggle_worker.py program/kaggle_voice.py program/voice_clip_edit.py program/cloud_voice_preview.py build_cloud_voice_preview.py
+          python -m unittest discover -s program -p cloud_voice_test.py -v
+          python -m unittest discover -s program -p teacher_reference_test.py -v
+          python -m unittest discover -s program -p latency_workflows_test.py -v
+          python -m unittest discover -s program -p local_voice_test.py -v
+          python -m unittest discover -s program -p srt_timing_test.py -v
+          python -m unittest discover -s program -p srt_release_test.py -v
+          python -m unittest discover -s program -p voice_adjust_test.py -v
+          python -m unittest discover -s program -p voice_workflows_test.py -v
+          python -m unittest discover -s program -p cloud_voice_update_test.py -v
+      - name: Check PowerShell launcher syntax
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          $parseTokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'launch_cloud_voice_preview.ps1'), [ref]$parseTokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+      - name: Build isolated preview ZIP
+        run: python build_cloud_voice_preview.py --revision '${{ github.sha }}' --output '${{ runner.temp }}/YangNing_CloudVoice_Independent_Preview_0.1.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YangNing-CloudVoice-Independent-Preview
+          path: '${{ runner.temp }}/YangNing_CloudVoice_Independent_Preview_0.1.zip'
+          retention-days: 14
