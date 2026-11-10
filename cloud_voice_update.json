@@ -1,11 +1,17 @@
 {
   "product": "YangNing Cloud Voice Independent Preview",
-  "sequence": 8,
-  "version": "0.6-preview.1",
-  "source_revision": "5aff527ce154e3f323b740c09e86897f565b4ff8",
+  "sequence": 9,
+  "version": "0.7-preview.1",
+  "source_revision": "f7e225c5df3e983757db5c0aab305f2d670bd62f",
+  "payload_size": 381837,
+  "payload_sha256": "813f2ac6d55e270433e3032f5a11feb43c448403aa8fc633812a729a369590ea",
   "schema": 1,
-  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/262bfd0bebf045ff70f230b42963a08ae43e46cd/cloud_voice_payload.json",
-  "payload_size": 360939,
-  "payload_sha256": "c16ff4a342b33d7f4441b213e5818223a5d5f35b52f1465b03e598f9f40db0f3",
-  "notes": "新增本机／云端两种生成方式。原用户保留云端；更多设置可检测配置并安装独立本机环境，本机不需要Kaggle凭据。连续本机生成复用模型，可释放内存，保留原声校验、模板、读音、微调和局部修改。首次本机安装需要下载较大依赖和模型；速度与CUDA兼容性需短试听实测。公开更新不包含老师原声，旧电脑没有缓存时需选择原文件或使用私下完整包。"
+  "display_version": "0.7.0",
+  "release_status": "stable",
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/6d4fa6096a56285bdef0245d2f4388cf17c569ea/cloud_voice_payload.json",
+  "release_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/tag/cloudvoice-v0.7.0",
+  "download_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/download/cloudvoice-v0.7.0/YangNing_CloudVoice_0.7.0.zip",
+  "download_sha256": "45a9b42e5521afd118e2722cda1dbf25f6bc7e0ff2a746958c2833022d87681a",
+  "download_size": 103063,
+  "notes": "CloudVoice 0.7.0 正式修复版：SRT完整读取编号/起止时间/正文，按开始时间定位，保留长停顿；句子超时保留完整声音并提示、后续按需顺延。TXT按标点与换行加入停顿。新增打开最新WAV所在文件夹，文件名采用JST。保留1.0倍默认速度、六语言配置、1626原声校验、模板不混音、生成及取消按钮。更新保留已有设置、模板、音色参考、历史和模型缓存，无新增模型依赖。内部兼容编号0.7-preview.1。51项自动测试通过；Windows实际安装重启和真实模型六语言听检仍待验证。云端取消只停止等待，Kaggle作业可能继续。"
 }
