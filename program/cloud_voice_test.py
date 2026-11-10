@@ -307,6 +307,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(recipe["model_dtype"],"float32")
         self.assertEqual(recipe["review"]["音色"],"待听检")
 
+    def test_automatic_template_selection_prioritizes_label_and_explains_fallback(self):
+        from voice_prosody import choose_template
+        templates=self.root/"templates";templates.mkdir()
+        (templates/"english.wav").write_bytes(b"test marker")
+        fallback=choose_template("法语",template_root=templates)
+        self.assertEqual(fallback["source_kind"],"approved_rhythm_fallback")
+        self.assertEqual(fallback["template_language"],"英语")
+        self.assertFalse(fallback["waveform_sent_to_model"])
+        (templates/"french.wav").write_bytes(b"test marker")
+        native=choose_template("法语",template_root=templates)
+        self.assertEqual(native["source_kind"],"language_labelled")
+        self.assertTrue(native["path"].endswith("french.wav"))
+        for language in ("粤语","印尼语"):
+            chosen=choose_template(language,template_root=templates)
+            self.assertEqual(chosen["source_kind"],"natural_preset")
+            self.assertFalse(chosen["path"])
+            self.assertIn("未使用音频模板",chosen["description"])
+        self.assertFalse(choose_template("法语","自然语气（无模板）",template_root=templates)["path"])
+        with self.assertRaises(ValueError): choose_template("法语","手动指定","missing.wav",templates)
+        with self.assertRaises(ValueError): choose_template("越南语",template_root=templates)
+
+    def test_auto_template_request_contains_audit_not_local_path(self):
+        path=self.job(template_mode="自然语气（无模板）")
+        request=json.loads((path.parent/"request.json").read_text())
+        self.assertEqual(request["template_selection"]["source_kind"],"natural_preset")
+        self.assertNotIn("path",request["template_selection"])
+        self.assertNotIn("prosody_reference",request)
+        with self.assertRaises(RuntimeError):
+            run_job(path,"legacy",lambda e:None,cli=self.fake_cli(path))
+
     def test_template_summary_is_data_only_and_never_changes_tempo(self):
         from voice_prosody import analyze_template
         template = self.root / "template.wav"

@@ -13,6 +13,40 @@ def default_template(language):
     return str(ROOT / name) if name else ""
 
 
+NATIVE_NAMES={"日语":"japanese.wav","英语":"english.wav","法语":"french.wav","德语":"german.wav",
+              "粤语":"cantonese.wav","印尼语":"indonesian.wav"}
+TEMPLATE_MODES=("自动选择","手动指定","自然语气（无模板）")
+
+
+def choose_template(language, mode="自动选择", manual_path="", template_root=None):
+    """Match explicitly language-labelled local assets; no language/voice guessing."""
+    if language not in NATIVE_NAMES:
+        raise ValueError("当前模型入口尚未配置此语言，不能仅靠模板选择宣称支持。")
+    if mode not in TEMPLATE_MODES:
+        raise ValueError("请选择有效的语气模板模式。")
+    root=Path(template_root) if template_root is not None else ROOT
+    result={"mode":mode,"language":language,"path":"","source_kind":"natural_preset",
+            "template_language":None,"waveform_sent_to_model":False}
+    if mode=="自然语气（无模板）":
+        result["description"]=f"{language}自然语气预设 · 未使用音频模板"
+        return result
+    if mode=="手动指定":
+        if not str(manual_path).strip() or not Path(manual_path).is_file():
+            raise ValueError("手动模式请先选择有效模板；不会默默改用其他音频。")
+        result.update(path=str(Path(manual_path).resolve()),source_kind="manual",description="手动模板："+Path(manual_path).name+" · 仅节奏摘要")
+        return result
+    native=root/NATIVE_NAMES[language]
+    if native.is_file():
+        result.update(path=str(native.resolve()),source_kind="language_labelled",template_language=language,
+                      description=f"自动：{language}标签模板 {native.name} · 仅节奏摘要")
+    elif language in ("法语","德语") and (root/"english.wav").is_file():
+        result.update(path=str((root/"english.wav").resolve()),source_kind="approved_rhythm_fallback",template_language="英语",
+                      description=f"自动：暂缺{language}模板，参考英语模板的节奏摘要 · 发音及语感仍用{language}预设")
+    else:
+        result["description"]=f"自动：暂缺{language}模板，使用{language}自然语气预设 · 未使用音频模板"
+    return result
+
+
 def analyze_template(path):
     """Approximate aggregate pauses and relative pitch spread, never absolute pitch."""
     from voice_clip_edit import tool

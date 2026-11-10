@@ -229,7 +229,7 @@ def run(request):
         "job_id": request["job_id"], "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
         "language": request["language"], "reference_sha256": reference_hash,
         "template_audio_used": False, "template_prosody_alignment": "not_implemented",
-        "prosody_reference": prosody,
+        "prosody_reference": prosody, "template_selection": request.get("template_selection"),
         "pronunciation": request.get("pronunciation"),
         "delivery_instruction": request.get("delivery_instruction", ""),
         "postprocess": request.get("postprocess", {"gain_db":0.0,"light_denoise":True}),

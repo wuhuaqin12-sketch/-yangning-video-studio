@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
-from voice_prosody import default_template
+from voice_prosody import default_template, choose_template, TEMPLATE_MODES
 from japanese_pronunciation import READINGS, parse_overrides, reading_plan
 from voice_adjust import STYLE_OPTIONS, PRESETS, interpret_instruction, adjust_audio, validate_options
 
@@ -24,7 +24,7 @@ def _load_settings():
     try:
         value = json.loads(SETTINGS.read_text(encoding="utf-8"))
         if not isinstance(value,dict): return {}
-        for name in ("tempo_by_language","prosody_templates","generation_by_language","japanese_pronunciation_overrides","drafts"):
+        for name in ("tempo_by_language","prosody_templates","template_modes","generation_by_language","japanese_pronunciation_overrides","drafts"):
             if not isinstance(value.get(name,{}),dict): value[name]={}
         for name in ("audio_history","audio_adjustment_history"):
             if not isinstance(value.get(name,[]),list): value[name]=[]
@@ -127,6 +127,13 @@ def open_kaggle_voice(app, parent=None):
     if selected_template and not Path(selected_template).is_file() and Path(selected_template).name in ("japanese.wav","english.wav"):
         selected_template=default_template(language.get())
     template=tk.StringVar(value=selected_template)
+    # Preserve an existing custom manual path during migration; otherwise use auto.
+    initial_template_mode=settings.get("template_modes",{}).get(language.get())
+    if initial_template_mode not in TEMPLATE_MODES:
+        initial_template_mode="手动指定" if selected_template and selected_template!=default_template(language.get()) else "自动选择"
+    template_mode=tk.StringVar(value=initial_template_mode)
+    template_status=tk.StringVar()
+    template_display=tk.StringVar()
     mode = tk.StringVar(value="generate")
     source_audio = tk.StringVar(value=settings.get("last_audio", ""))
     source_srt = tk.StringVar()
@@ -188,6 +195,7 @@ def open_kaggle_voice(app, parent=None):
     preset_combo.bind("<<ComboboxSelected>>",lambda event: apply_preset())
     ttk.Button(line,text="详细调节",command=lambda: open_generation()).pack(side="left")
     ttk.Label(box,textvariable=option_summary,wraplength=730).pack(anchor="w",pady=3)
+    ttk.Label(box,textvariable=template_status,wraplength=730).pack(anchor="w",pady=3)
     ttk.Label(box,textvariable=mode_info,wraplength=730).pack(anchor="w",pady=3)
     ttk.Button(box,text="修改已有音频 / 全文重做",command=lambda: (more.deiconify(),tabs.select(pages[3]),more.lift())).pack(anchor="w",pady=3)
     ttk.Label(generation_tab,text="生成前调节：语气是模型提示，速度/音量/降噪是生成后的自动处理。",wraplength=680).pack(anchor="w",pady=6)
@@ -207,10 +215,15 @@ def open_kaggle_voice(app, parent=None):
     combo.bind("<<ComboboxSelected>>", lambda e: update_profile(True))
     template_row = ttk.LabelFrame(language_tab, text="语气参考（音色始终使用1626）", padding=8)
     template_row.pack(fill="x", pady=5)
-    ttk.Entry(template_row, textvariable=template).pack(side="left", fill="x", expand=True)
-    ttk.Button(template_row, text="选择模板", command=lambda: choose_media(template, [("音频", "*.wav *.mp3 *.m4a")])).pack(side="left", padx=5)
-    ttk.Button(template_row, text="恢复本语言模板", command=lambda: template.set(default_template(language.get()))).pack(side="left")
-    ttk.Label(language_tab, text="日语用日语模板；英语、法语、德语用英语模板。粤语、印尼语可另选模板；留空使用自然语气。模板不会改变所选倍数。", wraplength=740).pack(anchor="w")
+    template_row.columnconfigure(0,weight=1)
+    template_mode_combo=ttk.Combobox(template_row,textvariable=template_mode,values=TEMPLATE_MODES,state="readonly",width=24)
+    template_mode_combo.grid(row=0,column=0,sticky="w",pady=4)
+    template_mode_combo.bind("<<ComboboxSelected>>",lambda event: update_template_status())
+    template_entry=ttk.Entry(template_row,textvariable=template)
+    template_entry.grid(row=1,column=0,sticky="ew",pady=5)
+    ttk.Button(template_row,text="选择模板",command=lambda: select_manual_template()).grid(row=1,column=1,padx=5)
+    ttk.Label(template_row,textvariable=template_status,wraplength=650).grid(row=2,column=0,columnspan=2,sticky="w",pady=6)
+    ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
     ttk.Label(box, text="输出WAV音频 · 普通生成只需正文，无需视频或原音频。", wraplength=740).pack(anchor="w", pady=6)
     choices = ttk.Frame(edit_tab)
     choices.pack(fill="x", pady=6)
@@ -344,10 +357,26 @@ def open_kaggle_voice(app, parent=None):
             mode_info.set("当前：全文重做 · 旧版保留" if mode.get()=="full" else "生成新音频 · 只需正文，无需视频")
         update_count()
 
+    def update_template_status():
+        try:
+            selection=choose_template(language.get(),template_mode.get(),template.get())
+            template_status.set(selection["description"])
+            template_display.set(selection["path"])
+        except ValueError as exc:
+            template_status.set(str(exc))
+        manual=template_mode.get()=="手动指定"
+        template_entry.configure(textvariable=template if manual else template_display,state="normal" if manual else "readonly")
+
+    def select_manual_template():
+        value=filedialog.askopenfilename(parent=more,filetypes=[("音频","*.wav *.mp3 *.m4a *.flac")])
+        if value:
+            template.set(value);template_mode.set("手动指定");update_template_status()
+
     def store_language(name):
         opt=options()
         settings.setdefault("tempo_by_language",{})[name]=opt["tempo"]
         settings.setdefault("prosody_templates",{})[name]=template.get()
+        settings.setdefault("template_modes",{})[name]=template_mode.get()
         settings.setdefault("generation_by_language",{})[name]=opt
 
     def update_profile(reset=False):
@@ -364,13 +393,17 @@ def open_kaggle_voice(app, parent=None):
             if template_value and not Path(template_value).is_file() and Path(template_value).name in ("japanese.wav","english.wav"):
                 template_value=default_template(active_language)
             template.set(template_value)
+            chosen_mode=settings.get("template_modes",{}).get(active_language)
+            if chosen_mode not in TEMPLATE_MODES:
+                chosen_mode="手动指定" if template_value and template_value!=default_template(active_language) else "自动选择"
+            template_mode.set(chosen_mode)
             pref=settings.get("generation_by_language",{}).get(active_language,{})
             gain.set(str(pref.get("gain_db",0)));denoise.set(pref.get("denoise",True))
             for name,var in style_vars.items(): var.set(name in pref.get("styles",[]))
             preset.set(next((label for label,names in PRESETS.items() if names==pref.get("styles",[])),"自定义"))
         if language.get()=="日语": pronunciation_row.pack(fill="x",pady=4)
         else: pronunciation_row.pack_forget()
-        update_summary()
+        update_summary();update_template_status()
 
     def remember():
         store_language(language.get())
@@ -531,7 +564,7 @@ def open_kaggle_voice(app, parent=None):
                 snapshot=dict(root=DATA/"kaggle_voice_jobs",username=user,dataset=dataset.get().strip(),
                               text=script_from_text(text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
                               output_dir=output.get(),tempo=opt["tempo"],gain_db=opt["gain_db"],light_denoise=opt["denoise"],
-                              edit=edit,prosody_template=template.get().strip() or None,
+                              edit=edit,prosody_template=template.get().strip() or None,template_mode=template_mode.get(),
                               pronunciation_enabled=pronunciation_enabled.get(),japanese_readings=dict(japanese_readings),style_options=opt["styles"])
                 remember()
             if token.get().strip():
@@ -722,5 +755,6 @@ def open_kaggle_voice(app, parent=None):
         else: win.destroy()
     win.protocol("WM_DELETE_WINDOW",close_window)
     for var in (tempo,gain,denoise): var.trace_add("write",update_summary)
+    template.trace_add("write",lambda *args: update_template_status())
     update_profile();update_mode();update_summary()
     win.after(150,poll)

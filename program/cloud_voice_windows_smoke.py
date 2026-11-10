@@ -83,6 +83,11 @@ def main():
             assert not softer.instate(["selected"])
             lang_combo.set("日语");lang_combo.event_generate("<<ComboboxSelected>>");root.update()
             assert softer.instate(["selected"])
+            template_selector=next(w for w in widgets if isinstance(w,ttk.Combobox) and "自动选择" in tuple(w.cget("values")))
+            assert template_selector.get()=="自动选择"
+            template_selector.set("自然语气（无模板）");template_selector.event_generate("<<ComboboxSelected>>");root.update()
+            assert any(isinstance(w,ttk.Label) and "未使用音频模板" in str(w.cget("text")) for w in widgets)
+            template_selector.set("自动选择");template_selector.event_generate("<<ComboboxSelected>>");root.update()
             more.withdraw()
             next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text") == "编辑术语读音表").invoke()
             root.update()

@@ -66,7 +66,7 @@ def build_notebook(request):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
@@ -98,6 +98,11 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         save_json(folder / "pronunciation_plan.json", plan)
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
     split_script(request.get("reading_text",text))  # Reject oversized single sentences before paying GPU startup time.
+    if template_mode is not None:
+        from voice_prosody import choose_template
+        selection=choose_template(language,template_mode,prosody_template or "")
+        prosody_template=selection.pop("path")
+        request["template_selection"]=selection
     if prosody_template:
         from voice_prosody import analyze_template
         request["prosody_reference"] = analyze_template(prosody_template)
@@ -119,6 +124,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
         "postprocess": request["postprocess"], "delivery_instruction": request.get("delivery_instruction", ""),
+        "template_selection": request.get("template_selection"),
     }
     if request.get("pronunciation"):
         manifest["pronunciation"] = request["pronunciation"]
@@ -208,6 +214,8 @@ def deliver_result(folder, manifest):
         raise ValueError("云端制作记录不完整或与任务不一致，保留云端文件以便检查。")
     if manifest.get("pronunciation") and recipe.get("pronunciation") != manifest["pronunciation"]:
         raise ValueError("云端读音校正记录与任务不一致，未将音频标记为完成。")
+    if manifest.get("template_selection") and recipe.get("template_selection") != manifest["template_selection"]:
+        raise ValueError("自动/手动模板执行记录与任务不一致。")
     if manifest.get("delivery_instruction") and recipe.get("delivery_instruction") != manifest["delivery_instruction"]:
         raise ValueError("语气要求与云端返回记录不一致。")
     if recipe.get("postprocess") is not None and recipe["postprocess"] != manifest.get("postprocess", {"gain_db":0.0,"light_denoise":True}):
