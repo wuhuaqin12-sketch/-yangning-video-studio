@@ -136,6 +136,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(request["postprocess"],{"gain_db":-2.0,"light_denoise":False})
         self.assertIn("gentle relaxed",request["delivery_instruction"])
         self.assertEqual(request["tempo"],.9)
+        pointer=json.loads((manifest.parent.parent/"latest_manifest.json").read_text())
+        self.assertEqual(Path(pointer["path"]),manifest.resolve())
         for kwargs in ({"style_options":["停顿长一点","停顿短一点"]},{"gain_db":float('nan')}):
             with self.assertRaises(ValueError): self.job(**kwargs)
         with self.assertRaises(ValueError):

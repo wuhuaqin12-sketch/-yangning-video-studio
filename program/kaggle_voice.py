@@ -88,6 +88,13 @@ def open_kaggle_voice(app, parent=None):
         except tk.TclError:
             pass
     settings = _load_settings()
+    try:
+        pointer=json.loads((DATA/"kaggle_voice_jobs"/"latest_manifest.json").read_text(encoding="utf-8"))
+        candidate=Path(pointer["path"])
+        older=Path(settings.get("last_manifest", ""))
+        if candidate.is_file() and (not older.is_file() or candidate.stat().st_mtime>=older.stat().st_mtime):
+            settings["last_manifest"]=str(candidate)
+    except (OSError,ValueError,KeyError,TypeError): pass
     if settings.get("speed_standard_version") != 2:
         settings["tempo_by_language"] = {name: 1.0 for name in PROFILES}
         settings["speed_standard_version"] = 2

@@ -36,8 +36,8 @@ def build(root, output, revision):
     payloads["preview_version.json"] = json.dumps({
         "name": "YangNing Cloud Voice Independent Preview", "version": "0.3-preview.2",
         "source_revision": revision, "formal_studio_release": False,
-        "local_validation": "See validation report; prior GPU pipeline generated a verified WAV",
-        "pending_validation": ["Updated Windows GUI", "template-conditioned GPU audition", "teacher-voice and join listening"],
+        "local_validation": "Local workflow and FFmpeg tests; Windows setup and UI checked separately in CI; prior GPU pipeline generated a verified WAV",
+        "pending_validation": ["new generation controls GPU audition", "template-conditioned GPU audition", "teacher-voice and join listening"],
         "reference_audio_bundled": False,
         "prosody_templates_bundled": [Path(name).name for name in TEMPLATE_FILES if name in payloads],
         "template_waveform_sent_to_model": False,

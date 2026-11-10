@@ -125,6 +125,8 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     if edit:
         manifest["edit"] = {**edit, "text": text}
     save_json(folder / "manifest.json", manifest)
+    # Durable discovery does not depend on a later GUI event being processed.
+    save_json(Path(root) / "latest_manifest.json", {"path": str((folder / "manifest.json").resolve())})
     return folder / "manifest.json"
 
 
