@@ -1,11 +1,11 @@
 {
   "product": "YangNing Cloud Voice Independent Preview",
-  "sequence": 6,
-  "version": "0.5-preview.2",
-  "source_revision": "6992e91112170701e5fdc24a0336147922e659b8",
+  "sequence": 7,
+  "version": "0.5-preview.3",
+  "source_revision": "da597de9db1f093eec7d3e3ea83dfc325a678e07",
   "schema": 1,
-  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/cf66db2c3889d6388dc903aaeacf35d8fa2f065c/cloud_voice_payload.json",
-  "payload_size": 317883,
-  "payload_sha256": "a23c03590a246e0a742e8bd8b85100ab14621ce2ec7472eaf1aea6ef079a4a43",
-  "notes": "主页面精简：详细说明、模板来源和参数摘要移到更多设置。默认生成新音频，保留约15秒预听、试听及修改入口。修复老师原声读取：提交前校验原文件，云端未挂载时使用同一原声备用内容；不混入模板音色。失败时直接显示具体原因。"
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/30ae348f40dfe56b1e3418f652f7c3881878eb76/cloud_voice_payload.json",
+  "payload_size": 330175,
+  "payload_sha256": "7bf49a10bafe9d66a69b0955f2854f0c2288ffbe0c4ca38badd579632f5ea4fd",
+  "notes": "减少重复等待：默认全文附带开头短试听；相同正文和设置的已完成结果经校验后直接复用，不提交GPU。两项均可在更多设置关闭。单独预听后再生成全文仍是新作业，尚不支持跨作业常驻模型。移除重复的详细调节按钮，模板新增清除选择。"
 }
