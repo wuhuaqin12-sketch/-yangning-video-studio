@@ -70,7 +70,9 @@ jobs:
       - name: Check syntax and exercise voice workflows and audio processing
         run: |
           python -m compileall -q program/cloud_voice_core.py program/voxcpm_kaggle_worker.py program/kaggle_voice.py program/voice_clip_edit.py program/cloud_voice_preview.py build_cloud_voice_preview.py
-          python -m unittest discover -s program -p '*voice*test.py' -v
+          python -m unittest discover -s program -p cloud_voice_test.py -v
+          python -m unittest discover -s program -p voice_adjust_test.py -v
+          python -m unittest discover -s program -p voice_workflows_test.py -v
       - name: Check PowerShell launcher syntax
         shell: pwsh
         run: |
