@@ -191,7 +191,7 @@ def main():
             with wave.open(str(reference),"wb") as audio:
                 audio.setparams((1,2,48000,0,"NONE","not compressed"));audio.writeframes(b'\x01\x00'*4800)
             engine_selector.set("本机生成");engine_selector.event_generate("<<ComboboxSelected>>");root.update()
-            reference_entry=next(w for w in local_panel.winfo_children() if isinstance(w,ttk.Entry))
+            reference_entry=next(w for w in local_panel.winfo_children() if isinstance(w,ttk.Entry) and not isinstance(w,ttk.Combobox))
             reference_entry.delete(0,"end");reference_entry.insert(0,str(reference))
             script=next(w for w in widgets if isinstance(w,tk.Text) and on_main(w))
             script.delete("1.0","end");script.insert("1.0","金剛経。")
@@ -199,7 +199,7 @@ def main():
             def local_run(record,emit):
                 routed.append(json.loads(Path(record).read_text(encoding="utf-8")))
                 emit(("local_ready","Local routing checked"))
-            with patch.object(local_voice,"REFERENCE_SHA256",hashlib.sha256(reference.read_bytes()).hexdigest()),patch.object(kaggle_voice,"_vault",side_effect=AssertionError("Local must not request Kaggle credentials")),patch.object(kaggle_voice,"run_local_job",side_effect=local_run):
+            with patch.object(local_voice,"REFERENCE_SHA256",hashlib.sha256(reference.read_bytes()).hexdigest()),patch.object(kaggle_voice,"_vault",side_effect=AssertionError("Local must not request Kaggle credentials")),patch.object(kaggle_voice,"run_local_job",side_effect=local_run),patch.object(kaggle_voice.messagebox,"showerror",side_effect=AssertionError("Unexpected local submission dialog")):
                 generate.invoke()
                 deadline=time.monotonic()+5
                 while time.monotonic()<deadline and not routed:

@@ -656,6 +656,7 @@ def open_kaggle_voice(app, parent=None):
         if execution.get()=="本机生成":
             connection.pack_forget();local_box.pack(fill="x",pady=6,after=engine_box)
         else:
+            if not running: ENGINE.stop()
             local_box.pack_forget();connection.pack(fill="x",pady=6,after=engine_box)
 
     def install_local():

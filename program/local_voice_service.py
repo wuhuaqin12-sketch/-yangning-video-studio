@@ -34,7 +34,11 @@ def main():
                 result={"status":"error","error":str(exc)}
             print("YANGNING_LOCAL="+json.dumps(result,ensure_ascii=False),flush=True)
     finally:
-        if context.get("runtime"): shutil.rmtree(context["runtime"],ignore_errors=True)
+        runtime=context.get("runtime")
+        context.clear()
+        import gc
+        gc.collect()
+        if runtime: shutil.rmtree(runtime,ignore_errors=True)
 
 
 if __name__=="__main__": main()
