@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 sys.path.insert(0,str(Path(__file__).parent/'program'))
 from cloud_voice_update import PRODUCT,MANAGED,PREFIX,validate_descriptor
-from build_cloud_voice_preview import build
+from build_cloud_voice_preview import build,FILES
 
 
 def payload(root,revision,destination):
@@ -18,7 +18,7 @@ def payload(root,revision,destination):
         archive=Path(td)/'preview.zip';build(root,archive,revision)
         with zipfile.ZipFile(archive) as z:
             prefix='YangNing_CloudVoice_Independent_Preview/'
-            files={name:z.read(prefix+name) for name in MANAGED if prefix+name in z.namelist()}
+            files={name:z.read(prefix+name) for name in tuple(FILES)+('preview_version.json',) if prefix+name in z.namelist()}
     version=json.loads(files['preview_version.json']);version['prosody_templates_bundled']=[]
     files['preview_version.json']=json.dumps(version,ensure_ascii=False,indent=2).encode()
     value={'product':PRODUCT,'sequence':version['update_sequence'],'version':version['version'],'source_revision':revision,

@@ -33,6 +33,10 @@ REQUIRED={"START_CLOUD_VOICE_PREVIEW.bat","launch_cloud_voice_preview.ps1","prev
           "program/cloud_voice_preview.py","program/kaggle_voice.py"}
 
 
+def allowed_file(name):
+    return isinstance(name,str) and (name in MANAGED or re.fullmatch(r"program/[a-z][a-z0-9_]*\.py",name) is not None)
+
+
 def data_root():
     return Path(os.environ.get("YANGNING_CLOUD_DATA_DIR",str(Path(os.environ.get("LOCALAPPDATA",str(Path.home())))/"YangNingCloudVoicePreview")))
 
@@ -102,7 +106,7 @@ def validate_payload(data,descriptor):
     if any(value.get(key)!=descriptor.get(key) for key in ("product","sequence","version","source_revision")):
         raise ValueError("更新包内容与版本说明不一致。")
     files=value.get("files")
-    if not isinstance(files,dict) or not REQUIRED.issubset(files) or not set(files).issubset(MANAGED):
+    if not isinstance(files,dict) or not REQUIRED.issubset(files) or not all(allowed_file(name) for name in files):
         raise ValueError("更新文件清单不完整或包含用户数据目录。")
     decoded={}
     for name,record in files.items():
@@ -155,7 +159,7 @@ def load_plan(path):
     tx=Path(plan["tx"]).resolve()
     if path!=tx/"plan.json" or path.parent.parent.resolve()!=(data_root()/"updates").resolve() or plan.get("schema")!=1:
         raise ValueError("更新事务目录无效。")
-    if Path(plan["stage"]).resolve()!=tx/"stage" or not REQUIRED.issubset(plan["files"]) or not set(plan["files"]).issubset(MANAGED):
+    if Path(plan["stage"]).resolve()!=tx/"stage" or not REQUIRED.issubset(plan["files"]) or not all(allowed_file(name) for name in plan["files"]):
         raise ValueError("更新事务清单无效。")
     for name in plan["files"]: safe_target(Path(plan["root"]),name)
     return plan
@@ -165,7 +169,7 @@ def restore(plan_path):
     plan=load_plan(plan_path);root=Path(plan["root"]);tx=Path(plan["tx"])
     entries=json.loads((tx/"backup.json").read_text(encoding="utf-8"))
     for name,expected in entries.items():
-        if name not in MANAGED|{"FILES_SHA256.json",".runtime_selector.json"}: raise ValueError("备份路径无效。")
+        if not allowed_file(name) and name not in {"FILES_SHA256.json",".runtime_selector.json"}: raise ValueError("备份路径无效。")
         if expected is not None and sha((tx/"backup"/name).read_bytes())!=expected: raise ValueError("备份校验失败，尚未开始恢复。")
     for name,expected in entries.items():
         target=safe_target(root,name)
@@ -245,7 +249,7 @@ def launch(root,plan_path=None):
     env=os.environ.copy()
     env.pop("YANGNING_UPDATE_PLAN",None)
     if plan_path: env["YANGNING_UPDATE_PLAN"]=str(plan_path)
-    return subprocess.Popen(["cmd.exe","/c",str(Path(root)/"START_CLOUD_VOICE_PREVIEW.bat")],cwd=str(root),env=env)
+    return subprocess.Popen(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(Path(root)/"launch_cloud_voice_preview.ps1")],cwd=str(root),env=env)
 
 
 def installer(plan_path,pid,rollback=False):

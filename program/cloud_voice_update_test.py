@@ -70,6 +70,15 @@ class UpdateTests(unittest.TestCase):
         desc={**self.descriptor,'sequence':5,'version':'0.5-preview.1'}
         self.assertFalse(update.check_update(self.root,lambda url,limit:json.dumps(desc).encode())['available'])
         with self.assertRaises(ValueError):update.prepare_update(self.root,desc,self.fetch,False)
+    def test_future_python_module_can_update_but_template_or_runtime_cannot(self):
+        value=copy.deepcopy(self.value)
+        content=b"new_feature=True\n"
+        value["files"]["program/future_feature.py"]={"content":base64.b64encode(content).decode(),"sha256":update.sha(content)}
+        data=json.dumps(value).encode();desc={**self.descriptor,"payload_size":len(data),"payload_sha256":update.sha(data)}
+        self.assertIn("program/future_feature.py",update.validate_payload(data,desc))
+        for name in ("program/templates/private.wav",".preview_runtime/python.exe","../outside.py","program/../outside.py","program/settings.json"):
+            self.assertFalse(update.allowed_file(name))
+
     def test_boot_ack_requires_correct_transaction_root(self):
         plan=self.prepare();update.apply_plan(plan,health_check=False)
         with patch.dict(os.environ,{'YANGNING_UPDATE_PLAN':str(plan)}):update.acknowledge_boot(self.root)

@@ -54,6 +54,12 @@ jobs:
           $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
           & $previewPython .\program\cloud_voice_windows_smoke.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Apply, restart and roll back a real extracted package
+        shell: powershell
+        run: |
+          $previewPython = Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT '.preview_runtime\Scripts\python.exe'
+          & $previewPython .\program\cloud_voice_windows_update_test.py --package-dir (Join-Path $env:CLOUD_VOICE_PREVIEW_ROOT 'program')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   local-assembly-and-package:
     runs-on: ubuntu-latest
     timeout-minutes: 12
