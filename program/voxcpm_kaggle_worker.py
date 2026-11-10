@@ -149,6 +149,42 @@ def process_audio(raw_path, final_path, tempo, gain_db=0.0, light_denoise=True):
     return {"raw_seconds": before, "final_seconds": after, "filter": filter_graph(tempo,gain_db,light_denoise)}
 
 
+def request_fingerprint(request):
+    fields=("text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
+    data={key:request.get(key) for key in fields}
+    data.update(reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
+    return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+
+def atomic_json(path,value):
+    path=Path(path);pending=path.with_suffix(path.suffix+".tmp")
+    pending.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding="utf-8");pending.replace(path)
+
+
+def checkpoint_parts(manifest_path,request):
+    import numpy as np
+    path=Path(manifest_path)
+    record=json.loads(path.read_text(encoding="utf-8"))
+    blocks=[unit["reading_text"] for unit in request["units"]] if request.get("units") else split_script(request.get("reading_text",request["text"]))
+    if (record.get("fingerprint")!=request_fingerprint(request) or record.get("total")!=len(blocks)
+            or not isinstance(record.get("rate"),int) or not 8000<=record["rate"]<=96000):
+        raise ValueError("断点记录与原文、音色或生成参数不一致。")
+    valid={}
+    for piece in record.get("pieces",[]):
+        index=piece.get("index")
+        if not isinstance(index,int) or not 0<=index<len(blocks) or index in valid: raise ValueError("断点段号无效。")
+        relative=Path(piece.get("file",""))
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix!=".npz": raise ValueError("断点文件路径无效。")
+        audio_path=path.parent/relative
+        if hashlib.sha256(audio_path.read_bytes()).hexdigest()!=piece.get("sha256"): raise ValueError("断点音频校验不一致。")
+        if hashlib.sha256(blocks[index].encode()).hexdigest()!=piece.get("text_sha256"): raise ValueError("断点文字校验不一致。")
+        with np.load(audio_path,allow_pickle=False) as data:
+            audio=data["audio"]
+            if audio.ndim!=1 or not 0<audio.size<=record["rate"]*1200 or not np.isfinite(audio).all(): raise ValueError("断点音频无效。")
+        valid[index]=(piece,audio_path)
+    return record,valid
+
+
 def run(request):
     import numpy as np
     import soundfile as sf
@@ -175,7 +211,7 @@ def run(request):
     if request.get("delivery_instruction"):
         profile["style"] += ", " + request["delivery_instruction"]
     spoken_text = request.get("reading_text", request["text"])
-    blocks = split_script(spoken_text)
+    blocks = [unit["reading_text"] for unit in request["units"]] if request.get("units") else split_script(spoken_text)
     ensure_audio_tools(profile["tempo"])
     output_dir = Path(request.get("output_dir", "/kaggle/working"))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -187,7 +223,7 @@ def run(request):
 
     # Cache weights outside /kaggle/working so they are not saved as job outputs.
     print("YANGNING_STAGE=model_download", flush=True)
-    snapshot = Path(snapshot_download(MODEL_ID, cache_dir="/tmp/yangning_hf_cache"))
+    snapshot = Path(snapshot_download(MODEL_ID, cache_dir="/tmp/yangning_hf_cache", **({"revision":request["model_revision"]} if request.get("model_revision") else {})))
     config = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
     dtype = config.get("dtype", "bfloat16")
     if dtype in ("bfloat16", "bf16") and not torch.cuda.is_bf16_supported():
@@ -200,33 +236,57 @@ def run(request):
     (runtime / "config.json").write_text(json.dumps(config), encoding="utf-8")
     model = VoxCPM.from_pretrained(str(runtime), load_denoiser=False, optimize=False, device="cuda")
     rate = int(model.tts_model.sample_rate)
-    chunks, seeds, peaks = [], [], []
+    seeds, peaks, lengths = [], [], []
+    folder=output_dir/"checkpoints";folder.mkdir(exist_ok=True)
+    checkpoint={"version":1,"job_id":request["job_id"],"fingerprint":request_fingerprint(request),"snapshot_revision":snapshot.name,
+                "rate":rate,"model_dtype":dtype,"total":len(blocks),"pieces":[]}
+    available={}
+    if request.get("resume_checkpoint_job_id"):
+        for candidate in Path("/kaggle/input").rglob("checkpoint_manifest.json"):
+            record=json.loads(candidate.read_text(encoding="utf-8"))
+            if record.get("job_id")==request["resume_checkpoint_job_id"]:
+                record,available=checkpoint_parts(candidate,request)
+                if record["snapshot_revision"]!=snapshot.name or record["rate"]!=rate or record.get("model_dtype")!=dtype: raise ValueError("断点模型快照或采样率不一致。")
+                break
+        if not available: raise ValueError("没有取得可校验的已完成段落；不会静默从头生成。")
+    atomic_json(output_dir/"checkpoint_manifest.json",checkpoint)
     base_seed = int(request.get("seed", 16261109))
     print("YANGNING_STAGE=generation", flush=True)
     for index, block in enumerate(blocks):
         seed = base_seed + index if base_seed >= 0 else None
         if seed is not None:
-            torch.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
-            np.random.seed(seed % (2**32))
-        audio = np.asarray(model.generate(
-            text=f"({profile['style']}){block}", reference_wav_path=str(reference),
-            prompt_wav_path=None, prompt_text=None, cfg_value=2.0, inference_timesteps=10,
-            normalize=False, denoise=False, retry_badcase=False, max_len=4096,
-        ), dtype=np.float32).reshape(-1)
-        if not audio.size or not np.isfinite(audio).all():
-            raise RuntimeError(f"第{index + 1}段没有返回有效音频。")
-        chunks.append(audio)
-        seeds.append(seed)
-        peaks.append(float(np.max(np.abs(audio))))
-        print(f"已生成 {index + 1}/{len(blocks)} 个完整语义段", flush=True)
-    # Preserve every generated sample, including leading, internal and trailing pauses.
-    joined = np.concatenate(chunks)
-    peak = float(np.max(np.abs(joined)))
-    gain = 0.99 / peak if peak >= 1.0 else 1.0
-    sf.write(raw_path, joined * gain, rate, subtype="PCM_16")
+            torch.manual_seed(seed);torch.cuda.manual_seed_all(seed);np.random.seed(seed % (2**32))
+        target=folder/f"part_{index:05d}.npz"
+        if index in available:
+            old,source=available[index]
+            shutil.copy2(source,target)
+            with np.load(target,allow_pickle=False) as data: audio=data["audio"].astype(np.float32)
+            print(f"复用已完成段落 {index+1}",flush=True)
+        else:
+            audio = np.asarray(model.generate(
+                text=f"({profile['style']}){block}", reference_wav_path=str(reference),
+                prompt_wav_path=None, prompt_text=None, cfg_value=2.0, inference_timesteps=10,
+                normalize=False, denoise=False, retry_badcase=False, max_len=4096,
+            ), dtype=np.float32).reshape(-1)
+            if not audio.size or not np.isfinite(audio).all(): raise RuntimeError(f"第{index+1}段没有返回有效音频。")
+            pending=target.with_suffix(".tmp")
+            with pending.open("wb") as stream: np.savez(stream,audio=audio)
+            pending.replace(target)
+        seeds.append(seed);peaks.append(float(np.max(np.abs(audio))));lengths.append(int(audio.size))
+        checkpoint["pieces"].append({"index":index,"file":str(target.relative_to(output_dir)),
+                                     "sha256":hashlib.sha256(target.read_bytes()).hexdigest(),"text_sha256":hashlib.sha256(block.encode()).hexdigest()})
+        atomic_json(output_dir/"checkpoint_manifest.json",checkpoint)
+        print(f"已生成 {index+1}/{len(blocks)} 个完整语义段",flush=True)
+    peak=max(peaks);gain=.99/peak if peak>=1 else 1.0
+    # Stream one semantic unit at a time; preserve all samples and pauses.
+    with wave.open(str(raw_path),"wb") as destination:
+        destination.setparams((1,2,rate,0,"NONE","not compressed"))
+        for piece in checkpoint["pieces"]:
+            with np.load(output_dir/piece["file"],allow_pickle=False) as data:
+                values=np.rint(data["audio"]*gain*32768).clip(-32768,32767).astype("<i2")
+                destination.writeframes(values.tobytes())
     recipe = {
-        "job_id": request["job_id"], "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
+        "job_id": request["job_id"], "purpose":request.get("purpose","full"), "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
         "language": request["language"], "reference_sha256": reference_hash,
         "template_audio_used": False, "template_prosody_alignment": "not_implemented",
         "prosody_reference": prosody, "template_selection": request.get("template_selection"),
@@ -248,6 +308,16 @@ def run(request):
         if not math.isfinite(gain_db) or not -12 <= gain_db <= 6:
             raise ValueError("音量设置无效。")
         recipe.update(process_audio(raw_path, final_path, profile["tempo"],gain_db,post.get("light_denoise",True)))
+        position=0
+        segments=[]
+        scale=recipe["final_seconds"]/(sum(lengths)/rate)
+        units=request.get("units") or [{"text":block,"reading_text":block} for block in blocks]
+        for unit,length in zip(units,lengths):
+            segments.append({"start":position/rate*scale,"end":(position+length)/rate*scale,"text":unit["text"]})
+            position+=length
+        atomic_json(output_dir/"segments.json",{"audio_sha256":hashlib.sha256(final_path.read_bytes()).hexdigest(),
+                    "timing":"generated_units" if profile["tempo"]==1 else "estimated_after_tempo", "segments":segments})
+        recipe["resumed_segments"]=len(available)
         recipe["status"] = "generated_pending_review"
     except Exception as exc:
         recipe.update(status="postprocess_failed", error=str(exc))

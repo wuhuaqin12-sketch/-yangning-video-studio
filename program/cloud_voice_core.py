@@ -66,7 +66,7 @@ def build_notebook(request):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True, template_mode=None, purpose="full", template_library_dir=None):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
@@ -77,16 +77,21 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     if not str(output_dir).strip():
         raise ValueError("请选择输出目录。")
     text = script_from_text(text)
+    requested_seed=int(seed)
     seed = int(seed)
     if not -1 <= seed < 2**31:
         raise ValueError("随机种子须为-1或小于2147483648的非负整数。")
+    if seed==-1:
+        import secrets
+        seed=secrets.randbelow(2**30)
+    if purpose not in ("full","preview","terminology"): raise ValueError("任务类型无效。")
     job_id = uuid.uuid4().hex[:12]
     folder = Path(root) / job_id
     folder.mkdir(parents=True)
     target = Path(output_dir).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
     request = {
-        "job_id": job_id, "text": text, "language": language, "seed": seed, "tempo": profile["tempo"],
+        "job_id": job_id, "text": text, "language": language, "seed": seed, "requested_seed": requested_seed, "purpose":purpose, "tempo": profile["tempo"],
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
         "postprocess": {"gain_db": options["gain_db"], "light_denoise": options["denoise"]},
     }
@@ -97,10 +102,12 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         request["pronunciation"] = plan
         save_json(folder / "pronunciation_plan.json", plan)
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
+    original_units=split_script(text,target_chars=240)
+    request["units"]=[{"text":unit,"reading_text":reading_plan(unit,japanese_readings)["reading_text"] if language=="日语" and pronunciation_enabled else unit} for unit in original_units]
     split_script(request.get("reading_text",text))  # Reject oversized single sentences before paying GPU startup time.
     if template_mode is not None:
         from voice_prosody import choose_template
-        selection=choose_template(language,template_mode,prosody_template or "")
+        selection=choose_template(language,template_mode,prosody_template or "",template_root=template_library_dir)
         prosody_template=selection.pop("path")
         request["template_selection"]=selection
     if prosody_template:
@@ -124,7 +131,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
         "postprocess": request["postprocess"], "delivery_instruction": request.get("delivery_instruction", ""),
-        "template_selection": request.get("template_selection"),
+        "template_selection": request.get("template_selection"), "purpose":purpose,
     }
     if request.get("pronunciation"):
         manifest["pronunciation"] = request["pronunciation"]
@@ -212,6 +219,8 @@ def deliver_result(folder, manifest):
             or recipe.get("template_audio_used") is not False or recipe.get("silence_trimmed") is not False
             or recipe.get("pitch_ratio") != 1.0 or recipe.get("profile", {}).get("tempo") != manifest.get("tempo", profile_for(manifest["language"])["tempo"])):
         raise ValueError("云端制作记录不完整或与任务不一致，保留云端文件以便检查。")
+    if manifest.get("purpose","full")!="full" and recipe.get("purpose")!=manifest["purpose"]:
+        raise ValueError("试听任务类型记录不一致。")
     if manifest.get("pronunciation") and recipe.get("pronunciation") != manifest["pronunciation"]:
         raise ValueError("云端读音校正记录与任务不一致，未将音频标记为完成。")
     if manifest.get("template_selection") and recipe.get("template_selection") != manifest["template_selection"]:
@@ -242,7 +251,39 @@ def deliver_result(folder, manifest):
             dst = target/(prefix+suffix)
             shutil.copy2(src,dst)
             artifacts[name] = str(dst)
+    if (source/"segments.json").is_file():
+        from voice_workflows import load_segments
+        dst=Path(artifacts["yangning_final.wav"]+".segments.json")
+        shutil.copy2(source/"segments.json",dst)
+        load_segments(artifacts["yangning_final.wav"])
+        artifacts["segments"]=str(dst)
     return artifacts
+
+
+def prepare_resume_job(manifest_path):
+    original=Path(manifest_path)
+    old=json.loads(original.read_text(encoding="utf-8"))
+    if old.get("status")!="remote_failed": raise ValueError("续生成只用于已经失败且保留了断点的作业；运行中的任务请使用恢复最近任务。")
+    if not (original.parent/"request.json").is_file() or not (original.parent/"download"/"checkpoint_manifest.json").is_file():
+        raise ValueError("这个作业没有平台保留的有效断点，无法续生成。请查看日志修正后重新生成。")
+    request=json.loads((original.parent/"request.json").read_text(encoding="utf-8"))
+    from voxcpm_kaggle_worker import checkpoint_parts
+    checkpoint,parts=checkpoint_parts(original.parent/"download"/"checkpoint_manifest.json",request)
+    if not parts: raise ValueError("这个作业没有可恢复的已完成段落；请查看日志修正错误后重新生成。")
+    job_id=uuid.uuid4().hex[:12];folder=original.parent.parent/job_id;folder.mkdir()
+    request.update(job_id=job_id,resume_checkpoint_job_id=old["job_id"],model_revision=checkpoint["snapshot_revision"])
+    kernel=f"{old['username']}/yangning-voice-{job_id}"
+    save_json(folder/"request.json",request)
+    save_json(folder/"voxcpm2.ipynb",build_notebook(request))
+    save_json(folder/"kernel-metadata.json",{"id":kernel,"title":"YangNing Resume "+job_id,"code_file":"voxcpm2.ipynb",
+              "language":"python","kernel_type":"notebook","is_private":True,"enable_gpu":True,"enable_internet":True,
+              "dataset_sources":[old["dataset"]],"kernel_sources":[old["kernel"]],"competition_sources":[],"model_sources":[]})
+    record={key:value for key,value in old.items() if key in ("username","dataset","language","tempo","output_dir","postprocess","delivery_instruction","template_selection","pronunciation","edit","purpose")}
+    record.update(job_id=job_id,kernel=kernel,status="prepared",cleanup_status="not_requested",created_utc=datetime.now(timezone.utc).isoformat(),
+                  retained_kernels=list(dict.fromkeys(old.get("retained_kernels",[])+[old["kernel"]])),resume_from=str(original))
+    save_json(folder/"manifest.json",record)
+    save_json(folder.parent/"latest_manifest.json",{"path":str((folder/"manifest.json").resolve())})
+    return folder/"manifest.json"
 
 
 def run_job(manifest_path, secret, emit, cli=kaggle_cli, sleep=time.sleep, timeout_seconds=9*60*60, audio_only=False):
@@ -297,9 +338,20 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
                         (folder / "remote_error.log").write_text(redact(log, secret), encoding="utf-8")
                     except Exception:
                         pass
+                    try:
+                        download=folder/"download";download.mkdir(exist_ok=True)
+                        cli(["kernels","output",kernel,"-p",str(download),"-o"],env,timeout=600)
+                        if (download/"checkpoint_manifest.json").is_file():
+                            from voxcpm_kaggle_worker import checkpoint_parts
+                            request=json.loads((folder/"request.json").read_text(encoding="utf-8"))
+                            checkpoint,parts=checkpoint_parts(download/"checkpoint_manifest.json",request)
+                            manifest["completed_segments"]=len(parts)
+                            manifest["total_segments"]=checkpoint["total"]
+                    except Exception as checkpoint_error:
+                        manifest["checkpoint_error"]=redact(checkpoint_error,secret)
                     manifest["status"] = "remote_failed"
                     manifest["remote_state"] = state
-                    raise RuntimeError("云端任务已失败或取消，继续等待不会重新运行。任务与可取得的日志已保留；请查看错误详情，修正后再提交新任务。")
+                    raise RuntimeError(f"云端任务已失败或取消。已保存{manifest.get('completed_segments',0)}个可校验段落；有断点时可在更多设置点击续生成未完成段。没有断点则先查看日志修正错误。")
                 manifest["remote_state"] = state
                 if state=="running" and time.monotonic() >= next_log:
                     try:
@@ -352,14 +404,18 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
         save_json(manifest_path,manifest)
         # Only delete remotely after local final/raw WAV and audit files are validated.
         if manifest.get("cleanup_status") != "deleted":
-            try:
-                cli(["kernels", "delete", kernel, "--yes"], env, timeout=180)
-                manifest["cleanup_status"] = "deleted"
-            except Exception as exc:
-                manifest["cleanup_status"] = "pending"
-                manifest["cleanup_error"] = redact(exc, secret)
-                emit(("warning", "WAV已保存；私有云端任务清理失败，稍后恢复任务可重试清理。"))
-            save_json(manifest_path, manifest)
+            states=manifest.setdefault("kernel_cleanup",{})
+            for cleanup_kernel in list(dict.fromkeys([kernel]+manifest.get("retained_kernels",[]))):
+                if states.get(cleanup_kernel)=="deleted": continue
+                try:
+                    cli(["kernels","delete",cleanup_kernel,"--yes"],env,timeout=180)
+                    states[cleanup_kernel]="deleted"
+                except Exception as exc:
+                    states[cleanup_kernel]="pending";manifest["cleanup_error"]=redact(exc,secret)
+                    emit(("warning","WAV已保存；部分私有作业清理失败，恢复任务可重试清理。"))
+                save_json(manifest_path,manifest)
+            manifest["cleanup_status"]="deleted" if all(value=="deleted" for value in states.values()) else "pending"
+            save_json(manifest_path,manifest)
         for name in ("voxcpm2.ipynb", "kernel-metadata.json"):
             (folder / name).unlink(missing_ok=True)
         emit(("done", manifest["artifacts"]))

@@ -9,10 +9,11 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
+from cloud_voice_core import prepare_job, prepare_resume_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
-from voice_prosody import default_template, choose_template, TEMPLATE_MODES, restore_template_path
+from voice_prosody import default_template, choose_template, TEMPLATE_MODES, restore_template_path, install_language_template
 from japanese_pronunciation import READINGS, parse_overrides, reading_plan
+from voice_workflows import audition_text, terminology_text, load_segments
 from voice_adjust import STYLE_OPTIONS, PRESETS, interpret_instruction, adjust_audio, validate_options
 
 DATA = Path(os.environ.get("YANGNING_CLOUD_DATA_DIR", str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio")))
@@ -119,6 +120,7 @@ def open_kaggle_voice(app, parent=None):
     canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(item, width=e.width), _wrap_labels(box,e.width-28)))
     events = queue.Queue()
     running = False
+    active_purpose="full"
 
     username = tk.StringVar(value=settings.get("username", ""))
     dataset = tk.StringVar(value=settings.get("reference_dataset", ""))
@@ -223,6 +225,7 @@ def open_kaggle_voice(app, parent=None):
     template_entry.grid(row=1,column=0,sticky="ew",pady=5)
     ttk.Button(template_row,text="选择模板",command=lambda: select_manual_template()).grid(row=1,column=1,padx=5)
     ttk.Label(template_row,textvariable=template_status,wraplength=650).grid(row=2,column=0,columnspan=2,sticky="w",pady=6)
+    ttk.Button(language_tab,text="加入本语言模板库（以后自动选择）",command=lambda: register_template()).pack(anchor="w",pady=6)
     ttk.Label(language_tab,text="自动按已标记语言的本机模板匹配，优先本语言。法语、德语暂缺模板时沿用已确认的英语节奏摘要；粤语、印尼语缺模板时用各自自然语气预设。不会从网上随意抓取声音，也不自动识别素材语言。",wraplength=680).pack(anchor="w",pady=6)
     ttk.Label(box, text="输出WAV音频 · 普通生成只需正文，无需视频或原音频。", wraplength=740).pack(anchor="w", pady=6)
     choices = ttk.Frame(edit_tab)
@@ -274,6 +277,7 @@ def open_kaggle_voice(app, parent=None):
     ttk.Label(advanced, text="随机种子").pack(side="left")
     ttk.Entry(advanced, textvariable=seed, width=14).pack(side="left", padx=8)
     ttk.Label(advanced, text="-1为随机；同种子不保证跨设备听感完全相同。").pack(side="left")
+    ttk.Button(language_tab,text="术语集中试听",command=lambda: terms_dialog()).pack(anchor="w",pady=6)
     ttk.Label(box, textvariable=status, wraplength=730).pack(anchor="w", pady=8)
     progressbar=ttk.Progressbar(box,mode="indeterminate")
     progressbar.pack(fill="x",pady=3)
@@ -281,11 +285,16 @@ def open_kaggle_voice(app, parent=None):
     ttk.Button(results_row,text="试听上一版",command=lambda: play_path(previous_audio)).pack(side="left")
     ttk.Button(results_row,text="版本与输出文件",command=lambda: result_history()).pack(side="left",padx=6)
     ttk.Button(connection_tab,text="查看最近任务日志",command=lambda: show_log()).pack(anchor="w",pady=8)
+    ttk.Button(connection_tab,text="续生成未完成段（已有断点时）",command=lambda: start(True,continuation=True)).pack(anchor="w",pady=8)
     ttk.Button(connection_tab,text="检查本机环境",command=lambda: local_check()).pack(anchor="w",pady=8)
     actions = ttk.Frame(box)
     actions.pack(fill="x", pady=5)
     preview = ttk.Button(actions, text="试听最近WAV", command=lambda: play_last())
     preview.pack(side="left")
+    audition_actions=ttk.Frame(box);audition_actions.pack(fill="x",pady=5)
+    ttk.Button(audition_actions,text="先预听约15秒",command=lambda: start(False,purpose="preview")).pack(side="left")
+    ttk.Button(audition_actions,text="试听预听",command=lambda: play_path(settings.get("last_preview_audio","") )).pack(side="left",padx=6)
+    ttk.Button(audition_actions,text="按句段试听 / 修改",command=lambda: segment_dialog()).pack(side="left",padx=6)
     ttk.Button(actions,text="音频微调",command=lambda: adjustment_dialog()).pack(side="left",padx=6)
     resume = ttk.Button(actions, text="恢复最近任务", command=lambda: start(True))
     resume.pack(side="left", padx=8)
@@ -359,7 +368,7 @@ def open_kaggle_voice(app, parent=None):
 
     def update_template_status():
         try:
-            selection=choose_template(language.get(),template_mode.get(),template.get())
+            selection=choose_template(language.get(),template_mode.get(),template.get(),template_root=DATA/"templates")
             template_status.set(selection["description"])
             template_display.set(selection["path"])
         except ValueError as exc:
@@ -544,7 +553,8 @@ def open_kaggle_voice(app, parent=None):
         if value: progressbar.start(12)
         else: progressbar.stop()
 
-    def start(recover):
+    def start(recover, purpose="full", supplied_text=None, continuation=False):
+        nonlocal active_purpose
         if running: return
         try:
             if recover:
@@ -553,6 +563,7 @@ def open_kaggle_voice(app, parent=None):
                 manifest=Path(record)
                 job=json.loads(manifest.read_text(encoding="utf-8"))
                 user=job["username"]
+                purpose=job.get("purpose","full")
             else:
                 user=username.get().strip()
                 if generation_command.get().strip():
@@ -564,10 +575,12 @@ def open_kaggle_voice(app, parent=None):
                     if not range_start.get().strip() or not range_end.get().strip(): raise ValueError("请先选择完整句段的起止时间，或从配套SRT选段。")
                     edit={"kind":"audio","mode":"partial","audio":source_audio.get(),"srt":source_srt.get(),"start":float(range_start.get()),"end":float(range_end.get())}
                 snapshot=dict(root=DATA/"kaggle_voice_jobs",username=user,dataset=dataset.get().strip(),
-                              text=script_from_text(text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
+                              text=script_from_text(supplied_text if supplied_text is not None else text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
                               output_dir=output.get(),tempo=opt["tempo"],gain_db=opt["gain_db"],light_denoise=opt["denoise"],
-                              edit=edit,prosody_template=template.get().strip() or None,template_mode=template_mode.get(),
+                              edit=edit if purpose=="full" else None,purpose=purpose,template_library_dir=DATA/"templates",
+                              prosody_template=template.get().strip() or None,template_mode=template_mode.get(),
                               pronunciation_enabled=pronunciation_enabled.get(),japanese_readings=dict(japanese_readings),style_options=opt["styles"])
+                if purpose=="preview": snapshot["text"]=audition_text(snapshot["text"],language.get())
                 remember()
             if token.get().strip():
                 raise ValueError("令牌输入框有未保存内容，请先点击安全保存连接。")
@@ -575,16 +588,87 @@ def open_kaggle_voice(app, parent=None):
             if not secret: raise ValueError("请先在更多设置为本人Kaggle用户名安全保存令牌。")
         except Exception as exc:
             messagebox.showerror("还不能提交",str(exc) if isinstance(exc,(ValueError,OSError)) else "请检查连接和最近任务记录。",parent=win);return
+        active_purpose=purpose
         set_running(True)
         status.set("正在恢复已有任务，不重复提交…" if recover else "正在检查正文、模板与修改范围…")
         def work():
             try:
-                record=manifest if recover else prepare_job(**snapshot)
-                if not recover: events.put(("manifest",str(record)))
+                record=prepare_resume_job(manifest) if continuation else (manifest if recover else prepare_job(**snapshot))
+                if not recover or continuation: events.put(("manifest",str(record)))
                 run_job(record,secret,events.put,audio_only=True)
             except Exception as exc:
                 events.put(("error",str(exc)))
         threading.Thread(target=work,daemon=True).start()
+
+    def register_template():
+        if running: return
+        source=filedialog.askopenfilename(parent=more,filetypes=[("音频","*.wav *.mp3 *.m4a *.flac")])
+        if not source: return
+        selected_language=language.get()
+        set_running(True);status.set("正在检查并加入本语言模板库；只用于节奏参考…")
+        def work():
+            try:
+                path=install_language_template(selected_language,source,DATA/"templates")
+                events.put(("template_added",{"language":selected_language,"path":path}))
+            except Exception as exc: events.put(("adjust_error",str(exc)))
+        threading.Thread(target=work,daemon=True).start()
+
+    def terms_dialog():
+        popup=tk.Toplevel(win);popup.title("术语集中试听");_fit_window(popup,720,500)
+        ttk.Label(popup,text="日语可从正文提取已知术语；其他语言请每行输入一个需确认的词。此试听不改变全文。",wraplength=650).pack(padx=12,pady=10)
+        entry=tk.Text(popup,wrap="word",height=12);entry.pack(fill="both",expand=True,padx=12,pady=8)
+        try:
+            if language.get()=="日语":
+                entry.insert("1.0",terminology_text(text_box.get("1.0","end"),"日语",japanese_readings).replace("。 ","\n").rstrip("。"))
+        except ValueError: pass
+        def generate():
+            try: content=terminology_text(entry.get("1.0","end"),language.get(),japanese_readings)
+            except ValueError as exc:
+                messagebox.showinfo("没有术语",str(exc),parent=popup);return
+            popup.destroy();start(False,purpose="terminology",supplied_text=content)
+        ttk.Button(popup,text="生成术语试听（使用当前语气与1626音色）",command=generate).pack(pady=10)
+
+    def segment_dialog():
+        audio=last_audio
+        try: record=load_segments(audio)
+        except (OSError,ValueError,KeyError) as exc:
+            messagebox.showinfo("没有配套句段表","请选择本版生成的完整音频。外部或普通微调音频可在更多设置通过配套SRT或时间范围修改。",parent=win);return
+        popup=tk.Toplevel(win);popup.title("按生成句段试听与修改");_fit_window(popup,800,550)
+        ttk.Label(popup,text="选择一句段或连续几段。按生成语义段定位，不是逐词识别；变速后的时间近似，拼接前仍检查静音接点。",wraplength=720).pack(padx=12,pady=10)
+        listing=tk.Listbox(popup,selectmode="extended",exportselection=False)
+        listing.pack(fill="both",expand=True,padx=12,pady=10)
+        for item in record["segments"]: listing.insert("end",f"{item['start']:.2f}–{item['end']:.2f}  {item['text']}")
+        def selected():
+            indices=list(listing.curselection())
+            if not indices or indices!=list(range(indices[0],indices[-1]+1)): raise ValueError("请选择连续的完整句段。")
+            return indices
+        def listen():
+            try: indices=selected()
+            except ValueError as exc: messagebox.showinfo("请选择句段",str(exc),parent=popup);return
+            a,b=record["segments"][indices[0]]["start"],record["segments"][indices[-1]]["end"]
+            def work():
+                try:
+                    import uuid
+                    from voice_clip_edit import command,tool
+                    folder=DATA/"audition_cache";folder.mkdir(parents=True,exist_ok=True)
+                    target=folder/(uuid.uuid4().hex+".wav")
+                    command([tool("ffmpeg"),"-v","error","-y","-ss",str(a),"-i",audio,"-t",str(b-a),"-c:a","pcm_s16le",str(target)])
+                    events.put(("play",str(target)))
+                except Exception as exc: events.put(("listen_error",str(exc)))
+            threading.Thread(target=work,daemon=True).start()
+        def modify():
+            if running: return
+            try: indices=selected()
+            except ValueError as exc: messagebox.showinfo("请选择句段",str(exc),parent=popup);return
+            mode.set("partial");update_mode()
+            source_audio.set(audio);source_srt.set("")
+            range_start.set(str(record["segments"][indices[0]]["start"]))
+            range_end.set(str(record["segments"][indices[-1]]["end"]))
+            text_box.delete("1.0","end");text_box.insert("1.0"," ".join(record["segments"][i]["text"] for i in indices))
+            update_count();popup.destroy();status.set("已载入选中句段；修改正文后生成，会连接成完整新WAV。")
+        row=ttk.Frame(popup);row.pack(pady=10)
+        ttk.Button(row,text="试听选中句段",command=listen).pack(side="left",padx=6)
+        ttk.Button(row,text="修改选中句段并接回全文",command=modify).pack(side="left",padx=6)
 
     def adjustment_dialog():
         popup=tk.Toplevel(win);popup.title("音频微调 · 保留原版");_fit_window(popup,760,650)
@@ -689,7 +773,7 @@ def open_kaggle_voice(app, parent=None):
             messagebox.showinfo("没有任务记录","先提交一次任务。",parent=more);return
         folder=Path(record).parent
         job=json.loads(Path(record).read_text(encoding="utf-8"))
-        content=f"状态：{job.get('status')}\n最近错误：{job.get('last_error','无')}\n"
+        content=f"状态：{job.get('status')}\n已保存段落：{job.get('completed_segments',0)}/{job.get('total_segments','?')}\n最近错误：{job.get('last_error','无')}\n"
         log=folder/"remote_error.log"
         if log.is_file(): content+="\n"+log.read_text(encoding="utf-8",errors="replace")[-30000:]
         popup=tk.Toplevel(win);popup.title("最近任务日志");_fit_window(popup,780,580)
@@ -739,7 +823,14 @@ def open_kaggle_voice(app, parent=None):
                     set_running(False)
                     path=payload.get("edited_audio",payload.get("yangning_final.wav"))
                     if not path: raise ValueError("生成记录没有音频路径。")
-                    install_result(path,"局部修改" if payload.get("edited_audio") else "云端生成")
+                    if active_purpose=="full":
+                        install_result(path,"局部修改" if payload.get("edited_audio") else "云端生成")
+                    else:
+                        settings["last_preview_audio"]=path
+                        settings.setdefault("audio_history",[]).append({"result":path,"kind":"术语试听" if active_purpose=="terminology" else "约15秒预听"})
+                        save_json(SETTINGS,settings)
+                        status.set("试听已保存，请点击试听预听；全文正文及完整音频未被替换。")
+                        continue
                     # Old SRT belongs to old audio; never silently reuse it after another result.
                     source_srt.set(payload.get("edited_srt",""))
                     status.set("已导出新WAV，原版保留。请试听音色、全文完整性、术语读音和接缝。")
@@ -751,6 +842,14 @@ def open_kaggle_voice(app, parent=None):
                     set_running(False)
                     status.set("任务未完成，原文件与任务记录保留；查看更多设置中的日志确认原因。")
                     messagebox.showerror("云端任务未完成" if kind=="error" else "微调未完成",payload,parent=win)
+                elif kind=="template_added":
+                    set_running(False)
+                    settings.setdefault("template_modes",{})[payload["language"]]="自动选择"
+                    if language.get()==payload["language"]:
+                        template_mode.set("自动选择");update_template_status()
+                    save_json(SETTINGS,settings);status.set("本语言模板已加入，自动模式以后优先选择它；音色参考仍为1626。")
+                elif kind=="play": play_path(payload)
+                elif kind=="listen_error": messagebox.showerror("句段试听未完成",payload,parent=win)
                 elif kind=="check_done": messagebox.showinfo("本机环境检查",payload,parent=more)
         except queue.Empty: pass
         except Exception as exc:

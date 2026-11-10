@@ -1,6 +1,8 @@
 """Summarize rhythm only. Template waveforms never enter voice cloning."""
 import hashlib
 import subprocess
+import shutil
+import uuid
 from pathlib import Path
 import numpy as np
 
@@ -44,15 +46,33 @@ def choose_template(language, mode="自动选择", manual_path="", template_root
         result.update(path=str(Path(manual_path).resolve()),source_kind="manual",description="手动模板："+Path(manual_path).name+" · 仅节奏摘要")
         return result
     native=root/NATIVE_NAMES[language]
+    if not native.is_file() and (ROOT/NATIVE_NAMES[language]).is_file(): native=ROOT/NATIVE_NAMES[language]
+    english=root/"english.wav"
+    if not english.is_file(): english=ROOT/"english.wav"
     if native.is_file():
         result.update(path=str(native.resolve()),source_kind="language_labelled",template_language=language,
                       description=f"自动：{language}标签模板 {native.name} · 仅节奏摘要")
-    elif language in ("法语","德语") and (root/"english.wav").is_file():
-        result.update(path=str((root/"english.wav").resolve()),source_kind="approved_rhythm_fallback",template_language="英语",
+    elif language in ("法语","德语") and english.is_file():
+        result.update(path=str(english.resolve()),source_kind="approved_rhythm_fallback",template_language="英语",
                       description=f"自动：暂缺{language}模板，参考英语模板的节奏摘要 · 发音及语感仍用{language}预设")
     else:
         result["description"]=f"自动：暂缺{language}模板，使用{language}自然语气预设 · 未使用音频模板"
     return result
+
+
+def install_language_template(language,source,directory):
+    if language not in NATIVE_NAMES: raise ValueError("语言未支持。")
+    summary=analyze_template(source)
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    target=directory/NATIVE_NAMES[language]
+    pending=directory/("template_"+uuid.uuid4().hex+".tmp")
+    # Normalize container/codec without changing the template's voice input role.
+    # It remains local analysis only, never the cloning speaker reference.
+    from voice_clip_edit import tool
+    subprocess.run([tool("ffmpeg"),"-v","error","-y","-i",str(source),"-t","120","-ar","48000","-ac","1","-c:a","pcm_s16le","-f","wav",str(pending)],check=True,capture_output=True,timeout=120)
+    if target.is_file(): shutil.copy2(target,directory/(target.stem+"_previous.wav"))
+    pending.replace(target)
+    return str(target)
 
 
 def analyze_template(path):

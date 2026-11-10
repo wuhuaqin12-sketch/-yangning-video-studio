@@ -58,6 +58,13 @@ def main():
             labels = [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             assert "生成音频" in labels and "恢复最近任务" in labels
             assert "更多设置 ⋯" in labels and "音频微调" in labels
+            for control in ("先预听约15秒","试听预听","按句段试听 / 修改","术语集中试听","续生成未完成段（已有断点时）","加入本语言模板库（以后自动选择）"):
+                assert control in labels, control
+            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="术语集中试听").invoke()
+            root.update()
+            term_window=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="术语集中试听")
+            assert any(isinstance(w,tk.Text) for w in descendants(term_window))
+            term_window.destroy()
             more=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="更多设置")
             assert more.state()=="withdrawn"
             notebook=next(w for w in more.winfo_children() if isinstance(w,ttk.Notebook))

@@ -252,6 +252,12 @@ def preflight_audio_edit(edit, cache_dir):
         copied = cache / "original_subtitles.srt"
         shutil.copy2(edit["srt"], copied)
         edit["_prepared_srt"] = str(copied)
+    if Path(str(source)+".segments.json").is_file():
+        from voice_workflows import load_segments
+        load_segments(source)
+        copied_map=cache/"original_segments.json"
+        shutil.copy2(str(source)+".segments.json",copied_map)
+        edit["_prepared_segments"]=str(copied_map)
     edit.update(_prepared_audio=str(snapshot), _audio_fingerprint=before)
 
 
@@ -291,6 +297,9 @@ def export_edited_audio(edit, replacement, target_dir, job_id, progress=lambda v
                 w.writeframes(np.rint(values*32768).clip(-32768,32767).astype("<i2").tobytes())
             results[name] = str(seam)
         pending.replace(final)
+        from voice_workflows import update_edited_segments
+        segment_map=update_edited_segments(edit,replacement,final,timing)
+        if segment_map: results["segments"]=segment_map
         report.update(status="exported_pending_review", timing_map=timing, audio=str(final))
         return results
     except Exception as exc:
