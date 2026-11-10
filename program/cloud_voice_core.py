@@ -344,6 +344,12 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             validate_wav(path)
         if manifest.get("artifacts",{}).get("edited_audio"):
             validate_wav(manifest["artifacts"]["edited_audio"])
+        from voice_review import write_review
+        selected=manifest["artifacts"].get("edited_audio",manifest["artifacts"]["yangning_final.wav"])
+        report_path=selected+".review.json"
+        write_review(selected,report_path)
+        manifest["artifacts"]["audio_review"]=report_path
+        save_json(manifest_path,manifest)
         # Only delete remotely after local final/raw WAV and audit files are validated.
         if manifest.get("cleanup_status") != "deleted":
             try:

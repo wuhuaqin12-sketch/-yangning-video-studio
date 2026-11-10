@@ -18,6 +18,14 @@ NATIVE_NAMES={"日语":"japanese.wav","英语":"english.wav","法语":"french.wa
 TEMPLATE_MODES=("自动选择","手动指定","自然语气（无模板）")
 
 
+def restore_template_path(language, saved_path, saved_mode=None):
+    """Repair moved built-ins only; explicit manual choices must never change."""
+    if saved_mode=="手动指定": return saved_path
+    if saved_path and not Path(saved_path).is_file() and Path(saved_path).name in ("japanese.wav","english.wav"):
+        return default_template(language)
+    return saved_path
+
+
 def choose_template(language, mode="自动选择", manual_path="", template_root=None):
     """Match explicitly language-labelled local assets; no language/voice guessing."""
     if language not in NATIVE_NAMES:

@@ -337,6 +337,31 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             run_job(path,"legacy",lambda e:None,cli=self.fake_cli(path))
 
+    def test_manual_template_path_is_never_silently_repaired(self):
+        from voice_prosody import restore_template_path,choose_template,default_template
+        missing=self.root/"missing"/"english.wav"
+        restored=restore_template_path("英语",str(missing),"手动指定")
+        self.assertEqual(restored,str(missing))
+        with self.assertRaises(ValueError): choose_template("英语","手动指定",restored)
+        self.assertEqual(restore_template_path("英语",str(missing),"自动选择"),default_template("英语"))
+
+    def test_streaming_review_flags_problems_without_cutting_or_certifying(self):
+        from voice_review import review_wav,file_sha256,describe_review
+        path=self.root/"check.wav"
+        values=sound(6,[(.2,.6,.04),(4.2,4.6,.04)])
+        values[15000]=1
+        write_wave(path,values)
+        digest=file_sha256(path)
+        report=review_wav(path)
+        self.assertGreater(report["longest_internal_low_energy_seconds"],3)
+        self.assertGreater(report["near_fullscale_samples"],0)
+        self.assertFalse(report["transcript_or_voice_verified"])
+        self.assertFalse(report["silence_trimmed"])
+        self.assertIn("未验证音色",describe_review(report))
+        self.assertEqual(file_sha256(path),digest)
+        silent=self.root/"silent.wav";write_wave(silent,np.zeros(48000))
+        self.assertIn("无声",review_wav(silent)["flags"][0])
+
     def test_template_summary_is_data_only_and_never_changes_tempo(self):
         from voice_prosody import analyze_template
         template = self.root / "template.wav"

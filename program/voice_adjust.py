@@ -1,5 +1,4 @@
 """Reversible ordinary-audio adjustments and explicit generation style controls."""
-import hashlib
 import json
 import math
 import re
@@ -90,7 +89,8 @@ def adjust_audio(source, output_dir, tempo=1.0, gain_db=0.0, denoise=False):
     channels=int(streams[0].get("channels",1))
     if channels not in (1,2):
         raise ValueError("普通微调支持单声道或双声道音频；多声道请先另存成所需声道。")
-    source_hash=hashlib.sha256(source.read_bytes()).hexdigest()
+    from voice_review import file_sha256
+    source_hash=file_sha256(source)
     folder = Path(output_dir).resolve() / ("audio_adjust_" + uuid.uuid4().hex[:12])
     folder.mkdir(parents=True)
     target, partial = folder / "adjusted.wav", folder / "adjusted.partial.wav"
@@ -109,7 +109,7 @@ def adjust_audio(source, output_dir, tempo=1.0, gain_db=0.0, denoise=False):
     try:
         command(args + ["-ar", "48000", "-ac", str(channels), "-c:a", "pcm_s16le", str(partial)])
         command([tool("ffmpeg"), "-v", "error", "-xerror", "-i", str(partial), "-f", "null", "-"])
-        if hashlib.sha256(source.read_bytes()).hexdigest()!=source_hash:
+        if file_sha256(source)!=source_hash:
             raise ValueError("处理期间原音频发生变化，请重新选择该文件。")
         partial.replace(target)
     except Exception:
@@ -120,4 +120,6 @@ def adjust_audio(source, output_dir, tempo=1.0, gain_db=0.0, denoise=False):
         "light_denoise": bool(denoise), "pitch_factor": 1, "silence_trimmed": False,
         "source_preserved": True, "speech_style_changed": False,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+    from voice_review import write_review
+    write_review(target,str(target)+".review.json")
     return str(target)

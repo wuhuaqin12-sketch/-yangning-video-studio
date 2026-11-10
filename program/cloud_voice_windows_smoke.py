@@ -109,6 +109,14 @@ def main():
             by_text["局部改读音并接回原音频"].invoke()
             root.update()
             assert correction.winfo_manager() == "pack"
+            # Source change must invalidate stale subtitle/range associations.
+            entries=[w for w in descendants(correction) if isinstance(w,ttk.Entry)]
+            assert len(entries)==4
+            entries[1].insert(0,"old-subtitles.srt")
+            entries[2].insert(0,"2");entries[3].insert(0,"3")
+            entries[0].delete(0,"end");entries[0].insert(0,"new-source.wav")
+            root.update()
+            assert entries[1].get()=="" and entries[2].get()=="" and entries[3].get()==""
             assert "重生成句段并连接完整音频" in [str(w.cget("text")) for w in widgets if isinstance(w, ttk.Button)]
             by_text["修改全文后重新生成"].invoke()
             root.update()
@@ -122,6 +130,13 @@ def main():
             assert len(speeds) == 1
             speeds[0].set("1.1")
             assert speeds[0].get() == "1.1"
+            window.geometry("720x480");root.update()
+            # Main action remains reachable through scrolling on a small laptop.
+            main_canvas=next(w for w in widgets if isinstance(w,tk.Canvas) and w.winfo_toplevel() is window)
+            main_canvas.yview_moveto(1);root.update()
+            generate=next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="生成音频")
+            assert generate.winfo_rooty()>=main_canvas.winfo_rooty()
+            assert generate.winfo_rooty()+generate.winfo_height()<=main_canvas.winfo_rooty()+main_canvas.winfo_height()+2
             open_kaggle_voice(app)
             assert app._cloud_voice_window is window, "Repeated open should reuse one window."
             root.update()

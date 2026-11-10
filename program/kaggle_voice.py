@@ -11,7 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
-from voice_prosody import default_template, choose_template, TEMPLATE_MODES
+from voice_prosody import default_template, choose_template, TEMPLATE_MODES, restore_template_path
 from japanese_pronunciation import READINGS, parse_overrides, reading_plan
 from voice_adjust import STYLE_OPTIONS, PRESETS, interpret_instruction, adjust_audio, validate_options
 
@@ -123,9 +123,7 @@ def open_kaggle_voice(app, parent=None):
     saved_language = settings.get("language", "日语")
     language = tk.StringVar(value=saved_language if saved_language in PROFILES else "日语")
     tempo = tk.StringVar(value=str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
-    selected_template=settings.get("prosody_templates",{}).get(language.get(),default_template(language.get()))
-    if selected_template and not Path(selected_template).is_file() and Path(selected_template).name in ("japanese.wav","english.wav"):
-        selected_template=default_template(language.get())
+    selected_template=restore_template_path(language.get(),settings.get("prosody_templates",{}).get(language.get(),default_template(language.get())),settings.get("template_modes",{}).get(language.get()))
     template=tk.StringVar(value=selected_template)
     # Preserve an existing custom manual path during migration; otherwise use auto.
     initial_template_mode=settings.get("template_modes",{}).get(language.get())
@@ -137,7 +135,7 @@ def open_kaggle_voice(app, parent=None):
     mode = tk.StringVar(value="generate")
     source_audio = tk.StringVar(value=settings.get("last_audio", ""))
     source_srt = tk.StringVar()
-    range_start, range_end = tk.StringVar(value="0"), tk.StringVar(value="1")
+    range_start, range_end = tk.StringVar(), tk.StringVar()
     pronunciation_enabled = tk.BooleanVar(value=settings.get("japanese_pronunciation_enabled",True))
     japanese_readings = settings.get("japanese_pronunciation_overrides",{})
     output = tk.StringVar(value=settings.get("output_dir", app.v["output"].get()))
@@ -150,7 +148,7 @@ def open_kaggle_voice(app, parent=None):
     gain=tk.StringVar(value=str(prefs.get("gain_db",0)))
     denoise=tk.BooleanVar(value=prefs.get("denoise",True))
     style_vars={name:tk.BooleanVar(value=name in prefs.get("styles",[])) for name in STYLE_OPTIONS}
-    preset=tk.StringVar(value="自定义" if prefs.get("styles") else "自然")
+    preset=tk.StringVar(value=next((label for label,names in PRESETS.items() if names==prefs.get("styles",[])),"自定义"))
     active_language=language.get()
     previous_mode="generate"
     drafts=settings.get("drafts",{})
@@ -390,8 +388,7 @@ def open_kaggle_voice(app, parent=None):
             active_language=language.get()
             tempo.set(str(settings.get("tempo_by_language",{}).get(active_language,1.0)))
             template_value=settings.get("prosody_templates",{}).get(active_language,default_template(active_language))
-            if template_value and not Path(template_value).is_file() and Path(template_value).name in ("japanese.wav","english.wav"):
-                template_value=default_template(active_language)
+            template_value=restore_template_path(active_language,template_value,settings.get("template_modes",{}).get(active_language))
             template.set(template_value)
             chosen_mode=settings.get("template_modes",{}).get(active_language)
             if chosen_mode not in TEMPLATE_MODES:
@@ -446,6 +443,7 @@ def open_kaggle_voice(app, parent=None):
             content = script_from_text(content)
             text_box.delete("1.0", "end")
             text_box.insert("1.0", content)
+            update_count()
             status.set("正文已导入；SRT编号和时间码不参与朗读，佛教术语读音仍需校对。")
         except (OSError, UnicodeError, ValueError) as exc:
             messagebox.showerror("导入失败", str(exc), parent=win)
@@ -533,6 +531,7 @@ def open_kaggle_voice(app, parent=None):
             range_end.set(str(cues[selected[-1]]["end"]))
             text_box.delete("1.0","end")
             text_box.insert("1.0"," ".join(cues[i]["text"] for i in selected))
+            update_count()
             chooser.destroy()
         ttk.Button(chooser,text="载入句段后修改正文",command=take).pack(pady=8)
 
@@ -560,6 +559,7 @@ def open_kaggle_voice(app, parent=None):
                 edit=None
                 if mode.get()=="partial":
                     if not Path(source_audio.get()).is_file(): raise ValueError("局部修改需先选择原音频。")
+                    if not range_start.get().strip() or not range_end.get().strip(): raise ValueError("请先选择完整句段的起止时间，或从配套SRT选段。")
                     edit={"kind":"audio","mode":"partial","audio":source_audio.get(),"srt":source_srt.get(),"start":float(range_start.get()),"end":float(range_end.get())}
                 snapshot=dict(root=DATA/"kaggle_voice_jobs",username=user,dataset=dataset.get().strip(),
                               text=script_from_text(text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
@@ -669,6 +669,16 @@ def open_kaggle_voice(app, parent=None):
         row=ttk.Frame(popup);row.pack(fill="x",padx=12,pady=8)
         ttk.Button(row,text="试听选中版",command=lambda: play_path(selected())).pack(side="left")
         ttk.Button(row,text="打开所在文件夹",command=folder).pack(side="left",padx=8)
+        def inspect_review():
+            path=selected()
+            report=Path(path+".review.json")
+            if not path or not report.is_file():
+                messagebox.showinfo("没有检查记录","旧版本可能没有波形检查记录；仍需人工试听。",parent=popup);return
+            detail=tk.Toplevel(popup);detail.title("波形检查 · 不是读音验收");_fit_window(detail,700,500)
+            view=tk.Text(detail,wrap="word");view.pack(fill="both",expand=True,padx=12,pady=12)
+            from voice_review import describe_review
+            view.insert("1.0",describe_review(json.loads(report.read_text(encoding="utf-8"))));view.configure(state="disabled")
+        ttk.Button(row,text="查看波形检查",command=inspect_review).pack(side="left",padx=6)
         ttk.Label(popup,text="版本不会覆盖。微调记录保存在对应输出文件夹；所有版本仍待音色和读音听检。",wraplength=680).pack(pady=8)
 
     def show_log():
@@ -708,7 +718,7 @@ def open_kaggle_voice(app, parent=None):
         settings.update(last_audio=path,previous_audio=previous_audio)
         records=settings.setdefault("audio_history",[])
         if not any(record.get("result")==path for record in records):
-            records.append({"result":path,"source":previous_audio,"kind":kind})
+            records.append({"result":path,"source":previous_audio,"kind":kind,"review":path+".review.json"})
         source_audio.set(path)
         save_json(SETTINGS,settings)
         app.v["audio"].set(path)
@@ -756,5 +766,8 @@ def open_kaggle_voice(app, parent=None):
     win.protocol("WM_DELETE_WINDOW",close_window)
     for var in (tempo,gain,denoise): var.trace_add("write",update_summary)
     template.trace_add("write",lambda *args: update_template_status())
+    def source_changed(*unused):
+        source_srt.set("");range_start.set("");range_end.set("")
+    source_audio.trace_add("write",source_changed)
     update_profile();update_mode();update_summary()
     win.after(150,poll)
