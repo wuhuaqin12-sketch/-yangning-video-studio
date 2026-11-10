@@ -58,7 +58,15 @@ def build_notebook(request):
             "# 私有VoxCPM2生成作业\n", "1626原声音色；文字语气指令；自然停顿保留；结果待听检。\n"
         ]}
     ]
-    for source in (install, setup, worker + "\nrun(REQUEST)\n"):
+    guarded_run = (
+        "\ntry:\n    run(REQUEST)\n"
+        "except Exception as exc:\n"
+        "    failed_dir=Path(REQUEST.get('output_dir','/kaggle/working'))\n"
+        "    failed_dir.mkdir(parents=True,exist_ok=True)\n"
+        "    atomic_json(failed_dir/'job_failure.json', {'job_id':REQUEST['job_id'], 'status':'failed_with_saved_outputs', 'error':str(exc)})\n"
+        "    print('YANGNING_STAGE=failed_with_saved_outputs', flush=True)\n"
+    )
+    for source in (install, setup, worker + guarded_run):
         cells.append({"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": source.splitlines(True)})
     return {
         "cells": cells, "nbformat": 4, "nbformat_minor": 5,
@@ -367,6 +375,19 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             download.mkdir(exist_ok=True)
             emit(("status", "正在下载WAV和制作记录…"))
             cli(["kernels", "output", kernel, "-p", str(download), "-o"], env, timeout=900)
+            if (download/"job_failure.json").is_file():
+                failed=json.loads((download/"job_failure.json").read_text(encoding="utf-8"))
+                if failed.get("job_id")!=manifest["job_id"]: raise ValueError("云端失败记录与任务不一致。")
+                manifest["status"]="remote_failed"
+                manifest["completed_segments"]=0
+                if (download/"checkpoint_manifest.json").is_file():
+                    from voxcpm_kaggle_worker import checkpoint_parts
+                    request=json.loads((folder/"request.json").read_text(encoding="utf-8"))
+                    checkpoint,parts=checkpoint_parts(download/"checkpoint_manifest.json",request)
+                    manifest["completed_segments"]=len(parts);manifest["total_segments"]=checkpoint["total"]
+                save_json(manifest_path,manifest)
+                (folder/"remote_error.log").write_text(redact(failed.get("error","未知错误"),secret),encoding="utf-8")
+                raise RuntimeError(f"生成中断，已保存{manifest['completed_segments']}段。请查看日志；有断点时可点击续生成未完成段。")
             manifest["artifacts"] = deliver_result(folder, manifest)
             manifest["status"] = "audio_ready"
             manifest.pop("last_error", None)

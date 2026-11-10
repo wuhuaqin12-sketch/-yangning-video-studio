@@ -80,6 +80,28 @@ class NewWorkflowTests(unittest.TestCase):
                 cp=download/'checkpoints'/'part_00000.npz';cp.write_bytes(b'corrupt')
                 with self.assertRaises(ValueError): worker.checkpoint_parts(download/'checkpoint_manifest.json',request)
 
+    def test_notebook_preserves_handled_errors_and_client_never_reports_them_as_audio(self):
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)
+            notebook=core.build_notebook({"job_id":"guard","text":"One","language":"英语"})
+            source="".join(notebook["cells"][-1]["source"])
+            guard=source[source.rindex("\ntry:\n    run(REQUEST)"):]
+            def fail(request): raise RuntimeError("controlled generation error")
+            exec(guard,{"REQUEST":{"job_id":"guard","output_dir":str(root/"handled")},"run":fail,"Path":Path,"atomic_json":core.save_json})
+            self.assertEqual(json.loads((root/"handled"/"job_failure.json").read_text())["status"],"failed_with_saved_outputs")
+            manifest=core.prepare_job(root/"jobs","member","owner/reference","One.","英语",1,root/"out")
+            job=json.loads(manifest.read_text())
+            def cli(args,env,timeout=180):
+                if args[:2]==['kernels','status']: return 'has status "COMPLETE"'
+                if args[:2]==['kernels','output']:
+                    folder=Path(args[args.index('-p')+1]);folder.mkdir(exist_ok=True)
+                    core.save_json(folder/'job_failure.json',{'job_id':job['job_id'],'error':'controlled interruption'})
+                if args[:2]==['kernels','delete']: raise AssertionError('Do not delete retained failed outputs')
+                return 'ok'
+            with self.assertRaisesRegex(RuntimeError,'已保存0段'):
+                core.run_job(manifest,'legacy',lambda event:None,cli=cli)
+            self.assertEqual(json.loads(manifest.read_text())["status"],"remote_failed")
+
     def test_edited_audio_retains_usable_sentence_table(self):
         from voice_review import file_sha256
         with tempfile.TemporaryDirectory() as td:
