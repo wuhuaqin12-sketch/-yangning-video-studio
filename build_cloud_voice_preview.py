@@ -34,7 +34,7 @@ def build(root, output, revision):
         if (root / name).is_file():
             payloads[name] = (root / name).read_bytes()
     payloads["preview_version.json"] = json.dumps({
-        "name": "YangNing Cloud Voice Independent Preview", "version": "0.3-preview.1",
+        "name": "YangNing Cloud Voice Independent Preview", "version": "0.3-preview.2",
         "source_revision": revision, "formal_studio_release": False,
         "local_validation": "See validation report; prior GPU pipeline generated a verified WAV",
         "pending_validation": ["Updated Windows GUI", "template-conditioned GPU audition", "teacher-voice and join listening"],

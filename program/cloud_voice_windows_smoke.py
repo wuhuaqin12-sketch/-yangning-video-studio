@@ -61,13 +61,29 @@ def main():
             more=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="更多设置")
             assert more.state()=="withdrawn"
             notebook=next(w for w in more.winfo_children() if isinstance(w,ttk.Notebook))
-            assert len(notebook.tabs())==3
+            assert len(notebook.tabs())==4
             next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="音频微调 / 语气重生成").invoke()
             root.update()
             adjustment=next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title()=="音频微调 · 保留原版")
             assert any(isinstance(w,ttk.Button) and w.cget("text")=="识别指令并预览动作" for w in descendants(adjustment))
             adjustment.destroy()
             assert "预览实际朗读稿" in labels and "编辑术语读音表" in labels
+            # All changes are selectable before generation and persist by language.
+            next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text")=="详细调节").invoke()
+            root.update()
+            assert more.state()=="normal"
+            softer=next(w for w in widgets if isinstance(w,ttk.Checkbutton) and w.cget("text")=="更柔和")
+            softer.invoke()
+            next(w for w in descendants(more) if isinstance(w,ttk.Button) and w.cget("text")=="保存当前语言设置").invoke()
+            import json
+            preferences=json.loads((Path(directory)/"kaggle_voice_settings.json").read_text(encoding="utf-8"))
+            assert "更柔和" in preferences["generation_by_language"]["日语"]["styles"]
+            lang_combo=next(w for w in widgets if isinstance(w,ttk.Combobox) and "日语" in tuple(w.cget("values")))
+            lang_combo.set("英语");lang_combo.event_generate("<<ComboboxSelected>>");root.update()
+            assert not softer.instate(["selected"])
+            lang_combo.set("日语");lang_combo.event_generate("<<ComboboxSelected>>");root.update()
+            assert softer.instate(["selected"])
+            more.withdraw()
             next(w for w in widgets if isinstance(w,ttk.Button) and w.cget("text") == "编辑术语读音表").invoke()
             root.update()
             dictionary_window = next(w for w in window.winfo_children() if isinstance(w,tk.Toplevel) and w.title() == "日语术语读音表")

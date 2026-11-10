@@ -4,7 +4,7 @@ import unittest
 import wave
 from pathlib import Path
 import numpy as np
-from voice_adjust import adjust_audio, interpret_instruction, style_instruction
+from voice_adjust import adjust_audio, interpret_instruction, style_instruction, validate_options
 
 class AdjustTests(unittest.TestCase):
     def test_explicit_instruction_routing(self):
@@ -14,6 +14,29 @@ class AdjustTests(unittest.TestCase):
         self.assertTrue(result['denoise'])
         self.assertEqual(result['unrecognized'],['变成另一个人'])
         with self.assertRaises(ValueError): style_instruction(['未支持'])
+
+    def test_conflicting_and_unknown_options_block_execution(self):
+        for text in ('放慢一点，加快一点','大声一点，小声一点','停顿长一点，停顿短一点'):
+            with self.assertRaises(ValueError): interpret_instruction(text)
+        for values in ((float('nan'),0),(1,float('inf')),(0,0),(1,7)):
+            with self.assertRaises(ValueError): validate_options(*values)
+        self.assertEqual(interpret_instruction('更柔和')['specified'],[])
+        self.assertEqual(interpret_instruction('音量小一点')['specified'],['gain_db'])
+
+    def test_stereo_preserved_and_invalid_source_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td)/'stereo.wav'
+            left=np.sin(2*np.pi*220*np.arange(48000)/48000)*.2
+            right=np.sin(2*np.pi*440*np.arange(48000)/48000)*.1
+            with wave.open(str(p),'wb') as w:
+                w.setparams((2,2,48000,0,'NONE','not compressed'))
+                w.writeframes((np.column_stack([left,right])*32767).astype('<i2').tobytes())
+            output=adjust_audio(p,td,1,-2,False)
+            with wave.open(output,'rb') as w:
+                self.assertEqual(w.getnchannels(),2)
+                data=np.frombuffer(w.readframes(w.getnframes()),dtype='<i2').reshape(-1,2)
+            self.assertGreater(np.std(data[:,0]),1.8*np.std(data[:,1]))
+            with self.assertRaises(ValueError): adjust_audio(Path(td)/'missing.wav',td)
 
     def test_preserves_source_silence_pitch_and_duration(self):
         with tempfile.TemporaryDirectory() as td:

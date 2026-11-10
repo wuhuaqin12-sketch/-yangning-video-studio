@@ -93,16 +93,20 @@ def split_script(text, target_chars=900):
     return result
 
 
-def filter_graph(tempo):
+def filter_graph(tempo, gain_db=0.0, light_denoise=True):
     tempo = float(tempo)
     if not math.isfinite(tempo) or not 0.5 <= tempo <= 2.0:
         raise ValueError("倍数须在0.5到2.0之间。")
-    chain = "afftdn=nr=6:nf=-55:tn=1:gs=8"
+    chain = "afftdn=nr=6:nf=-55:tn=1:gs=8" if light_denoise else "anull"
     if tempo != 1.0:
         chain += (
             f",rubberband=tempo={tempo}:pitch=1:formant=preserved:"
             "pitchq=quality:transients=crisp:detector=soft:phase=laminar"
         )
+    if gain_db:
+        chain += f",volume={gain_db}dB"
+        if gain_db > 0:
+            chain += ",alimiter=limit=0.95:level=0:latency=1"
     return chain
 
 
@@ -129,11 +133,11 @@ def ensure_audio_tools(tempo):
         return check_audio_tools(tempo)
 
 
-def process_audio(raw_path, final_path, tempo):
+def process_audio(raw_path, final_path, tempo, gain_db=0.0, light_denoise=True):
     ffmpeg = check_audio_tools(tempo)
     subprocess.run([
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(raw_path),
-        "-af", filter_graph(tempo), "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(final_path),
+        "-af", filter_graph(tempo,gain_db,light_denoise), "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", str(final_path),
     ], check=True, capture_output=True)
     with wave.open(str(raw_path), "rb") as source, wave.open(str(final_path), "rb") as final:
         before = source.getnframes() / source.getframerate()
@@ -142,7 +146,7 @@ def process_audio(raw_path, final_path, tempo):
             raise RuntimeError("输出不是48kHz单声道PCM16 WAV。")
     if abs(after - before / tempo) > max(0.08, before / tempo * 0.002):
         raise RuntimeError("处理后的时长不符合整段保音高变速，未交付该结果。")
-    return {"raw_seconds": before, "final_seconds": after, "filter": filter_graph(tempo)}
+    return {"raw_seconds": before, "final_seconds": after, "filter": filter_graph(tempo,gain_db,light_denoise)}
 
 
 def run(request):
@@ -152,6 +156,7 @@ def run(request):
     from huggingface_hub import snapshot_download
     from voxcpm import VoxCPM
 
+    print("YANGNING_STAGE=preflight", flush=True)
     if not torch.cuda.is_available():
         raise RuntimeError("此Kaggle作业没有分配到GPU；请检查账号GPU权限及剩余额度。")
     candidates = [p for p in Path("/kaggle/input").rglob("*") if p.is_file() and p.name in ("1626_reference.wav", "1626_reference.wav.wav")]
@@ -162,13 +167,13 @@ def run(request):
     if reference_hash != REFERENCE_SHA256:
         raise ValueError("参考文件与已确认的1626原声不一致。请上传原始10秒参考文件，仅改文件名即可，不要重新编码。")
     profile = profile_for(request["language"], request.get("tempo"))
-    if request.get("delivery_instruction"):
-        profile["style"] += ", " + request["delivery_instruction"]
     prosody = request.get("prosody_reference")
     if prosody:
         if prosody.get("method") != "aggregate_acoustic_summary_to_text" or prosody.get("template_waveform_sent_to_model") is not False:
             raise ValueError("语气模板必须只提供节奏摘要，不能作为音色或续写音频。")
         profile["style"] += ", " + prosody["instruction"]
+    if request.get("delivery_instruction"):
+        profile["style"] += ", " + request["delivery_instruction"]
     spoken_text = request.get("reading_text", request["text"])
     blocks = split_script(spoken_text)
     ensure_audio_tools(profile["tempo"])
@@ -181,6 +186,7 @@ def run(request):
         (output_dir / "pronunciation_plan.json").write_text(json.dumps(request["pronunciation"],ensure_ascii=False,indent=2),encoding="utf-8")
 
     # Cache weights outside /kaggle/working so they are not saved as job outputs.
+    print("YANGNING_STAGE=model_download", flush=True)
     snapshot = Path(snapshot_download(MODEL_ID, cache_dir="/tmp/yangning_hf_cache"))
     config = json.loads((snapshot / "config.json").read_text(encoding="utf-8"))
     dtype = config.get("dtype", "bfloat16")
@@ -196,6 +202,7 @@ def run(request):
     rate = int(model.tts_model.sample_rate)
     chunks, seeds, peaks = [], [], []
     base_seed = int(request.get("seed", 16261109))
+    print("YANGNING_STAGE=generation", flush=True)
     for index, block in enumerate(blocks):
         seed = base_seed + index if base_seed >= 0 else None
         if seed is not None:
@@ -224,6 +231,8 @@ def run(request):
         "template_audio_used": False, "template_prosody_alignment": "not_implemented",
         "prosody_reference": prosody,
         "pronunciation": request.get("pronunciation"),
+        "delivery_instruction": request.get("delivery_instruction", ""),
+        "postprocess": request.get("postprocess", {"gain_db":0.0,"light_denoise":True}),
         "style_control": "text_instruction", "profile": profile, "seed_per_block": seeds,
         "cfg_value": 2.0, "inference_timesteps": 10, "max_len": 4096,
         "normalize": False, "model_denoise": False, "retry_badcase": False,
@@ -233,7 +242,12 @@ def run(request):
         "review": {name: "待听检" for name in ("音色", "读音与全文完整性", "语感", "重点", "问句", "停顿", "声音")},
     }
     try:
-        recipe.update(process_audio(raw_path, final_path, profile["tempo"]))
+        print("YANGNING_STAGE=postprocess", flush=True)
+        post = request.get("postprocess",{})
+        gain_db=float(post.get("gain_db",0.0))
+        if not math.isfinite(gain_db) or not -12 <= gain_db <= 6:
+            raise ValueError("音量设置无效。")
+        recipe.update(process_audio(raw_path, final_path, profile["tempo"],gain_db,post.get("light_denoise",True)))
         recipe["status"] = "generated_pending_review"
     except Exception as exc:
         recipe.update(status="postprocess_failed", error=str(exc))

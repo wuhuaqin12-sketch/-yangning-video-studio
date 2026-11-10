@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from cloud_voice_core import auth_env, build_notebook, prepare_job, run_job, script_from_text, state_from_output
+from cloud_voice_core import auth_env, build_notebook, prepare_job, run_job, script_from_text, state_from_output, stage_from_log
 from voice_clip_edit import command, export_edited_clip, patch_audio, preflight_edit, probe, read_frames, read_srt, remap_subtitles, tool, wav_info, write_srt
 from voxcpm_kaggle_worker import REFERENCE_SHA256, filter_graph, process_audio, profile_for, split_script
 import voxcpm_kaggle_worker as worker
@@ -116,6 +116,58 @@ class WorkflowTests(unittest.TestCase):
         non_jp=prepare_job(self.root/"en","member","owner/reference","金剛経","英语",1,self.root/"output")
         ns={}; nb=json.loads((non_jp.parent/"voxcpm2.ipynb").read_text());exec("".join(nb["cells"][2]["source"]),ns)
         self.assertNotIn("reading_text",ns["REQUEST"])
+
+    def test_optional_generation_denoise_and_gain_use_actual_filters(self):
+        self.assertNotIn("afftdn",filter_graph(1,0,False))
+        self.assertNotIn("rubberband",filter_graph(1,0,False))
+        self.assertIn("volume=-2",filter_graph(1,-2,False))
+        original,final=self.root/"post_raw.wav",self.root/"post_final.wav"
+        values=sound(2,[(.5,1.5,.2)])
+        write_wave(original,values)
+        process_audio(original,final,1,-2,False)
+        result=read_frames(final,0,96000)
+        self.assertEqual(len(result),len(values))
+        self.assertAlmostEqual(float(np.max(np.abs(result))),.2*10**(-2/20),delta=.001)
+        self.assertLess(float(np.max(np.abs(result[:12000]))),.0001)
+
+    def test_generation_options_are_snapshotted_before_submission(self):
+        manifest=self.job(tempo=.9,gain_db=-2,light_denoise=False,style_options=["更柔和","更连贯"])
+        request=json.loads((manifest.parent/"request.json").read_text())
+        self.assertEqual(request["postprocess"],{"gain_db":-2.0,"light_denoise":False})
+        self.assertIn("gentle relaxed",request["delivery_instruction"])
+        self.assertEqual(request["tempo"],.9)
+        for kwargs in ({"style_options":["停顿长一点","停顿短一点"]},{"gain_db":float('nan')}):
+            with self.assertRaises(ValueError): self.job(**kwargs)
+        with self.assertRaises(ValueError):
+            prepare_job(self.root/"invalid","member","owner/private-reference","字"*3001,"日语",1,self.root/"output")
+
+    def test_custom_postprocess_record_cannot_be_omitted(self):
+        manifest=self.job(gain_db=-2,light_denoise=False)
+        with self.assertRaises(RuntimeError): run_job(manifest,"legacy",lambda e:None,cli=self.fake_cli(manifest))
+        self.assertFalse(any(args[:2]==["kernels","delete"] for args,env in self.calls))
+
+    def test_actual_stage_parser_and_missing_completed_result(self):
+        self.assertIn("安装依赖",stage_from_log("YANGNING_STAGE=dependencies"))
+        log=json.dumps([{"data":"YANGNING_STAGE=generation\n已生成 2/5 个完整语义段"}])
+        self.assertIn("2/5",stage_from_log(log))
+        self.assertEqual(stage_from_log("no logs available"),"")
+        manifest=self.job()
+        artifacts=run_job(manifest,"legacy",lambda e:None,cli=self.fake_cli(manifest))
+        Path(artifacts["yangning_final.wav"]).unlink()
+        with self.assertRaises(RuntimeError): run_job(manifest,"legacy",lambda e:None,cli=self.fake_cli(manifest))
+
+    def test_remote_failure_is_terminal_and_does_not_report_queue(self):
+        manifest=self.job()
+        def failed(args,env,timeout=180):
+            if args[:2]==["kernels","status"]: return 'member/task has status "KernelWorkerStatus.ERROR"'
+            return "network failure"
+        events=[]
+        with self.assertRaises(RuntimeError): run_job(manifest,"legacy",events.append,cli=failed)
+        self.assertEqual(json.loads(manifest.read_text())["status"],"remote_failed")
+        self.assertTrue((manifest.parent/"remote_error.log").is_file())
+        def forbidden(*args,**kwargs): raise AssertionError("Terminal failures must not submit or poll again")
+        with self.assertRaises(RuntimeError): run_job(manifest,"legacy",events.append,cli=forbidden)
+        self.assertFalse(any("正在排队" in str(event) for event in events))
 
     def test_private_job_and_custom_speed(self):
         path = self.job(tempo=0.95)

@@ -8,6 +8,7 @@ on:
       - 'program/voxcpm_kaggle_worker.py'
       - 'program/requirements.txt'
       - 'program/preview_python_check.py'
+      - 'program/japanese_pronunciation.py'
       - '*cloud_voice_preview*'
       - '*CLOUD*'
       - 'preview_requirements.txt'
@@ -66,10 +67,11 @@ jobs:
           python -m pip install 'numpy>=1.26,<3'
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
-      - name: Check syntax and exercise local video assembly
+      - name: Check syntax and exercise voice workflows and audio processing
         run: |
           python -m compileall -q program/cloud_voice_core.py program/voxcpm_kaggle_worker.py program/kaggle_voice.py program/voice_clip_edit.py program/cloud_voice_preview.py build_cloud_voice_preview.py
           python -m unittest discover -s program -p cloud_voice_test.py -v
+          python -m unittest discover -s program -p voice_adjust_test.py -v
       - name: Check PowerShell launcher syntax
         shell: pwsh
         run: |

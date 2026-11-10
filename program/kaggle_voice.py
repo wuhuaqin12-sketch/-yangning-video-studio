@@ -13,7 +13,7 @@ from cloud_voice_core import prepare_job, run_job, save_json, script_from_text
 from voxcpm_kaggle_worker import PROFILES, profile_for
 from voice_prosody import default_template
 from japanese_pronunciation import READINGS, parse_overrides, reading_plan
-from voice_adjust import STYLE_OPTIONS, interpret_instruction, adjust_audio
+from voice_adjust import STYLE_OPTIONS, PRESETS, interpret_instruction, adjust_audio, validate_options
 
 DATA = Path(os.environ.get("YANGNING_CLOUD_DATA_DIR", str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "YangNingStudio")))
 SETTINGS = DATA / "kaggle_voice_settings.json"
@@ -23,7 +23,17 @@ KEYRING_SERVICE = os.environ.get("YANGNING_CLOUD_CREDENTIAL_SERVICE", "YangNingS
 def _load_settings():
     try:
         value = json.loads(SETTINGS.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
+        if not isinstance(value,dict): return {}
+        for name in ("tempo_by_language","prosody_templates","generation_by_language","japanese_pronunciation_overrides","drafts"):
+            if not isinstance(value.get(name,{}),dict): value[name]={}
+        for name in ("audio_history","audio_adjustment_history"):
+            if not isinstance(value.get(name,[]),list): value[name]=[]
+        value["generation_by_language"]={k:v for k,v in value.get("generation_by_language",{}).items() if isinstance(v,dict)}
+        value["audio_history"]=[v for v in value.get("audio_history",[]) if isinstance(v,dict) and isinstance(v.get("result"),str)]
+        for pref in value["generation_by_language"].values():
+            if not isinstance(pref.get("styles",[]),list): pref["styles"]=[]
+            pref["styles"]=[name for name in pref.get("styles",[]) if name in STYLE_OPTIONS]
+        return value
     except (OSError, ValueError):
         return {}
 
@@ -35,11 +45,36 @@ def _vault():
     return WinVaultKeyring()
 
 
+def _fit_window(window, width, height):
+    window.geometry(f"{min(width,max(600,window.winfo_screenwidth()-60))}x{min(height,max(460,window.winfo_screenheight()-100))}")
+
+
+def _scroll_pane(parent):
+    outer=ttk.Frame(parent)
+    outer.pack(fill="both",expand=True)
+    canvas=tk.Canvas(outer,highlightthickness=0)
+    bar=ttk.Scrollbar(outer,orient="vertical",command=canvas.yview)
+    canvas.configure(yscrollcommand=bar.set)
+    bar.pack(side="right",fill="y");canvas.pack(side="left",fill="both",expand=True)
+    pane=ttk.Frame(canvas,padding=10)
+    item=canvas.create_window((0,0),window=pane,anchor="nw")
+    pane.bind("<Configure>",lambda event:canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>",lambda event:canvas.itemconfigure(item,width=event.width))
+    def wheel(event):
+        canvas.yview_scroll(-1 if event.delta>0 or getattr(event,"num",0)==4 else 1,"units")
+    # No bind_all: wheel over another window/text must retain its own scrolling.
+    canvas.bind("<MouseWheel>",wheel)
+    canvas.bind("<Button-4>",wheel);canvas.bind("<Button-5>",wheel)
+    pane.bind("<MouseWheel>",wheel)
+    return pane
+
+
 def open_kaggle_voice(app, parent=None):
     previous = getattr(app, "_cloud_voice_window", None)
     if previous is not None:
         try:
             if previous.winfo_exists():
+                previous.deiconify()
                 previous.lift()
                 return
         except tk.TclError:
@@ -52,8 +87,8 @@ def open_kaggle_voice(app, parent=None):
     win = tk.Toplevel(app.root)
     app._cloud_voice_window = win
     win.title("免费云端语音克隆 · VoxCPM2")
-    win.geometry("840x780")
-    win.minsize(760, 650)
+    _fit_window(win, 850, 760)
+    win.minsize(720, 480)
     outer = ttk.Frame(win)
     outer.pack(fill="both", expand=True)
     canvas = tk.Canvas(outer, highlightthickness=0)
@@ -73,7 +108,10 @@ def open_kaggle_voice(app, parent=None):
     saved_language = settings.get("language", "日语")
     language = tk.StringVar(value=saved_language if saved_language in PROFILES else "日语")
     tempo = tk.StringVar(value=str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
-    template = tk.StringVar(value=settings.get("prosody_templates", {}).get(language.get(), default_template(language.get())))
+    selected_template=settings.get("prosody_templates",{}).get(language.get(),default_template(language.get()))
+    if selected_template and not Path(selected_template).is_file() and Path(selected_template).name in ("japanese.wav","english.wav"):
+        selected_template=default_template(language.get())
+    template=tk.StringVar(value=selected_template)
     mode = tk.StringVar(value="generate")
     source_audio = tk.StringVar(value=settings.get("last_audio", ""))
     source_srt = tk.StringVar()
@@ -86,20 +124,32 @@ def open_kaggle_voice(app, parent=None):
     profile_info = tk.StringVar()
     status = tk.StringVar(value="准备就绪。生成结果按试听保存，音色和读音需听检确认。")
     last_audio = settings.get("last_audio", "")
-    delivery_options = []
+    prefs=settings.get("generation_by_language",{}).get(language.get(),{})
+    gain=tk.StringVar(value=str(prefs.get("gain_db",0)))
+    denoise=tk.BooleanVar(value=prefs.get("denoise",True))
+    style_vars={name:tk.BooleanVar(value=name in prefs.get("styles",[])) for name in STYLE_OPTIONS}
+    preset=tk.StringVar(value="自定义" if prefs.get("styles") else "自然")
+    active_language=language.get()
+    previous_mode="generate"
+    drafts=settings.get("drafts",{})
+    mode_info=tk.StringVar(value="生成新音频 · 只需正文，无需视频")
+    option_summary=tk.StringVar()
+    previous_audio=settings.get("previous_audio","")
     more = tk.Toplevel(win)
     more.title("更多设置")
-    more.geometry("820x720")
+    _fit_window(more,820,720)
     more.withdraw()
     more.protocol("WM_DELETE_WINDOW", more.withdraw)
     tabs = ttk.Notebook(more)
     tabs.pack(fill="both", expand=True, padx=12, pady=12)
-    connection_tab, language_tab, edit_tab = [ttk.Frame(tabs, padding=10) for _ in range(3)]
-    for pane, label in ((connection_tab,"连接与输出"),(language_tab,"模板与读音"),(edit_tab,"修改原音频")):
-        tabs.add(pane, text=label)
+    pages=[ttk.Frame(tabs) for _ in range(4)]
+    for pane,label in zip(pages,("连接与输出","生成设置","模板与读音","修改原音频")):
+        tabs.add(pane,text=label)
+    connection_tab,generation_tab,language_tab,edit_tab=[_scroll_pane(page) for page in pages]
+    ttk.Button(more,text="保存当前语言设置",command=lambda: save_preferences()).pack(pady=(0,8))
     ttk.Button(box,text="更多设置 ⋯",command=lambda: (more.deiconify(), more.lift())).pack(anchor="e")
 
-    ttk.Label(box, text="1626老师原声 · 保留自然停顿 · 轻度降噪", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
+    ttk.Label(box, text="1626老师原声 · 自然停顿保留", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
     ttk.Label(box, text="模板只分析停顿和相对起伏，再转成语气提示；不作为音色或续写音频。逐句语调复刻尚未实现。", wraplength=740).pack(anchor="w", pady=(4, 10))
     connection = ttk.LabelFrame(connection_tab, text="首次连接Kaggle", padding=10)
     connection.pack(fill="x", pady=(0, 10))
@@ -117,7 +167,28 @@ def open_kaggle_voice(app, parent=None):
     combo.pack(side="left", padx=8)
     ttk.Label(line, text="倍数").pack(side="left")
     ttk.Combobox(line, textvariable=tempo, values=("0.5", "0.75", "0.84", "0.9", "1.0", "1.1", "1.25", "1.5", "2.0"), width=7).pack(side="left", padx=8)
-    ttk.Label(line, textvariable=profile_info).pack(side="left")
+    ttk.Label(line,text="语气").pack(side="left")
+    preset_combo=ttk.Combobox(line,textvariable=preset,values=tuple(PRESETS),state="readonly",width=12)
+    preset_combo.pack(side="left",padx=8)
+    preset_combo.bind("<<ComboboxSelected>>",lambda event: apply_preset())
+    ttk.Button(line,text="详细调节",command=lambda: open_generation()).pack(side="left")
+    ttk.Label(box,textvariable=option_summary,wraplength=730).pack(anchor="w",pady=3)
+    ttk.Label(box,textvariable=mode_info,wraplength=730).pack(anchor="w",pady=3)
+    ttk.Button(box,text="修改已有音频 / 全文重做",command=lambda: (more.deiconify(),tabs.select(pages[3]),more.lift())).pack(anchor="w",pady=3)
+    ttk.Label(generation_tab,text="生成前调节：语气是模型提示，速度/音量/降噪是生成后的自动处理。",wraplength=680).pack(anchor="w",pady=6)
+    style_grid=ttk.Frame(generation_tab);style_grid.pack(fill="x")
+    for i,(name,var) in enumerate(style_vars.items()):
+        ttk.Checkbutton(style_grid,text=name,variable=var,command=lambda: custom_style()).grid(row=i//3,column=i%3,sticky="w",padx=8,pady=6)
+    audio_row=ttk.Frame(generation_tab);audio_row.pack(fill="x",pady=10)
+    ttk.Label(audio_row,text="音量变化 dB").pack(side="left")
+    ttk.Combobox(audio_row,textvariable=gain,values=("-6","-2","0","2","4"),width=8).pack(side="left",padx=8)
+    ttk.Checkbutton(audio_row,text="轻度降噪（默认开）",variable=denoise).pack(side="left")
+    ttk.Button(generation_tab,text="恢复1倍 / 自然语气 / 轻度降噪",command=lambda: reset_generation()).pack(anchor="w",pady=8)
+    generation_command=tk.StringVar()
+    ttk.Label(generation_tab,text="快捷指令（用逗号分隔；仅支持已列选项）",wraplength=680).pack(anchor="w",pady=6)
+    ttk.Entry(generation_tab,textvariable=generation_command).pack(fill="x",pady=4)
+    ttk.Button(generation_tab,text="识别并应用到生成设置",command=lambda: apply_generation_command()).pack(anchor="w",pady=6)
+    ttk.Label(generation_tab,text="不改变1626音色参考；不强制抬高音调；停顿不会自动剪掉。模型语气提示的实际效果需试听。",wraplength=680).pack(anchor="w",pady=6)
     combo.bind("<<ComboboxSelected>>", lambda e: update_profile(True))
     template_row = ttk.LabelFrame(language_tab, text="语气参考（音色始终使用1626）", padding=8)
     template_row.pack(fill="x", pady=5)
@@ -129,7 +200,7 @@ def open_kaggle_voice(app, parent=None):
     choices = ttk.Frame(edit_tab)
     choices.pack(fill="x", pady=6)
     for label, value in (("生成新音频", "generate"), ("修改全文后重新生成", "full"), ("局部改读音并接回原音频", "partial")):
-        ttk.Radiobutton(choices, text=label, variable=mode, value=value, command=lambda: update_mode()).pack(side="left", padx=(0,12))
+        ttk.Radiobutton(choices, text=label, variable=mode, value=value, command=lambda: update_mode()).pack(anchor="w",pady=4)
     pronunciation_row = ttk.Frame(language_tab)
     ttk.Checkbutton(pronunciation_row,text="日语佛教术语读音校正",variable=pronunciation_enabled).pack(side="left")
     ttk.Button(pronunciation_row,text="预览实际朗读稿",command=lambda: preview_reading()).pack(side="left",padx=5)
@@ -156,8 +227,15 @@ def open_kaggle_voice(app, parent=None):
     script_label = ttk.Label(buttons, text="朗读正文")
     script_label.pack(side="left")
     ttk.Button(buttons, text="导入TXT / SRT", command=lambda: import_script()).pack(side="right")
-    text_box = tk.Text(box, height=12, wrap="word", undo=True)
-    text_box.pack(fill="both", expand=True, pady=(0, 8))
+    script_frame=ttk.Frame(box);script_frame.pack(fill="both",expand=True,pady=(0,8))
+    text_box = tk.Text(script_frame, height=10, wrap="word", undo=True)
+    text_scroll=ttk.Scrollbar(script_frame,command=text_box.yview)
+    text_box.configure(yscrollcommand=text_scroll.set)
+    text_scroll.pack(side="right",fill="y");text_box.pack(side="left",fill="both",expand=True)
+    text_box.insert("1.0",drafts.get("generate",""))
+    count=tk.StringVar()
+    ttk.Label(box,textvariable=count).pack(anchor="w")
+    text_box.bind("<KeyRelease>",lambda event: update_count())
     line = ttk.Frame(connection_tab)
     line.pack(fill="x", pady=4)
     ttk.Label(line, text="输出目录").pack(side="left")
@@ -168,7 +246,14 @@ def open_kaggle_voice(app, parent=None):
     ttk.Label(advanced, text="随机种子").pack(side="left")
     ttk.Entry(advanced, textvariable=seed, width=14).pack(side="left", padx=8)
     ttk.Label(advanced, text="-1为随机；同种子不保证跨设备听感完全相同。").pack(side="left")
-    ttk.Label(box, textvariable=status, wraplength=740).pack(anchor="w", pady=8)
+    ttk.Label(box, textvariable=status, wraplength=730).pack(anchor="w", pady=8)
+    progressbar=ttk.Progressbar(box,mode="indeterminate")
+    progressbar.pack(fill="x",pady=3)
+    results_row=ttk.Frame(box);results_row.pack(fill="x",pady=4)
+    ttk.Button(results_row,text="试听上一版",command=lambda: play_path(previous_audio)).pack(side="left")
+    ttk.Button(results_row,text="版本与输出文件",command=lambda: result_history()).pack(side="left",padx=6)
+    ttk.Button(connection_tab,text="查看最近任务日志",command=lambda: show_log()).pack(anchor="w",pady=8)
+    ttk.Button(connection_tab,text="检查本机环境",command=lambda: local_check()).pack(anchor="w",pady=8)
     actions = ttk.Frame(box)
     actions.pack(fill="x", pady=5)
     preview = ttk.Button(actions, text="试听最近WAV", command=lambda: play_last())
@@ -179,36 +264,112 @@ def open_kaggle_voice(app, parent=None):
     submit = ttk.Button(actions, text="生成音频", command=lambda: start(False))
     submit.pack(side="right")
 
+    def options():
+        return validate_options(tempo.get(),gain.get(),denoise.get(),[name for name,var in style_vars.items() if var.get()])
+
+    def update_summary(*unused):
+        try:
+            opt=options()
+            option_summary.set(f"{opt['tempo']:g}倍 · 音量{opt['gain_db']:+g}dB · 轻度降噪{'开' if opt['denoise'] else '关'} · "+("、".join(opt["styles"]) or "自然语气"))
+        except ValueError as exc:
+            option_summary.set("设置待修正："+str(exc))
+
+    def apply_generation_command():
+        try:
+            result=interpret_instruction(generation_command.get())
+            if result["unrecognized"]: raise ValueError("未识别："+"、".join(result["unrecognized"]))
+            # Transactional: validate the merged result before changing any control.
+            styles=list(dict.fromkeys([name for name,var in style_vars.items() if var.get()]+result["styles"]))
+            validate_options(result["tempo"] if "tempo" in result["specified"] else tempo.get(),
+                             result["gain_db"] if "gain_db" in result["specified"] else gain.get(),denoise.get(),styles)
+            if "tempo" in result["specified"]: tempo.set(str(result["tempo"]))
+            if "gain_db" in result["specified"]: gain.set(str(result["gain_db"]))
+            if "denoise" in result["specified"]: denoise.set(result["denoise"])
+            for name,var in style_vars.items(): var.set(name in styles)
+            generation_command.set("");custom_style()
+            status.set("生成设置已更新，请查看主页面参数摘要。")
+        except ValueError as exc:
+            messagebox.showinfo("指令未应用",str(exc),parent=more)
+
+    def apply_preset():
+        names=PRESETS.get(preset.get())
+        if names is not None:
+            for name,var in style_vars.items(): var.set(name in names)
+        update_summary()
+
+    def custom_style():
+        preset.set("自定义");update_summary()
+
+    def reset_generation():
+        tempo.set("1.0");gain.set("0");denoise.set(True);preset.set("自然");apply_preset()
+
+    def open_generation():
+        more.deiconify();tabs.select(pages[1]);more.lift()
+
+    def update_count():
+        raw=text_box.get("1.0","end").strip()
+        count.set(f"正文 {len(raw)} 字符 · 长文按完整语义段生成 · 日语读音稿可在更多设置预览")
+
     def update_mode():
+        nonlocal previous_mode
+        if previous_mode != mode.get():
+            drafts[previous_mode]=text_box.get("1.0","end").strip()
+            text_box.delete("1.0","end");text_box.insert("1.0",drafts.get(mode.get(),drafts.get("generate","") if mode.get()=="full" else ""))
+            previous_mode=mode.get()
         if mode.get() == "partial":
-            if not source_audio.get():
-                source_audio.set(last_audio)
+            if not source_audio.get(): source_audio.set(last_audio)
             correction.pack(fill="x", pady=5)
             script_label.configure(text="修改后的句段正文")
             submit.configure(text="重生成句段并连接完整音频")
+            mode_info.set("当前：局部修改 · 主页面只填替换句段；输出连接后的完整音频")
         else:
             correction.pack_forget()
             script_label.configure(text="修改后的完整正文" if mode.get() == "full" else "朗读正文")
             submit.configure(text="全文重新生成" if mode.get() == "full" else "生成音频")
+            mode_info.set("当前：全文重做 · 旧版保留" if mode.get()=="full" else "生成新音频 · 只需正文，无需视频")
+        update_count()
+
+    def store_language(name):
+        opt=options()
+        settings.setdefault("tempo_by_language",{})[name]=opt["tempo"]
+        settings.setdefault("prosody_templates",{})[name]=template.get()
+        settings.setdefault("generation_by_language",{})[name]=opt
 
     def update_profile(reset=False):
+        nonlocal active_language
         if reset:
-            tempo.set(str(settings.get("tempo_by_language", {}).get(language.get(), profile_for(language.get())["tempo"])))
-            template.set(settings.get("prosody_templates", {}).get(language.get(), default_template(language.get())))
-        profile_info.set("保音高 · 柔和连贯 · 停顿保留")
-        if language.get() == "日语":
-            pronunciation_row.pack(fill="x",pady=4)
-        else:
-            pronunciation_row.pack_forget()
+            try:
+                store_language(active_language)
+            except ValueError as exc:
+                language.set(active_language)
+                messagebox.showerror("请先修正设置",str(exc),parent=win);return
+            active_language=language.get()
+            tempo.set(str(settings.get("tempo_by_language",{}).get(active_language,1.0)))
+            template_value=settings.get("prosody_templates",{}).get(active_language,default_template(active_language))
+            if template_value and not Path(template_value).is_file() and Path(template_value).name in ("japanese.wav","english.wav"):
+                template_value=default_template(active_language)
+            template.set(template_value)
+            pref=settings.get("generation_by_language",{}).get(active_language,{})
+            gain.set(str(pref.get("gain_db",0)));denoise.set(pref.get("denoise",True))
+            for name,var in style_vars.items(): var.set(name in pref.get("styles",[]))
+            preset.set(next((label for label,names in PRESETS.items() if names==pref.get("styles",[])),"自定义"))
+        if language.get()=="日语": pronunciation_row.pack(fill="x",pady=4)
+        else: pronunciation_row.pack_forget()
+        update_summary()
 
     def remember():
-        settings.update(username=username.get().strip(), reference_dataset=dataset.get().strip(),
-                        language=language.get(), output_dir=output.get(), seed=seed.get())
-        settings.setdefault("tempo_by_language", {})[language.get()] = float(tempo.get())
-        settings.setdefault("prosody_templates", {})[language.get()] = template.get()
-        settings["japanese_pronunciation_enabled"] = pronunciation_enabled.get()
-        settings["japanese_pronunciation_overrides"] = japanese_readings
-        save_json(SETTINGS, settings)
+        store_language(language.get())
+        drafts[mode.get()]=text_box.get("1.0","end").strip()
+        settings.update(username=username.get().strip(),reference_dataset=dataset.get().strip(),language=language.get(),
+                        output_dir=output.get(),seed=seed.get(),drafts=drafts,
+                        japanese_pronunciation_enabled=pronunciation_enabled.get(),japanese_pronunciation_overrides=japanese_readings)
+        save_json(SETTINGS,settings)
+
+    def save_preferences():
+        try:
+            remember();status.set("当前语言设置和正文草稿已保存。")
+        except (ValueError,OSError) as exc:
+            messagebox.showerror("设置未保存",str(exc),parent=more)
 
     def save_connection():
         user = username.get().strip()
@@ -222,8 +383,9 @@ def open_kaggle_voice(app, parent=None):
                 token.set("")
             elif not vault.get_password(KEYRING_SERVICE, user):
                 raise ValueError("请先输入本人Kaggle访问令牌。")
-            remember()
-            status.set("连接信息已保存。令牌已存入Windows凭据库。")
+            settings.update(username=user,reference_dataset=dataset.get().strip())
+            save_json(SETTINGS,settings)
+            status.set("连接信息已保存。令牌已存入Windows凭据库；尚未验证云端GPU权限。")
         except Exception:
             messagebox.showerror("连接未保存", "请检查用户名、访问令牌和Windows凭据库。密钥不会写入普通设置文件。", parent=win)
 
@@ -326,197 +488,224 @@ def open_kaggle_voice(app, parent=None):
             chooser.destroy()
         ttk.Button(chooser,text="载入句段后修改正文",command=take).pack(pady=8)
 
-    def start(recover):
+    def set_running(value):
         nonlocal running
-        if running:
-            return
+        running=value
+        for button in (submit,resume): button.state(["disabled"] if value else ["!disabled"])
+        if value: progressbar.start(12)
+        else: progressbar.stop()
+
+    def start(recover):
+        if running: return
         try:
             if recover:
-                manifest = Path(settings.get("last_manifest", ""))
-                job = json.loads(manifest.read_text(encoding="utf-8"))
-                user = job["username"]
+                record=settings.get("last_manifest","")
+                if not record or not Path(record).is_file(): raise ValueError("还没有可恢复的任务。")
+                manifest=Path(record)
+                job=json.loads(manifest.read_text(encoding="utf-8"))
+                user=job["username"]
             else:
-                user = username.get().strip()
-            secret = _vault().get_password(KEYRING_SERVICE, user)
-            if not secret:
-                raise ValueError("请先为这个Kaggle用户名安全保存访问令牌。")
-            if not recover:
-                selected_tempo = float(tempo.get())
-                profile_for(language.get(), selected_tempo)
-                edit = None
-                if mode.get() == "partial":
-                    if not Path(source_audio.get()).is_file():
-                        raise ValueError("局部改读音需要先选择原音频。")
-                    edit = {"kind":"audio", "mode":"partial", "audio":source_audio.get(), "srt":source_srt.get(), "start":float(range_start.get()), "end":float(range_end.get())}
-                manifest = prepare_job(DATA / "kaggle_voice_jobs", user, dataset.get().strip(),
-                                       text_box.get("1.0", "end"), language.get(), int(seed.get()), output.get(), tempo=selected_tempo, edit=edit, prosody_template=template.get() or None,
-                                       pronunciation_enabled=pronunciation_enabled.get(), japanese_readings=japanese_readings, style_options=delivery_options)
-                settings["last_manifest"] = str(manifest)
+                user=username.get().strip()
+                if generation_command.get().strip():
+                    raise ValueError("生成指令框有未应用内容，请先识别并应用，或清空。")
+                opt=options()
+                edit=None
+                if mode.get()=="partial":
+                    if not Path(source_audio.get()).is_file(): raise ValueError("局部修改需先选择原音频。")
+                    edit={"kind":"audio","mode":"partial","audio":source_audio.get(),"srt":source_srt.get(),"start":float(range_start.get()),"end":float(range_end.get())}
+                snapshot=dict(root=DATA/"kaggle_voice_jobs",username=user,dataset=dataset.get().strip(),
+                              text=script_from_text(text_box.get("1.0","end")),language=language.get(),seed=int(seed.get()),
+                              output_dir=output.get(),tempo=opt["tempo"],gain_db=opt["gain_db"],light_denoise=opt["denoise"],
+                              edit=edit,prosody_template=template.get().strip() or None,
+                              pronunciation_enabled=pronunciation_enabled.get(),japanese_readings=dict(japanese_readings),style_options=opt["styles"])
                 remember()
+            if token.get().strip():
+                raise ValueError("令牌输入框有未保存内容，请先点击安全保存连接。")
+            secret=_vault().get_password(KEYRING_SERVICE,user)
+            if not secret: raise ValueError("请先在更多设置为本人Kaggle用户名安全保存令牌。")
         except Exception as exc:
-            messagebox.showerror("还不能提交", str(exc) if isinstance(exc, (ValueError, OSError)) else "请检查连接信息和最近任务记录。", parent=win)
-            return
-        running = True
-        submit.state(["disabled"])
-        resume.state(["disabled"])
-        status.set("正在恢复云端任务…" if recover else "正在准备私有GPU作业…")
-
+            messagebox.showerror("还不能提交",str(exc) if isinstance(exc,(ValueError,OSError)) else "请检查连接和最近任务记录。",parent=win);return
+        set_running(True)
+        status.set("正在恢复已有任务，不重复提交…" if recover else "正在检查正文、模板与修改范围…")
         def work():
             try:
-                run_job(manifest, secret, events.put, audio_only=True)
+                record=manifest if recover else prepare_job(**snapshot)
+                if not recover: events.put(("manifest",str(record)))
+                run_job(record,secret,events.put,audio_only=True)
             except Exception as exc:
-                events.put(("error", str(exc)))
-        threading.Thread(target=work, daemon=True).start()
+                events.put(("error",str(exc)))
+        threading.Thread(target=work,daemon=True).start()
 
     def adjustment_dialog():
-        nonlocal delivery_options
-        popup = tk.Toplevel(win)
-        popup.title("音频微调 · 保留原版")
-        popup.geometry("760x650")
-        area = ttk.Frame(popup,padding=14)
-        area.pack(fill="both",expand=True)
-        selected_audio = tk.StringVar(value=last_audio)
-        ttk.Label(area,text="普通音频也可以选择；无需克隆文本、视频或云端GPU。").pack(anchor="w")
-        row=ttk.Frame(area); row.pack(fill="x",pady=7)
+        popup=tk.Toplevel(win);popup.title("音频微调 · 保留原版");_fit_window(popup,760,650)
+        area=_scroll_pane(popup)
+        selected_audio=tk.StringVar(value=last_audio)
+        ttk.Label(area,text="普通音频微调 · 不需要云端GPU或克隆正文",font=("Microsoft YaHei UI",12,"bold")).pack(anchor="w",pady=6)
+        row=ttk.Frame(area);row.pack(fill="x",pady=6)
         ttk.Entry(row,textvariable=selected_audio).pack(side="left",fill="x",expand=True)
-        ttk.Button(row,text="选择音频",command=lambda: choose_media(selected_audio,[("音频","*.wav *.mp3 *.m4a *.flac")])).pack(side="left")
-        speed, gain = tk.StringVar(value="1.0"),tk.StringVar(value="0")
+        ttk.Button(row,text="选择音频",command=lambda: choose_media(selected_audio,[("音频","*.wav *.mp3 *.m4a *.flac")])).pack(side="left",padx=5)
+        speed,volume=tk.StringVar(value="1.0"),tk.StringVar(value="0")
         noise=tk.BooleanVar(value=False)
-        row=ttk.Frame(area);row.pack(fill="x",pady=7)
+        row=ttk.Frame(area);row.pack(fill="x",pady=8)
         ttk.Label(row,text="速度（保音高）").pack(side="left")
-        ttk.Combobox(row,textvariable=speed,values=("0.75","0.9","1.0","1.1","1.25"),width=8).pack(side="left",padx=5)
+        ttk.Combobox(row,textvariable=speed,values=("0.75","0.9","1.0","1.1","1.25"),width=8).pack(side="left",padx=6)
         ttk.Label(row,text="音量变化 dB").pack(side="left")
-        ttk.Combobox(row,textvariable=gain,values=("-6","-2","0","2","4"),width=8).pack(side="left",padx=5)
+        ttk.Combobox(row,textvariable=volume,values=("-6","-2","0","2","4"),width=8).pack(side="left",padx=6)
         ttk.Checkbutton(row,text="轻度降噪",variable=noise).pack(side="left")
-        ttk.Label(area,text="语气选项（需要重新生成；普通外部音频须先提供对应正文）：").pack(anchor="w",pady=(12,5))
-        selected={name:tk.BooleanVar(value=name in delivery_options) for name in STYLE_OPTIONS}
-        grid=ttk.Frame(area);grid.pack(fill="x")
-        for i,(name,var) in enumerate(selected.items()):
-            ttk.Checkbutton(grid,text=name,variable=var).grid(row=i//4,column=i%4,sticky="w",padx=5,pady=4)
-        ttk.Label(area,text="快捷指令：放慢一点、加快一点、音量大一点、音量小一点、轻度降噪，以及上面的语气选项。用逗号分隔。​",wraplength=700).pack(anchor="w",pady=8)
-        instructions=tk.StringVar()
-        ttk.Entry(area,textvariable=instructions).pack(fill="x")
-        explanation=tk.StringVar(value="未列出的自由指令不会自动执行。语气控制是模型提示，不能保证每次听感完全符合要求。")
-        ttk.Label(area,textvariable=explanation,wraplength=700).pack(fill="x",pady=8)
+        ttk.Label(area,text="快捷指令：放慢一点、加快一点、音量大一点、音量小一点、轻度降噪。用逗号分隔；识别后会显示实际数值。",wraplength=670).pack(anchor="w",pady=8)
+        instructions=tk.StringVar();ttk.Entry(area,textvariable=instructions).pack(fill="x",pady=5)
+        explanation=tk.StringVar(value="仅执行上方数值；未知或互相矛盾的指令会被拦下。")
+        ttk.Label(area,textvariable=explanation,wraplength=670).pack(fill="x",pady=6)
         def parse():
-            result=interpret_instruction(instructions.get())
-            if result["unrecognized"]:
-                messagebox.showinfo("存在未识别指令","请改用列出的选项："+"、".join(result["unrecognized"]),parent=popup)
-                return
-            speed.set(str(result["tempo"]));gain.set(str(result["gain_db"]));noise.set(result["denoise"])
-            for name,var in selected.items():
-                var.set(name in result["styles"])
-            instructions.set("")
-            explanation.set(f"将应用：速度{speed.get()}倍、音量{gain.get()}dB、降噪{'开' if noise.get() else '关'}。语气重生成："+"、".join(result["styles"]))
-        ttk.Button(area,text="识别指令并预览动作",command=parse).pack(anchor="w")
-        def local_apply():
-            nonlocal running
-            if running:
-                messagebox.showinfo("任务进行中","请先等待当前任务完成。",parent=popup);return
-            if any(v.get() for v in selected.values()):
-                messagebox.showinfo("语气需要重生成","当前选择了语气选项。请使用下方语气重生成按钮，或取消语气选项后只处理速度、音量和降噪。",parent=popup);return
-            if instructions.get().strip():
-                messagebox.showinfo("请先预览","请先点击识别指令并预览动作，然后清空指令框；调整按上方显示的数值执行。",parent=popup);return
             try:
-                values=(selected_audio.get(), output.get(),float(speed.get()),float(gain.get()),noise.get())
-            except ValueError:
-                messagebox.showerror("数值错误","请填写有效的速度和音量数值。",parent=popup);return
-            running=True
-            submit.state(["disabled"]);resume.state(["disabled"])
-            status.set("正在处理已有音频，保留原文件和停顿…")
+                result=interpret_instruction(instructions.get())
+                if result["unrecognized"]: raise ValueError("未识别："+"、".join(result["unrecognized"]))
+                if result["styles"]:
+                    raise ValueError("柔和、连贯等需要重新生成。请使用下面的生成前语气调节，不能在普通微调中直接实现。")
+            except ValueError as exc:
+                messagebox.showinfo("指令未应用",str(exc),parent=popup);return False
+            if "tempo" in result["specified"]: speed.set(str(result["tempo"]))
+            if "gain_db" in result["specified"]: volume.set(str(result["gain_db"]))
+            if "denoise" in result["specified"]: noise.set(result["denoise"])
+            instructions.set("")
+            explanation.set(f"待执行：{speed.get()}倍、音量{volume.get()}dB、降噪{'开' if noise.get() else '关'}。")
+            return True
+        ttk.Button(area,text="识别指令并预览动作",command=parse).pack(anchor="w",pady=6)
+        def local_apply():
+            if running:
+                messagebox.showinfo("任务进行中","请等待当前任务结束。",parent=popup);return
+            if instructions.get().strip() and not parse(): return
+            try:
+                opt=validate_options(speed.get(),volume.get(),noise.get())
+                source=selected_audio.get()
+                if not Path(source).is_file(): raise ValueError("请选择有效音频。")
+                if not output.get().strip(): raise ValueError("请在更多设置选择输出目录。")
+            except ValueError as exc:
+                messagebox.showerror("不能微调",str(exc),parent=popup);return
+            target_dir=output.get()
+            set_running(True);status.set("正在处理已有音频，保留原声道、原文件和停顿…")
             def work():
                 try:
-                    result=adjust_audio(*values)
-                    events.put(("adjusted",result))
-                except Exception as exc:
-                    events.put(("adjust_error",str(exc)))
-            threading.Thread(target=work,daemon=True).start()
-            popup.destroy()
-        def regenerate():
-            nonlocal delivery_options
-            if instructions.get().strip():
-                messagebox.showinfo("请先预览","先识别指令，确认选项后清空指令框。",parent=popup);return
-            delivery_options=[name for name,var in selected.items() if var.get()]
-            if not delivery_options:
-                messagebox.showinfo("请选择语气","至少选择一项语气调整。",parent=popup);return
-            # Generation uses the visible corrected text and existing partial mode,
-            # never pretend to infer a transcript from an arbitrary audio file.
-            if not text_box.get("1.0","end").strip():
-                messagebox.showinfo("需要正文","请先在主页面填写音频对应的正文；外部音频不会自动转录。",parent=popup);return
-            tempo.set(speed.get())
-            if gain.get() not in ("0","0.0") or noise.get():
-                messagebox.showinfo("先重生成语气","此按钮只使用语气和速度；音量与额外降噪请在生成后单独处理。",parent=popup);return
-            popup.destroy()
-            start(False)
-        ttk.Button(area,text="仅处理已有音频 → 另存新WAV",command=local_apply).pack(fill="x",pady=(12,5))
-        ttk.Button(area,text="按主页面正文 / 当前修改模式重生成语气",command=regenerate).pack(fill="x",pady=5)
-        ttk.Label(area,text="原音频始终保留。不会自动裁剪停顿、改变音高，或把普通后期处理标记为语气改善。",wraplength=700).pack(anchor="w",pady=8)
+                    result=adjust_audio(source,target_dir,opt["tempo"],opt["gain_db"],opt["denoise"])
+                    events.put(("adjusted",{"source":source,"result":result}))
+                except Exception as exc: events.put(("adjust_error",str(exc)))
+            threading.Thread(target=work,daemon=True).start();popup.destroy()
+        ttk.Button(area,text="执行微调 → 另存新WAV",command=local_apply).pack(fill="x",pady=12)
+        ttk.Separator(area).pack(fill="x",pady=12)
+        ttk.Label(area,text="想改变柔和程度、连贯性或停顿方式？",font=("Microsoft YaHei UI",11,"bold")).pack(anchor="w")
+        ttk.Label(area,text="请先在主页面提供对应的完整正文或待改句段，再调节语气重新生成。普通音频不会自动转录，也不会用滤镜假装改善说话方式。",wraplength=670).pack(anchor="w",pady=8)
+        ttk.Button(area,text="打开生成前语气调节",command=lambda: (popup.destroy(),open_generation())).pack(anchor="w",pady=6)
+        ttk.Label(area,text="不覆盖原版。双声道保留双声道；速度默认1.0倍；不改变音高或剪掉停顿。微调后不要沿用旧SRT时间轴直接替换。",wraplength=670).pack(anchor="w",pady=10)
+
+    def play_path(path):
+        if not path or not Path(path).is_file():
+            messagebox.showinfo("没有可用音频","请先完成生成或选择已有版本。",parent=win);return
+        try:
+            if os.name=="nt": os.startfile(path)
+            else: subprocess.Popen(["xdg-open",path])
+        except OSError as exc:
+            messagebox.showerror("无法打开播放器",str(exc),parent=win)
+
+    def result_history():
+        popup=tk.Toplevel(win);popup.title("版本与输出文件");_fit_window(popup,760,520)
+        listing=tk.Listbox(popup,exportselection=False)
+        listing.pack(fill="both",expand=True,padx=12,pady=12)
+        records=list(reversed(settings.get("audio_history",[])))
+        if not records and last_audio: records=[{"result":last_audio,"kind":"已有结果"}]
+        for record in records: listing.insert("end",f"{record.get('kind','音频')}  {Path(record['result']).name}")
+        def selected():
+            ids=listing.curselection();return records[ids[0]]["result"] if ids else ""
+        def folder():
+            path=selected()
+            if path: play_path(str(Path(path).parent))
+        row=ttk.Frame(popup);row.pack(fill="x",padx=12,pady=8)
+        ttk.Button(row,text="试听选中版",command=lambda: play_path(selected())).pack(side="left")
+        ttk.Button(row,text="打开所在文件夹",command=folder).pack(side="left",padx=8)
+        ttk.Label(popup,text="版本不会覆盖。微调记录保存在对应输出文件夹；所有版本仍待音色和读音听检。",wraplength=680).pack(pady=8)
+
+    def show_log():
+        record=settings.get("last_manifest","")
+        if not record or not Path(record).is_file():
+            messagebox.showinfo("没有任务记录","先提交一次任务。",parent=more);return
+        folder=Path(record).parent
+        job=json.loads(Path(record).read_text(encoding="utf-8"))
+        content=f"状态：{job.get('status')}\n最近错误：{job.get('last_error','无')}\n"
+        log=folder/"remote_error.log"
+        if log.is_file(): content+="\n"+log.read_text(encoding="utf-8",errors="replace")[-30000:]
+        popup=tk.Toplevel(win);popup.title("最近任务日志");_fit_window(popup,780,580)
+        view=tk.Text(popup,wrap="word");view.pack(fill="both",expand=True,padx=10,pady=10)
+        view.insert("1.0",content);view.configure(state="disabled")
+
+    def local_check():
+        if running: return
+        def work():
+            try:
+                from cloud_voice_preview import ensure_media_tools
+                from voice_clip_edit import command,tool
+                ensure_media_tools()
+                filters=command([tool("ffmpeg"),"-hide_banner","-filters"]).decode("utf-8",errors="replace")
+                if not all(name in filters for name in ("afftdn","rubberband","alimiter")):
+                    raise RuntimeError("FFmpeg缺少所需音频滤镜，请重新运行启动安装检查。")
+                events.put(("check_done","本机FFmpeg与音频滤镜可用。该检查不代表Kaggle账号权限、GPU余量或云端网络可用。"))
+            except Exception as exc: events.put(("check_done",str(exc)))
+        threading.Thread(target=work,daemon=True).start()
 
     def play_last():
-        path = last_audio
-        if not path or not Path(path).is_file():
-            messagebox.showinfo("还没有结果", "先完成对应的生成或合成任务。", parent=win)
-            return
-        if os.name == "nt":
-            os.startfile(path)
-        else:
-            subprocess.Popen(["xdg-open", path])
+        play_path(last_audio)
+
+    def install_result(path,kind,source=None):
+        nonlocal last_audio,previous_audio
+        previous_audio=source or last_audio
+        last_audio=path
+        settings.update(last_audio=path,previous_audio=previous_audio)
+        records=settings.setdefault("audio_history",[])
+        if not any(record.get("result")==path for record in records):
+            records.append({"result":path,"source":previous_audio,"kind":kind})
+        source_audio.set(path)
+        save_json(SETTINGS,settings)
+        app.v["audio"].set(path)
+        if "speed" in app.v: app.v["speed"].set("1.0")
+        if "trim" in app.v: app.v["trim"].set(False)
+        if hasattr(app,"auto_cut"): app.auto_cut.set(False)
 
     def poll():
-        nonlocal running, last_audio
         try:
             while True:
-                kind, payload = events.get_nowait()
-                if kind in ("status", "warning"):
-                    status.set(payload)
-                elif kind == "done":
-                    running = False
-                    last_audio = payload.get("edited_audio", payload["yangning_final.wav"])
-                    source_audio.set(last_audio)
-                    if payload.get("edited_srt"):
-                        source_srt.set(payload["edited_srt"])
-                    settings["last_audio"] = last_audio
-                    save_json(SETTINGS, settings)
-                    app.v["audio"].set(last_audio)
-                    # Do not apply the audio tempo a second time in the host Studio.
-                    if "speed" in app.v:
-                        app.v["speed"].set("1.0")
-                    if "trim" in app.v:
-                        app.v["trim"].set(False)
-                    if hasattr(app, "auto_cut"):
-                        app.auto_cut.set(False)
-                    status.set("已导出完整修正WAV；原文件已保留，请试听接缝与读音。" if payload.get("edited_audio") else "WAV音频已生成，可试听或导入杨宁工作室制作成片。")
-                    submit.state(["!disabled"])
-                    resume.state(["!disabled"])
-                elif kind in ("adjusted", "adjust_error"):
-                    running = False
-                    submit.state(["!disabled"]);resume.state(["!disabled"])
-                    if kind == "adjusted":
-                        old_audio=last_audio
-                        last_audio=payload
-                        settings.setdefault("audio_adjustment_history",[]).append({"source":old_audio,"result":payload})
-                        settings["last_audio"]=last_audio
-                        source_audio.set(last_audio)
-                        save_json(SETTINGS,settings)
-                        app.v["audio"].set(last_audio)
-                        if "speed" in app.v: app.v["speed"].set("1.0")
-                        if "trim" in app.v: app.v["trim"].set(False)
-                        if hasattr(app,"auto_cut"): app.auto_cut.set(False)
-                        status.set("微调WAV已另存。原音频和停顿保留，可试听最近WAV。")
-                    else:
-                        status.set("音频微调未完成，原文件保留。")
-                        messagebox.showerror("微调未完成",payload,parent=win)
-                elif kind == "error":
-                    running = False
-                    submit.state(["!disabled"])
-                    resume.state(["!disabled"])
-                    status.set("任务未完成，记录已保留。可点击恢复最近任务；不会重新提交同一作业。")
-                    messagebox.showerror("云端任务未完成", payload, parent=win)
-        except queue.Empty:
-            pass
-        if win.winfo_exists():
-            win.after(150, poll)
+                kind,payload=events.get_nowait()
+                if kind in ("status","warning"): status.set(payload)
+                elif kind=="manifest":
+                    settings["last_manifest"]=payload;save_json(SETTINGS,settings)
+                elif kind=="done":
+                    set_running(False)
+                    path=payload.get("edited_audio",payload.get("yangning_final.wav"))
+                    if not path: raise ValueError("生成记录没有音频路径。")
+                    install_result(path,"局部修改" if payload.get("edited_audio") else "云端生成")
+                    # Old SRT belongs to old audio; never silently reuse it after another result.
+                    source_srt.set(payload.get("edited_srt",""))
+                    status.set("已导出新WAV，原版保留。请试听音色、全文完整性、术语读音和接缝。")
+                elif kind=="adjusted":
+                    set_running(False);install_result(payload["result"],"普通音频微调",payload["source"])
+                    source_srt.set("")
+                    status.set("微调WAV已另存。原版与声道保留，未自动调整SRT。可试听上一版比较。")
+                elif kind in ("error","adjust_error"):
+                    set_running(False)
+                    status.set("任务未完成，原文件与任务记录保留；查看更多设置中的日志确认原因。")
+                    messagebox.showerror("云端任务未完成" if kind=="error" else "微调未完成",payload,parent=win)
+                elif kind=="check_done": messagebox.showinfo("本机环境检查",payload,parent=more)
+        except queue.Empty: pass
+        except Exception as exc:
+            set_running(False)
+            status.set("结果处理遇到问题："+str(exc))
+        if win.winfo_exists(): win.after(150,poll)
 
-    update_profile()
-    update_mode()
-    win.after(150, poll)
+    def close_window():
+        try: remember()
+        except (ValueError,OSError): pass
+        more.withdraw()
+        # Keep event handling alive while work is in flight; reopening reuses it.
+        if running: win.withdraw()
+        else: win.destroy()
+    win.protocol("WM_DELETE_WINDOW",close_window)
+    for var in (tempo,gain,denoise): var.trace_add("write",update_summary)
+    update_profile();update_mode();update_summary()
+    win.after(150,poll)

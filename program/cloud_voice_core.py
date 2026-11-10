@@ -12,7 +12,7 @@ import wave
 from datetime import datetime, timezone
 from pathlib import Path
 
-from voxcpm_kaggle_worker import PACKAGE_VERSION, REFERENCE_SHA256, profile_for
+from voxcpm_kaggle_worker import PACKAGE_VERSION, REFERENCE_SHA256, profile_for, split_script
 
 _ACTIVE = set()
 _ACTIVE_LOCK = threading.Lock()
@@ -48,7 +48,7 @@ def script_from_text(text):
 def build_notebook(request):
     worker = Path(__file__).with_name("voxcpm_kaggle_worker.py").read_text(encoding="utf-8")
     install = (
-        "import subprocess, sys\n"
+        "import subprocess, sys\nprint('YANGNING_STAGE=dependencies', flush=True)\n"
         f"subprocess.run([sys.executable, '-m', 'pip', 'install', 'voxcpm=={PACKAGE_VERSION}', 'soundfile'], check=True)\n"
     )
     # Data is parsed as JSON, never interpolated into executable Python source.
@@ -66,12 +66,16 @@ def build_notebook(request):
     }
 
 
-def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None):
+def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo=None, edit=None, prosody_template=None, pronunciation_enabled=True, japanese_readings=None, style_options=None, gain_db=0.0, light_denoise=True):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", username):
         raise ValueError("请填写Kaggle用户名。")
     if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", dataset):
         raise ValueError("私有数据集标识应为：用户名/数据集slug。")
     profile = profile_for(language, tempo)
+    from voice_adjust import validate_options
+    options = validate_options(profile["tempo"],gain_db,light_denoise,style_options)
+    if not str(output_dir).strip():
+        raise ValueError("请选择输出目录。")
     text = script_from_text(text)
     seed = int(seed)
     if not -1 <= seed < 2**31:
@@ -84,6 +88,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     request = {
         "job_id": job_id, "text": text, "language": language, "seed": seed, "tempo": profile["tempo"],
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
+        "postprocess": {"gain_db": options["gain_db"], "light_denoise": options["denoise"]},
     }
     if language == "日语" and pronunciation_enabled:
         from japanese_pronunciation import reading_plan
@@ -92,6 +97,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         request["pronunciation"] = plan
         save_json(folder / "pronunciation_plan.json", plan)
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
+    split_script(request.get("reading_text",text))  # Reject oversized single sentences before paying GPU startup time.
     if prosody_template:
         from voice_prosody import analyze_template
         request["prosody_reference"] = analyze_template(prosody_template)
@@ -112,6 +118,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         "job_id": job_id, "username": username, "dataset": dataset, "kernel": kernel,
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
+        "postprocess": request["postprocess"], "delivery_instruction": request.get("delivery_instruction", ""),
     }
     if request.get("pronunciation"):
         manifest["pronunciation"] = request["pronunciation"]
@@ -164,6 +171,25 @@ def state_from_output(output):
     raise RuntimeError("无法识别Kaggle任务状态，保留任务以便恢复。")
 
 
+def stage_from_log(log):
+    # Kaggle may return plain text or a JSON array of stream events.
+    text=str(log)
+    try:
+        events=json.loads(text)
+        if isinstance(events,list):
+            text="\n".join(str(item.get("data","")) for item in events if isinstance(item,dict))
+    except (ValueError,TypeError): pass
+    matches=re.findall(r"YANGNING_STAGE=([a-z_]+)",text)
+    stages={"dependencies":"云端正在安装依赖…","preflight":"云端正在检查GPU和1626参考文件…",
+            "model_download":"云端正在下载或载入模型…","generation":"云端正在生成音频…",
+            "postprocess":"云端正在执行速度、音量和降噪处理…"}
+    label=stages.get(matches[-1],"") if matches else ""
+    counts=re.findall(r"已生成 (\d+)/(\d+) 个完整语义段",text)
+    if label and matches[-1]=="generation" and counts:
+        label=f"云端已生成 {counts[-1][0]}/{counts[-1][1]} 个完整语义段…"
+    return label
+
+
 def validate_wav(path):
     with wave.open(str(path), "rb") as wav:
         if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (1, 2, 48000) or wav.getnframes() <= 0:
@@ -180,6 +206,12 @@ def deliver_result(folder, manifest):
         raise ValueError("云端制作记录不完整或与任务不一致，保留云端文件以便检查。")
     if manifest.get("pronunciation") and recipe.get("pronunciation") != manifest["pronunciation"]:
         raise ValueError("云端读音校正记录与任务不一致，未将音频标记为完成。")
+    if manifest.get("delivery_instruction") and recipe.get("delivery_instruction") != manifest["delivery_instruction"]:
+        raise ValueError("语气要求与云端返回记录不一致。")
+    if recipe.get("postprocess") is not None and recipe["postprocess"] != manifest.get("postprocess", {"gain_db":0.0,"light_denoise":True}):
+        raise ValueError("音量或降噪设置与任务不一致。")
+    if (manifest.get("postprocess",{}).get("gain_db",0) != 0 or manifest.get("postprocess",{}).get("light_denoise",True) is not True) and recipe.get("postprocess") is None:
+        raise ValueError("缺少自定义音量和降噪的执行记录。")
     target = Path(manifest["output_dir"])
     target.mkdir(parents=True, exist_ok=True)
     prefix = "YangNing_VoxCPM2_1626_" + manifest["job_id"]
@@ -235,12 +267,16 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             # Save the identity before submission: a timed-out push may still start remotely.
             manifest["status"] = "submitting"
             save_json(manifest_path, manifest)
-            emit(("status", "正在提交私有GPU作业…"))
+            emit(("status", "正在提交私有GPU作业；尚未开始生成…"))
             cli(["kernels", "push", "-p", str(folder)], env, timeout=600)
             manifest["status"] = "submitted"
             save_json(manifest_path, manifest)
+        if manifest["status"] == "remote_failed":
+            raise RuntimeError("最近的云端任务已失败或取消，恢复不会重复提交。请在更多设置查看日志，修正后点击生成音频提交新任务。")
         if manifest["status"] not in ("audio_ready", "completed"):
             deadline = time.monotonic() + timeout_seconds
+            next_log = 0
+            last_stage = ""
             while time.monotonic() < deadline:
                 state = state_from_output(cli(["kernels", "status", kernel], env, timeout=180))
                 if state in {"complete", "completed"}:
@@ -251,8 +287,17 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
                         (folder / "remote_error.log").write_text(redact(log, secret), encoding="utf-8")
                     except Exception:
                         pass
-                    raise RuntimeError("云端执行失败；任务和日志已保留，可恢复下载或查看Kaggle运行日志。")
-                emit(("status", "云端正在排队或生成，可关闭窗口，之后恢复任务。"))
+                    manifest["status"] = "remote_failed"
+                    manifest["remote_state"] = state
+                    raise RuntimeError("云端任务已失败或取消，继续等待不会重新运行。任务与可取得的日志已保留；请查看错误详情，修正后再提交新任务。")
+                manifest["remote_state"] = state
+                if state=="running" and time.monotonic() >= next_log:
+                    try:
+                        log=cli(["kernels","logs",kernel],env,timeout=45)
+                        last_stage=stage_from_log(log) or last_stage
+                    except Exception: pass  # Status remains authoritative if live logs are unavailable.
+                    next_log=time.monotonic()+60
+                emit(("status", "正在等待Kaggle分配资源（排队）…" if state in {"queued","pending"} else (last_stage or "云端正在运行：可能在安装依赖、下载模型或生成音频；不是排队。")))
                 sleep(20)
             else:
                 raise TimeoutError("等待云端超时，任务身份已保存，可稍后恢复，未重复提交。")
@@ -280,6 +325,15 @@ def _run_job(manifest_path, secret, emit, cli, sleep, timeout_seconds, audio_onl
             manifest["status"] = "completed"
             manifest.pop("last_error", None)
             save_json(manifest_path, manifest)
+        # A previously completed record must not claim success if the user moved
+        # or deleted local outputs; retain remote data when it still exists.
+        for name in ("yangning_final.wav","yangning_raw.wav"):
+            path=manifest.get("artifacts",{}).get(name,"")
+            if not path or not Path(path).is_file():
+                raise ValueError("已保存的音频文件已移动或删除。请恢复原路径，或在云端任务仍存在时重新下载输出；不会重复提交。")
+            validate_wav(path)
+        if manifest.get("artifacts",{}).get("edited_audio"):
+            validate_wav(manifest["artifacts"]["edited_audio"])
         # Only delete remotely after local final/raw WAV and audit files are validated.
         if manifest.get("cleanup_status") != "deleted":
             try:
