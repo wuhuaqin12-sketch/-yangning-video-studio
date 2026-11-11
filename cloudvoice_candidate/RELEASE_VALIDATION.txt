@@ -1,4 +1,21 @@
-CloudVoice 0.7.2
-61 automated tests PASS. New coverage: legacy fast-setting migration and backup, preserve references/templates/history, one-time migration, 0.1-second vs 10-minute SRT deadline gives identical model prompt/fingerprint, and real FFmpeg normal-speed output retains 2-second waveform duration.
-Single full-text generation, EOS guard and existing updater data preservation/rollback tests retained.
-No real model listening or Windows setup/boot executed. Reading pace improvements are instructions, not a verified acoustic result.
+CloudVoice 0.7.3 punctuation pause release validation
+Date: 2026-11-12 (Japan local date)
+
+Automated regression: 71 tests PASS (unittest discovery, isolated Python 3.12 / torch 2.6.0 CPU).
+Real speech integration: one paired sample per language from https://huggingface.co/datasets/google/fleurs. These are public evaluation recordings, NOT newly generated 1626 teacher audio.
+Checks: acoustic alignment succeeded, output sample count equals all original samples plus inserted silence, no TTS call by pause processing. Listening is still pending.
+
+德语: PASS; 11.160s -> 11.245s; added 0.085s; 2 boundaries; min anchor confidence 1.000
+英语: PASS; 8.760s -> 9.060s; added 0.300s; 3 boundaries; min anchor confidence 0.683
+法语: PASS; 10.200s -> 10.200s; added 0.000s; 1 boundaries; min anchor confidence 0.864
+印尼语: PASS; 8.580s -> 8.865s; added 0.285s; 1 boundaries; min anchor confidence 0.997
+日语: PASS; 10.440s -> 10.740s; added 0.300s; 1 boundaries; min anchor confidence 0.794
+粤语: PASS; 7.260s -> 7.825s; added 0.565s; 2 boundaries; min anchor confidence 0.498
+
+Long speech check: PASS; concatenated real German sample 17 times (189.72s -> 191.165s); 50 boundaries; final aligned word 187.36s agrees with expected 187.36s. Not a fresh 1626 clone or a test of long-form TTS quality.
+
+Implementation: one full-text VoxCPM2 generation, fixed teacher reference hash; no waveform template mixing. MMS only locates words in existing speech. Minimum internal comma .30s, sentence/question .60s, newline .70s; existing quiet time counted; no proportional timing, subtitle deadline fitting, sample truncation, or additional TTS calls. 3ms gain fades at newly inserted silence boundaries.
+Model: official torchaudio MMS_FA, SHA256 20ef12963ab4924bef49ac4fc7f58ad5da2ee43b2c11bc8c853c9b90ecdbc680. First use downloads approx 1.2GB; existing VoxCPM cache remains. Text helpers pinned; pip check passes in isolated test environment.
+Failures: uncertain/invalid alignment stops delivery, keeps full raw WAV and checkpoint. Does not silently label unmodified speech as repaired. Original SRT numbers/times/text retained as metadata only.
+Updater: independent CloudVoice channel and new tag cloudvoice-v0.7.3, no existing release asset replacement and no change to VideoStudio main/latest. Full archive and live old-updater checks performed separately after packaging/publishing.
+Pending: real 1626 long model generation/listening, six-language voice quality review, Windows actual setup/restart, real Kaggle job end-to-end. Notebook compilation, same-module embedding and mocked worker tests are NOT real Kaggle execution.

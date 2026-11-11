@@ -69,7 +69,8 @@ class WorkflowTests(unittest.TestCase):
                           "generation_mode":"continuous_full_text","generation_audit":{"model_calls":1,"eos_observed":True},
                           "reference_sha256": "wrong" if invalid_recipe else REFERENCE_SHA256,
                           "template_audio_used": False, "silence_trimmed": False, "pitch_ratio": 1.0,
-                          "profile": {"tempo": manifest["tempo"]}, "pronunciation":manifest.get("pronunciation")}
+                          "profile": {"tempo": manifest["tempo"]}, "pronunciation":manifest.get("pronunciation"),
+                          "punctuation_pauses":{"policy":"aligned_punctuation_minimum_v1","boundaries":[],"added_seconds":0}}
                 (folder/"voice_recipe.json").write_text(json.dumps(recipe))
             if args[:2] == ["kernels", "delete"]:
                 self.assertTrue(list((self.root/"output").glob("*.wav")))
@@ -77,6 +78,21 @@ class WorkflowTests(unittest.TestCase):
                     raise RuntimeError("temporary cleanup failure")
             return "ok"
         return call
+
+    def test_missing_punctuation_execution_record_is_not_delivered(self):
+        path=self.job()
+        delegate=self.fake_cli(path)
+        def missing(args,env,timeout=180):
+            result=delegate(args,env,timeout)
+            if args[:2]==["kernels","output"]:
+                folder=Path(args[args.index("-p")+1])
+                record=json.loads((folder/"voice_recipe.json").read_text())
+                record.pop("punctuation_pauses")
+                (folder/"voice_recipe.json").write_text(json.dumps(record))
+            return result
+        with self.assertRaisesRegex(RuntimeError,"停顿修复记录"):
+            run_job(path,"legacy",lambda event:None,cli=missing)
+        self.assertFalse(list((self.root/"output").glob("*.wav")))
 
     def test_notebook_code_is_valid_and_request_is_data(self):
         payload = '日本語。\n"\"\"); __import__("os").environ["UNWANTED"]="1" #'

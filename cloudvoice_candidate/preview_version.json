@@ -1,20 +1,22 @@
 {
   "name": "YangNing Cloud Voice Independent Preview",
-  "version": "0.7-preview.3",
-  "update_sequence": 11,
-  "source_revision": "f7e225c5df3e983757db5c0aab305f2d670bd62f",
+  "version": "0.7-preview.4",
+  "update_sequence": 12,
+  "source_revision": "eda854666ec5cba56018b8d23a753727aba5e566",
   "formal_studio_release": false,
-  "local_validation": "Automated regression, real FFmpeg synthetic audio, old updater payload checks; see release validation notes",
+  "local_validation": "Automated regression; real multilingual FLEURS acoustic alignment and silence insertion; see RELEASE_VALIDATION.txt",
   "pending_validation": [
-    "real long-model generation and listening",
-    "Windows actual install/restart"
+    "real 1626 full-text model listening",
+    "Windows actual install/restart",
+    "real Kaggle job end-to-end"
   ],
   "reference_audio_bundled": false,
   "prosody_templates_bundled": [],
   "template_waveform_sent_to_model": false,
   "default_tempo_all_languages": 1.0,
   "release_status": "stable",
-  "display_version": "0.7.2",
+  "display_version": "0.7.3",
   "generation_mode": "continuous_full_text",
-  "reading_pace_policy": "natural_gentle_no_timeline"
+  "reading_pace_policy": "natural_gentle_no_timeline",
+  "punctuation_pause_policy": "aligned_punctuation_minimum_v1"
 }

@@ -124,7 +124,18 @@ class LocalEngine:
             if not python_path().is_file() or not (local_root()/"ready.json").is_file():
                 raise ValueError("请先在更多设置安装本机模型环境。")
             if self.process is None or self.process.poll() is not None:
+                # Add only the small alignment text helpers to the existing engine.
+                # Existing torch/VoxCPM installation and voice/model caches stay in place.
+                from punctuation_pause import DEPENDENCIES
+                marker=local_root()/"pause_dependencies_v1.json"
+                if not marker.is_file():
+                    emit(("status","正在补充标点停顿定位组件，保留原有模型和依赖…"))
+                    subprocess.run([str(python_path()),"-m","pip","install",*DEPENDENCIES],check=True,
+                                   capture_output=True,text=True,timeout=600,
+                                   creationflags=0x08000000 if os.name=="nt" else 0)
+                    marker.write_text(json.dumps(list(DEPENDENCIES)),encoding="utf-8")
                 env=os.environ.copy();env.update(PYTHONIOENCODING="utf-8",PYTHONUNBUFFERED="1",HF_HUB_DISABLE_SYMLINKS_WARNING="1")
+                env["YANGNING_PAUSE_CACHE"]=str(local_root()/"models"/"punctuation_alignment")
                 self.process=subprocess.Popen([str(python_path()),"-u",str(self.service_path),str(local_root()/"models")],
                     stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding="utf-8",errors="replace",bufsize=1,env=env,
                     creationflags=0x08000000 if os.name=="nt" else 0)

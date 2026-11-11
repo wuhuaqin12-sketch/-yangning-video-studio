@@ -114,10 +114,15 @@ def ensure_teacher_reference(folder, dataset, env, cli, emit):
 
 def build_notebook(request, teacher_reference_bytes=None):
     worker = Path(__file__).with_name("voxcpm_kaggle_worker.py").read_text(encoding="utf-8")
+    from punctuation_pause import DEPENDENCIES
+    pause_source = Path(__file__).with_name("punctuation_pause.py").read_text(encoding="utf-8")
     install = (
         "import subprocess, sys\nprint('YANGNING_STAGE=dependencies', flush=True)\n"
-        f"subprocess.run([sys.executable, '-m', 'pip', 'install', 'voxcpm=={PACKAGE_VERSION}', 'soundfile'], check=True)\n"
+        f"subprocess.run([sys.executable, '-m', 'pip', 'install', 'torch==2.6.0', 'torchaudio==2.6.0', 'voxcpm=={PACKAGE_VERSION}', 'soundfile', *{DEPENDENCIES!r}], check=True)\n"
     )
+    # Ship the same pause implementation to Kaggle, without a sibling-file assumption.
+    worker = ("import sys, types\n_pause=types.ModuleType('punctuation_pause')\n"
+              "sys.modules['punctuation_pause']=_pause\nexec(" + repr(pause_source) + ",_pause.__dict__)\n" + worker)
     # Data is parsed as JSON, never interpolated into executable Python source.
     setup = "import json\nREQUEST = json.loads(" + repr(json.dumps(request, ensure_ascii=False)) + ")\n"
     if teacher_reference_bytes is not None:
@@ -195,6 +200,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     request["generation_mode"] = "continuous_full_text"
     request["timing_schema"] = 4
     request["reading_pace_policy"] = "natural_gentle_no_timeline"
+    request["punctuation_pause_policy"] = "aligned_punctuation_minimum_v1"
     if srt_cues:
         request["srt_cues"] = srt_cues
         request["srt_timing_policy"] = "source_reference_only"
@@ -225,6 +231,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     manifest = {
         "generation_mode": "continuous_full_text",
         "reading_pace_policy": "natural_gentle_no_timeline",
+        "punctuation_pause_policy": "aligned_punctuation_minimum_v1",
         "job_id": job_id, "username": username, "dataset": dataset, "kernel": kernel,
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",
@@ -376,7 +383,8 @@ def stage_from_log(log):
     matches=re.findall(r"YANGNING_STAGE=([a-z_]+)",text)
     stages={"dependencies":"云端正在安装依赖…","preflight":"云端正在检查GPU和老师原声参考文件…",
             "model_download":"云端正在下载或载入模型…","generation":"云端正在生成音频…",
-            "postprocess":"云端正在执行速度、音量和降噪处理…"}
+            "postprocess":"云端正在执行速度、音量和降噪处理…",
+            "punctuation_alignment":"云端正在定位逗号、句号并补入停顿；首次需下载约1.2GB定位模型…"}
     label=stages.get(matches[-1],"") if matches else ""
     counts=re.findall(r"已生成 (\d+)/(\d+) 个完整语义段",text)
     if label and matches[-1]=="generation" and counts:
@@ -402,6 +410,11 @@ def deliver_result(folder, manifest):
         audit=recipe.get("generation_audit",{})
         if (recipe.get("generation_mode")!="continuous_full_text" or audit.get("model_calls") not in (0,1) or audit.get("eos_observed") is not True):
             raise ValueError("云端未确认全文单次生成并正常结束，未交付可能混入逐句生成的结果。")
+    if manifest.get("punctuation_pause_policy"):
+        from punctuation_pause import POLICY
+        report=recipe.get("punctuation_pauses",{})
+        if report.get("policy")!=POLICY or manifest["punctuation_pause_policy"]!=POLICY:
+            raise ValueError("云端缺少标点停顿修复记录；未将未经补停顿的声音作为新版结果交付。")
     if manifest.get("purpose","full")!="full" and recipe.get("purpose")!=manifest["purpose"]:
         raise ValueError("试听任务类型记录不一致。")
     if manifest.get("pronunciation") and recipe.get("pronunciation") != manifest["pronunciation"]:
@@ -428,7 +441,8 @@ def deliver_result(folder, manifest):
         shutil.copy2(src, temporary)
         os.replace(temporary, dst)
         artifacts[name] = str(dst)
-    for name, suffix in (("reading_text.txt", "_reading_text.txt"), ("pronunciation_plan.json", "_pronunciation_plan.json")):
+    for name, suffix in (("reading_text.txt", "_reading_text.txt"), ("pronunciation_plan.json", "_pronunciation_plan.json"),
+                         ("punctuation_pauses.json", "_punctuation_pauses.json")):
         src = source/name if (source/name).is_file() else folder/name
         if src.is_file():
             dst = target/(prefix+suffix)

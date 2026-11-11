@@ -236,9 +236,9 @@ def continuous_generate(model, text, reference, seed):
 
 
 def request_fingerprint(request):
-    fields=("reading_pace_policy","generation_mode","timing_schema","text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
+    fields=("punctuation_pause_policy","reading_pace_policy","generation_mode","timing_schema","text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
     data={key:request.get(key) for key in fields}
-    data.update(generation_revision=4,reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
+    data.update(generation_revision=5,reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
     if request.get("execution") == "local":
         data.update(execution="local", device=request.get("local_device", "auto"))
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -328,6 +328,8 @@ def run(request, local_context=None):
     output_dir = Path(request.get("output_dir", "/kaggle/working"))
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_path, final_path = output_dir / "yangning_raw.wav", output_dir / "yangning_final.wav"
+    # A failed retry must never expose a previous final WAV as the current result.
+    final_path.unlink(missing_ok=True)
     (output_dir / "script.txt").write_text(request["text"], encoding="utf-8")
     (output_dir / "reading_text.txt").write_text(spoken_text, encoding="utf-8")
     if request.get("pronunciation"):
@@ -446,13 +448,26 @@ def run(request, local_context=None):
     }
     try:
         print("YANGNING_STAGE=postprocess", flush=True)
+        from punctuation_pause import repair_file
+        print("YANGNING_STAGE=punctuation_alignment", flush=True)
+        pause_path=output_dir/"yangning_paused.wav"
+        pause_path.unlink(missing_ok=True)
+        pause_report=repair_file(raw_path,pause_path,spoken_text,request["language"])
+        if pause_report is not None:
+            atomic_json(output_dir/"punctuation_pauses.json",pause_report)
+            recipe["punctuation_pauses"]=pause_report
+        else:
+            recipe["punctuation_pauses"]={"policy":"aligned_punctuation_minimum_v1","boundaries":[],"added_seconds":0.0}
         post = request.get("postprocess",{})
         gain_db=float(post.get("gain_db",0.0))
         if not math.isfinite(gain_db) or not -12 <= gain_db <= 6:
             raise ValueError("音量设置无效。")
-        recipe.update(process_audio(raw_path, final_path, profile["tempo"],gain_db,post.get("light_denoise",True)))
+        recipe.update(process_audio(pause_path if pause_report is not None else raw_path, final_path, profile["tempo"],gain_db,post.get("light_denoise",True)))
+        recipe["raw_before_pauses_seconds"]=total_samples/rate
+        # Whole-utterance timing reflects the inserted pauses, never subtitle deadlines.
+        segment_times=[{"start":0.0,"end":recipe["final_seconds"]}]
         segments=[]
-        scale=recipe["final_seconds"]/(total_samples/rate/profile["tempo"])
+        scale=1.0
         units=[{"text":request["text"],"reading_text":spoken_text}]
         for unit,timing in zip(units,segment_times):
             segments.append({"start":timing["start"]*scale,"end":timing["end"]*scale,"text":unit["text"]})
