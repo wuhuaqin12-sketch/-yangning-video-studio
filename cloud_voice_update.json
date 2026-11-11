@@ -1,11 +1,20 @@
 {
+  "source_revision": "ef4f1e4aa612091084adde06d10817d1e2c514be",
+  "payload_size": 426944,
+  "payload_sha256": "e8981ecc26ff9572acde8b80f3883377caf9e7a67df56e20cb96677b8b71c1fb",
+  "download_size": 117239,
+  "download_sha256": "bdaaeb7017da59b36ef849ebd758754814e9f563103c4cfeac4b01f6662593f2",
   "product": "YangNing Cloud Voice Independent Preview",
-  "sequence": 8,
-  "version": "0.6-preview.1",
-  "source_revision": "5aff527ce154e3f323b740c09e86897f565b4ff8",
+  "version": "0.7-preview.4",
+  "sequence": 12,
   "schema": 1,
-  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/262bfd0bebf045ff70f230b42963a08ae43e46cd/cloud_voice_payload.json",
-  "payload_size": 360939,
-  "payload_sha256": "c16ff4a342b33d7f4441b213e5818223a5d5f35b52f1465b03e598f9f40db0f3",
-  "notes": "新增本机／云端两种生成方式。原用户保留云端；更多设置可检测配置并安装独立本机环境，本机不需要Kaggle凭据。连续本机生成复用模型，可释放内存，保留原声校验、模板、读音、微调和局部修改。首次本机安装需要下载较大依赖和模型；速度与CUDA兼容性需短试听实测。公开更新不包含老师原声，旧电脑没有缓存时需选择原文件或使用私下完整包。"
+  "display_version": "0.7.3",
+  "release_status": "stable",
+  "generation_mode": "continuous_full_text",
+  "reading_pace_policy": "natural_gentle_no_timeline",
+  "punctuation_pause_policy": "aligned_punctuation_minimum_v1",
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/0f1a4ad648ef90b7a1d7c95d100b476d6ba99b44/cloud_voice_payload.json",
+  "release_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/tag/cloudvoice-v0.7.3",
+  "download_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/download/cloudvoice-v0.7.3/YangNing_CloudVoice_0.7.3.zip",
+  "notes": "CloudVoice 0.7.3 标点停顿修复版：全文一次生成、1626原声、默认1.0倍，不赶SRT时间轴。全文生成后声学定位，逗号补足约0.30秒、句号/问号0.60秒、换行0.70秒，已有足够安静停顿不重复增加；不截断声音。首次额外下载约1.2GB停顿定位模型及少量文字组件，已有VoxCPM、设置、模板、原声和历史保留。71项自动检查、六语言各一条真实语音样本、189.72秒真实语音拼接测试通过。实际老师1626长篇听感、Windows启动和真实Kaggle端到端仍待验证。更新重启后重新生成，旧音频不自动改变。"
 }
