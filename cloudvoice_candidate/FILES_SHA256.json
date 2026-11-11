@@ -7,7 +7,7 @@
   "START_CLOUD_VOICE_PREVIEW.bat": "0c4e6e875e8bfab3c4ff13dbd500f139f574373f6dde17bb4d520bf5b4b25603",
   "launch_cloud_voice_preview.ps1": "85d9aa8562a9569b43f197f18a25ddca3f92019f57d704200f6cbd085dfc2882",
   "preview_requirements.txt": "5704b8102251a5429308df923c8387444c38264a3559090e6de561f63ad05a98",
-  "preview_version.json": "5179b6aa444cdd468af6acd69c6a5148df970fd93b99aa4856b110899de62fd5",
+  "preview_version.json": "6d1249d07a2d0c7c75bd469c5810e92b56dda27631f8c486c12c7969368589dc",
   "program/cloud_voice_core.py": "523ff283a62fbe224cbdf9415f55786dbff016e6d579cf7a2bd9d6af9f48dd51",
   "program/cloud_voice_preview.py": "3e34dbc00ed0c0a8f531c72fd88db0299ad9576a2880019101d825003fc0418f",
   "program/cloud_voice_test.py": "5bea7e0b7e48294e91d10e4bfa17bb6c54c210eb2f302f7f4d1105d7a4fc929d",

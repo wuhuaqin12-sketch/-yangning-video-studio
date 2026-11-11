@@ -2,7 +2,7 @@
   "name": "YangNing Cloud Voice Independent Preview",
   "version": "0.7-preview.4",
   "update_sequence": 12,
-  "source_revision": "eda854666ec5cba56018b8d23a753727aba5e566",
+  "source_revision": "ef4f1e4aa612091084adde06d10817d1e2c514be",
   "formal_studio_release": false,
   "local_validation": "Automated regression; real multilingual FLEURS acoustic alignment and silence insertion; see RELEASE_VALIDATION.txt",
   "pending_validation": [
