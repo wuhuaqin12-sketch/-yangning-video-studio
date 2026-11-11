@@ -7,6 +7,7 @@ from pathlib import Path
 from voice_clip_edit import tool, command, probe
 
 STYLE_OPTIONS = {
+    "自然语速不赶读": "comfortable unhurried conversational pace, clear words, natural breathing pauses between phrases and sentences",
     "更柔和": "gentle relaxed delivery, without breathiness or forced emphasis",
     "更连贯": "smooth connected phrasing, retain natural sentence pauses",
     "更平和": "calm even delivery with restrained native intonation",
@@ -19,10 +20,33 @@ STYLE_OPTIONS = {
 
 PRESETS = {
     "自然": [],
+    "自然柔和": ["自然语速不赶读", "更柔和", "更平和"],
     "柔和连贯": ["更柔和", "更连贯", "抑扬少一点"],
     "平和讲课": ["更平和", "更连贯", "像自然讲课"],
     "自定义": None,
 }
+
+
+DEFAULT_NATURAL_STYLES = ["自然语速不赶读", "更柔和", "更平和"]
+
+
+def migrate_natural_pace(settings, languages):
+    """Reset legacy generation speeds once; retain recordings/history and a backup."""
+    if settings.get("natural_pace_standard_version")==1: return False
+    import copy
+    settings["pace_settings_before_natural_v1"]={
+        "tempo_by_language":copy.deepcopy(settings.get("tempo_by_language",{})),
+        "generation_by_language":copy.deepcopy(settings.get("generation_by_language",{}))}
+    tempos=settings.setdefault("tempo_by_language",{})
+    preferences=settings.setdefault("generation_by_language",{})
+    for name in languages:
+        tempos[name]=1.0
+        pref=preferences.setdefault(name,{})
+        pref["tempo"]=1.0
+        pref["styles"]=list(DEFAULT_NATURAL_STYLES)
+    settings["speed_standard_version"]=2
+    settings["natural_pace_standard_version"]=1
+    return True
 
 
 def validate_options(tempo=1.0, gain_db=0.0, denoise=True, styles=None):

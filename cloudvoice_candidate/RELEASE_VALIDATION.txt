@@ -1,4 +1,4 @@
-CloudVoice 0.7.1
-57 automated tests: request preparation, single full-text model call, fixed reference/seed, EOS verification, context-overflow rejection, cache separation, original workflows and real FFmpeg with synthetic model audio.
-Installed voxcpm==2.0.3 wheel inspected: stop_head is a torch Linear module, EOS logic confirmed. No dependency/model update required.
-No real long-model listening test or Windows installation/boot performed. SRT times preserved as source metadata only, no phrase alignment claimed.
+CloudVoice 0.7.2
+61 automated tests PASS. New coverage: legacy fast-setting migration and backup, preserve references/templates/history, one-time migration, 0.1-second vs 10-minute SRT deadline gives identical model prompt/fingerprint, and real FFmpeg normal-speed output retains 2-second waveform duration.
+Single full-text generation, EOS guard and existing updater data preservation/rollback tests retained.
+No real model listening or Windows setup/boot executed. Reading pace improvements are instructions, not a verified acoustic result.

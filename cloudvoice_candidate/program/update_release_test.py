@@ -22,7 +22,7 @@ class UpdateReleaseTests(unittest.TestCase):
     if name=='preview_version.json':
      v=json.loads(content);v['source_revision']=self.revision;content=json.dumps(v).encode()
     files[name]=dict(content=base64.b64encode(content).decode(),sha256=hashlib.sha256(content).hexdigest())
-  meta=dict(product=self.product,sequence=10,version='0.7-preview.2',source_revision=self.revision)
+  meta=dict(product=self.product,sequence=11,version='0.7-preview.3',source_revision=self.revision)
   self.payload=json.dumps(dict(meta,files=files)).encode()
   self.descriptor=dict(meta,schema=1,payload_url=updater.PREFIX+self.revision+'/cloud_voice_payload.json',payload_size=len(self.payload),payload_sha256=hashlib.sha256(self.payload).hexdigest(),notes='test')
  def fetch(self,url,limit):return json.dumps(self.descriptor).encode() if url==updater.CHANNEL_URL else self.payload
@@ -32,7 +32,7 @@ class UpdateReleaseTests(unittest.TestCase):
   self.assertTrue(updater.check_update(self.root,self.fetch)['available'])
   plan=updater.prepare_update(self.root,self.descriptor,self.fetch,prepare_environment=False)
   updater.apply_plan(plan,health_check=False)
-  self.assertEqual(updater.read_current(self.root)['update_sequence'],10)
+  self.assertEqual(updater.read_current(self.root)['update_sequence'],11)
   for name in ('settings.json','program/references/teacher_reference.wav','program/templates/custom.wav','model_cache/weights.bin'):
    self.assertEqual((self.root/name).read_bytes(),b'private user content')
  def test_corrupt_download_does_not_modify_install(self):

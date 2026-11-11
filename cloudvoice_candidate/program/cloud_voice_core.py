@@ -178,7 +178,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     target = Path(output_dir).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
     request = {
-        "timing_schema": 2, "job_id": job_id, "text": text, "language": language, "seed": seed, "requested_seed": requested_seed, "purpose":purpose, "tempo": profile["tempo"],
+        "timing_schema": 4, "job_id": job_id, "text": text, "language": language, "seed": seed, "requested_seed": requested_seed, "purpose":purpose, "tempo": profile["tempo"],
         "reference_path": f"/kaggle/input/{dataset.split('/')[-1]}/1626_reference.wav",
         "postprocess": {"gain_db": options["gain_db"], "light_denoise": options["denoise"]},
     }
@@ -193,7 +193,8 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
         (folder / "reading_text.txt").write_text(request["reading_text"], encoding="utf-8")
     # One utterance for the entire supplied script, regardless of TXT/SRT boundaries.
     request["generation_mode"] = "continuous_full_text"
-    request["timing_schema"] = 3
+    request["timing_schema"] = 4
+    request["reading_pace_policy"] = "natural_gentle_no_timeline"
     if srt_cues:
         request["srt_cues"] = srt_cues
         request["srt_timing_policy"] = "source_reference_only"
@@ -223,6 +224,7 @@ def prepare_job(root, username, dataset, text, language, seed, output_dir, tempo
     })
     manifest = {
         "generation_mode": "continuous_full_text",
+        "reading_pace_policy": "natural_gentle_no_timeline",
         "job_id": job_id, "username": username, "dataset": dataset, "kernel": kernel,
         "language": language, "tempo": profile["tempo"], "output_dir": str(target), "status": "prepared",
         "created_utc": datetime.now(timezone.utc).isoformat(), "cleanup_status": "not_requested",

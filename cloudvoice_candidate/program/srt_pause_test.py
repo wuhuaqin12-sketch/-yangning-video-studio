@@ -36,8 +36,8 @@ class PauseTests(unittest.TestCase):
   self.assertEqual(pause_units('你好，世界。好吗？\n下一句'),['你好，','世界。','好吗？','下一句'])
   seg,w,total=self.assemble([100,100,100],pauses=[.22,.45,.45])
   self.assertEqual(total,970);self.assertEqual(seg[2]['start'],.87)
- def test_fingerprint_changes_when_timings_change(self):
+ def test_timing_metadata_does_not_change_natural_generation(self):
   a=dict(language='英语',text='hello',srt_cues=[dict(start=1,end=2)])
   b=dict(a,srt_cues=[dict(start=2,end=3)])
-  self.assertNotEqual(request_fingerprint(a),request_fingerprint(b))
+  self.assertEqual(request_fingerprint(a),request_fingerprint(b))
 if __name__=='__main__':unittest.main()

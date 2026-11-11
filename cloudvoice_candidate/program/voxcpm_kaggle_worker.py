@@ -14,6 +14,8 @@ from pathlib import Path
 MODEL_ID = "openbmb/VoxCPM2"
 PACKAGE_VERSION = "2.0.3"
 REFERENCE_SHA256 = "9be7f58bb98d61e33a3255a7fd963eda850219f8c8596e716675c078a2d0f0f6"
+NATURAL_PACE_INSTRUCTION = "gentle relaxed narration at a comfortable unhurried conversational pace, clear words, natural breathing pauses between phrases and sentences, let the reading take as long as needed"
+
 PROFILES = {
     "日语": {
         "style": "Warm, gentle Japanese narration, effortless and relaxed delivery, smoothly connected phrases, subtle intonation",
@@ -195,6 +197,11 @@ def generation_blocks(request):
     return [text]
 
 
+def full_reading_prompt(request, profile):
+    # Only prose and voice directions go to the model. Subtitle times never do.
+    return f"({profile['style']}; {NATURAL_PACE_INSTRUCTION}; single speaker, consistent voice throughout){generation_blocks(request)[0]}"
+
+
 def continuous_generate(model, text, reference, seed):
     """One model call, one reference, one seed. Detect missing end-of-speech."""
     import inspect
@@ -229,9 +236,9 @@ def continuous_generate(model, text, reference, seed):
 
 
 def request_fingerprint(request):
-    fields=("generation_mode","timing_schema","srt_cues","unit_pauses","text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
+    fields=("reading_pace_policy","generation_mode","timing_schema","text","reading_text","units","language","seed","tempo","postprocess","delivery_instruction","prosody_reference","pronunciation")
     data={key:request.get(key) for key in fields}
-    data.update(generation_revision=3,reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
+    data.update(generation_revision=4,reference=REFERENCE_SHA256,model=MODEL_ID,package=PACKAGE_VERSION,cfg=2.0,steps=10,max_len=4096,base_profile=profile_for(request["language"],request.get("tempo")),normalize=False,denoise=False,retry=False)
     if request.get("execution") == "local":
         data.update(execution="local", device=request.get("local_device", "auto"))
     return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -388,7 +395,7 @@ def run(request, local_context=None):
             with np.load(target,allow_pickle=False) as data: audio=data["audio"].astype(np.float32)
             print(f"复用已完成段落 {index+1}",flush=True)
         else:
-            generated,generation_audit=continuous_generate(model,f"({profile['style']}, single speaker, consistent voice throughout){block}",reference,seed)
+            generated,generation_audit=continuous_generate(model,full_reading_prompt(request,profile),reference,seed)
             audio = np.asarray(generated,dtype=np.float32).reshape(-1)
             if not audio.size or not np.isfinite(audio).all(): raise RuntimeError(f"第{index+1}段没有返回有效音频。")
             pending=target.with_suffix(".tmp")
@@ -418,6 +425,7 @@ def run(request, local_context=None):
         "timing_warnings": timing_warnings,
         "srt_cues": source_cues,
         "generation_mode": "continuous_full_text",
+        "reading_pace_policy": "natural_gentle_no_timeline",
         "generation_audit": generation_audit,
         "srt_timing_mode": "source_reference_only_continuous_speech" if source_cues else "natural_continuous_speech",
         "job_id": request["job_id"], "purpose":request.get("purpose","full"), "model": MODEL_ID, "package": f"voxcpm=={PACKAGE_VERSION}", "snapshot_revision": snapshot.name,
