@@ -7,6 +7,9 @@ from pathlib import Path
 from voice_clip_edit import tool, command, probe
 
 STYLE_OPTIONS = {
+    "沉稳叙述": "composed reflective narration, grounded and reassuring delivery, no forced low pitch, no breathy whisper",
+    "按语义重音": "restrained emphasis on meaning-bearing words, vary emphasis with sentence meaning rather than stressing every phrase",
+    "完整断句": "complete connected thought groups, keep meaningful phrase boundaries and sentence pauses, avoid choppy word-by-word delivery and abruptly cut word endings",
     "自然语速不赶读": "comfortable unhurried conversational pace, clear words, natural breathing pauses between phrases and sentences",
     "更柔和": "gentle relaxed delivery, without breathiness or forced emphasis",
     "更连贯": "smooth connected phrasing, retain natural sentence pauses",
@@ -19,6 +22,7 @@ STYLE_OPTIONS = {
 }
 
 PRESETS = {
+    "沉稳参考语气": ["自然语速不赶读", "沉稳叙述", "按语义重音", "完整断句"],
     "自然": [],
     "自然柔和": ["自然语速不赶读", "更柔和", "更平和"],
     "柔和连贯": ["更柔和", "更连贯", "抑扬少一点"],

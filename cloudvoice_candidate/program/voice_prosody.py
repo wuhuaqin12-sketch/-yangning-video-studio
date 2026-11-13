@@ -120,10 +120,22 @@ def analyze_template(path):
     pause = float(np.median(gaps)) if len(gaps) else 0.25
     gap_style = "brief natural pauses" if pause < 0.45 else "unhurried natural breathing pauses"
     contour = "subtle, restrained rises and falls" if spread < 5 else "gentle, moderately varied rises and falls without exaggerated emphasis"
-    instruction = f"Smooth connected phrasing, {gap_style}, {contour}, relaxed and gentle delivery"
+    # Summarize the contrast between phrase and sentence gaps, never transfer
+    # absolute pitch, waveform, a speaker embedding, or source sentence timing.
+    pause_quantiles = [float(x) for x in np.percentile(gaps, [25, 50, 75])] if len(gaps) else []
+    varied_gaps = len(gaps) >= 4 and pause_quantiles[2] >= max(0.30, pause_quantiles[0] * 1.5)
+    boundaries = ("shorter pauses inside a thought and more space between complete thoughts"
+                  if varied_gaps else "natural meaningful phrase boundaries")
+    instruction = (f"Smooth connected phrasing, {gap_style}, {boundaries}, {contour}, "
+                   "restrained emphasis guided by meaning, relaxed and gentle delivery; "
+                   "keep words within each thought connected, avoid choppy word-by-word reading")
     return {"method": "aggregate_acoustic_summary_to_text", "source_name": path.name,
             "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "analyzed_seconds": round(len(audio)/16000, 3), "median_internal_pause_seconds": round(pause, 3),
             "relative_pitch_spread_semitones": round(spread, 3), "instruction": instruction,
             "template_waveform_sent_to_model": False, "absolute_pitch_transferred": False,
-            "tempo_changed_by_template": False, "exact_sentence_alignment": False}
+            "tempo_changed_by_template": False, "exact_sentence_alignment": False,
+            "summary_schema": 2, "internal_pause_count": int(len(gaps)),
+            "pause_quartiles_seconds": [round(x, 3) for x in pause_quantiles],
+            "pause_pattern": "contrasting_phrase_boundaries" if varied_gaps else "general_phrase_boundaries",
+            "delivery_effect_verified": False}

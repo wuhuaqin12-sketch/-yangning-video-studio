@@ -150,6 +150,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertAlmostEqual(float(np.max(np.abs(result))),.2*10**(-2/20),delta=.001)
         self.assertLess(float(np.max(np.abs(result[:12000]))),.0001)
 
+    def test_delivery_assist_reaches_request_at_natural_speed(self):
+        from voice_adjust import PRESETS
+        manifest=self.job(tempo=1.0,style_options=PRESETS["沉稳参考语气"])
+        request=json.loads((manifest.parent/"request.json").read_text())
+        self.assertEqual(request["tempo"],1.0)
+        for phrase in ("composed reflective narration", "meaning-bearing words", "complete connected thought groups"):
+            self.assertIn(phrase,request["delivery_instruction"])
+
     def test_generation_options_are_snapshotted_before_submission(self):
         manifest=self.job(tempo=.9,gain_db=-2,light_denoise=False,style_options=["更柔和","更连贯"])
         request=json.loads((manifest.parent/"request.json").read_text())
