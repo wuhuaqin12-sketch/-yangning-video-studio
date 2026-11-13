@@ -146,19 +146,22 @@ def acoustic_alignment(waveform, rate, words):
     return result
 
 
-def insert_pauses(waveform, rate, records, spans):
+def insert_pauses(waveform, rate, records, spans, *, skip_uncertain=False):
     """No samples are dropped or sped up; 3ms fades only at new silence edges."""
     import numpy as np
     audio = np.asarray(waveform,dtype=np.float32)
     if audio.ndim != 1 or not audio.size or not np.isfinite(audio).all() or rate < 8000:
         raise ValueError("停顿处理收到无效音频。")
-    edits, cursor = [], 0
+    edits, skipped, cursor = [], [], 0
     # Prevalidate ALL boundaries before touching any sample.
     for record, following in zip(records, records[1:]):
         left, right = spans[record["last_word"]], spans[following["first_word"]]
         values = [left["start"],left["end"],right["start"],right["end"],left["confidence"],right["confidence"]]
         if (not all(math.isfinite(v) for v in values) or min(left["confidence"],right["confidence"]) < .25
                 or not 0 <= left["start"] < left["end"] <= right["start"] < right["end"] <= len(audio)/rate+.04):
+            if skip_uncertain:
+                skipped.append({"punctuation_after":record["text"],"reason":"low_confidence_or_invalid_alignment"})
+                continue
             raise ValueError("标点前后声音定位可信度不足；已保留完整原音，未按字数猜测或截断声音。")
         lo, hi = round(left["end"]*rate), min(len(audio),round(right["start"]*rate))
         window = max(1, round(.005*rate))
@@ -170,6 +173,9 @@ def insert_pauses(waveform, rate, records, spans):
             cut = (lo+hi)//2
         cut = min(len(audio)-1,max(1,cut))
         if cut <= cursor:
+            if skip_uncertain:
+                skipped.append({"punctuation_after":record["text"],"reason":"non_monotonic_boundary"})
+                continue
             raise ValueError("停顿边界顺序不一致；未修改原始音频。")
         # Count only acoustically quiet time, never the entire alignment gap.
         threshold = max(.001, float(np.sqrt(np.mean(audio.astype(np.float64)**2)))*.10)
@@ -209,6 +215,7 @@ def insert_pauses(waveform, rate, records, spans):
     assert len(result) == len(audio)+added
     return result, {"policy":POLICY,"boundaries":edits,"added_seconds":added/rate,
                     "source_samples":len(audio),"output_samples":len(result),
+                    "skipped_boundaries":skipped,"pause_completion":"partial" if skipped else "complete",
                     "model_calls_for_speech":0,"boundary_fade_ms":3,"listening":"pending"}
 
 
@@ -221,7 +228,7 @@ def repair_file(source, target, text, language):
     audio, rate = sf.read(str(source),dtype="float32")
     words, records = alignment_words(records,language)
     spans = acoustic_alignment(audio,rate,words)
-    repaired, report = insert_pauses(audio,rate,records,spans)
+    repaired, report = insert_pauses(audio,rate,records,spans,skip_uncertain=True)
     report["alignment_words"] = spans
     sf.write(str(target),repaired,rate,subtype="PCM_16")
     return report

@@ -917,6 +917,9 @@ def open_kaggle_voice(app, parent=None):
         try:
             recipe_path=Path(path).with_suffix("").with_name(Path(path).stem+"_recipe.json")
             recipe=json.loads(recipe_path.read_text(encoding="utf-8"))
+            skipped=recipe.get("punctuation_pauses",{}).get("skipped_boundaries",[])
+            if skipped:
+                messagebox.showwarning("音频已保存，部分停顿待检查",f"有{len(skipped)}处标点定位不可靠，已保留这些位置的原有声音和停顿。其余可靠位置已补足停顿。\n没有加速、截断或按字数猜测位置，请试听确认。",parent=win)
             warnings=recipe.get("timing_warnings",[])
             if warnings:
                 messagebox.showwarning("SRT句子超时", "\n".join(f"字幕{w['index']}：超时{w['overflow_seconds']:.2f}秒" for w in warnings)+"\n已保留完整声音，后续段落按需顺延。",parent=win)

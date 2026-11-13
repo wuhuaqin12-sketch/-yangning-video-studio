@@ -36,6 +36,31 @@ class PunctuationPauseTests(unittest.TestCase):
    self.assertTrue(np.all(y[cut+offset:cut+offset+e['added_samples']]==0))
    a=cut;offset+=e['added_samples']
   self.assertTrue(np.array_equal(x[a+fade:],y[a+offset+fade:]))
+ def test_uncertain_boundary_does_not_block_reliable_pauses(self):
+  x,sr,rs,ss=self.fixture();ss[0]['confidence']=.1
+  y,r=insert_pauses(x,sr,rs,ss,skip_uncertain=True)
+  self.assertEqual(len(r['skipped_boundaries']),1)
+  self.assertEqual(len(r['boundaries']),1)
+  self.assertEqual(r['pause_completion'],'partial')
+  self.assertTrue(np.array_equal(y[:round(1.5*sr)],x[:round(1.5*sr)]))
+  self.assertGreater(len(y),len(x))
+ def test_all_uncertain_keeps_every_original_sample(self):
+  x,sr,rs,ss=self.fixture()
+  for span in ss:span['confidence']=.1
+  y,r=insert_pauses(x,sr,rs,ss,skip_uncertain=True)
+  self.assertTrue(np.array_equal(x,y));self.assertEqual(r['added_seconds'],0)
+  self.assertEqual(len(r['skipped_boundaries']),2)
+ def test_real_file_with_low_confidence_still_exports(self):
+  import soundfile as sf
+  x,sr,rs,ss=self.fixture();ss[0]['confidence']=.1
+  with tempfile.TemporaryDirectory() as d:
+   source,target=Path(d)/'raw.wav',Path(d)/'paused.wav'
+   sf.write(source,x,sr,subtype='PCM_16');before=source.read_bytes()
+   with patch('punctuation_pause.acoustic_alignment',return_value=ss):
+    report=repair_file(source,target,'one, two. three.','英语')
+   self.assertTrue(target.is_file());self.assertEqual(source.read_bytes(),before)
+   self.assertEqual(len(report['skipped_boundaries']),1)
+
  def test_existing_long_silence_is_not_added_again(self):
   x,sr,rs,ss=self.fixture();rs[0]['minimum_seconds']=.05;rs[1]['minimum_seconds']=.1
   y,r=insert_pauses(x,sr,rs,ss)
