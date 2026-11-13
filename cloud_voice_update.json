@@ -1,17 +1,17 @@
 {
-  "source_revision": "4d9ac867b05e42e7f2e7d4dbb105a375859c6897",
-  "payload_size": 388938,
-  "payload_sha256": "1d1d9baaac0edeb9bd59ff67249906acf2f775bfa80c27e405803de0fd010f91",
+  "source_revision": "fc38f7df5e4429b09ac855c2d25257da3fff0216",
+  "payload_size": 389898,
+  "payload_sha256": "61fdc9cc5ba2ee8723adb33de14c133237125cb1713b699f1d351e9d9c5c4ebc",
   "product": "YangNing Cloud Voice Independent Preview",
-  "version": "0.7-preview.5",
-  "sequence": 13,
+  "version": "0.7-preview.6",
+  "sequence": 14,
   "schema": 1,
-  "display_version": "0.7.4",
+  "display_version": "0.7.5",
   "release_status": "stable",
   "generation_mode": "continuous_full_text",
   "reading_pace_policy": "natural_gentle_no_timeline",
   "punctuation_pause_policy": "aligned_punctuation_minimum_v1",
-  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/4597b13b10a58ad921fcc5bb42291d9eb5f7e612/cloud_voice_payload.json",
-  "release_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/commit/4d9ac867b05e42e7f2e7d4dbb105a375859c6897",
-  "notes": "CloudVoice 0.7.4：加入沉稳参考语气，支持沉稳叙述、语义重音、完整断句及模板停顿对比摘要。保持1626音色参考、默认1.0倍、全文连续生成及0.7.3标点停顿策略。72项自动测试通过；新1626实际听感和Windows真实启动仍待验证。更新重启后在语气中选择沉稳参考语气，再生成或试听。"
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/d47f6cf434d87f59f8cce06bd42ebbcecf99a839/cloud_voice_payload.json",
+  "release_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/commit/fc38f7df5e4429b09ac855c2d25257da3fff0216",
+  "notes": "CloudVoice 0.7.5：修复标点定位可信度不足导致生成中断。不可靠的位置保留原有声音与停顿，其余可靠位置继续补足，完整导出后提示待检查数量。保留语气辅助、1626音色参考及1.0倍语速。更新重启后，可使用续生成未完成段恢复断点。Windows真实启动和老师音频听感仍待验证。"
 }
