@@ -90,9 +90,9 @@ def show(app, open_path):
     ttk.Label(page,text='日语标题默认 Yuji Boku（佑字 朴）毛笔体。可选本机字体，也可直接输入字体名。',wraplength=780).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
-    for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认70）'),('subtitle_x','中心横向 %（相对老师画面）'),('subtitle_y','中心纵向 %（相对老师画面）'),('subtitle_width','区域宽度 %（相对老师画面）'),('subtitle_height','区域高度 %（相对老师画面）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
+    for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认70）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
     colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='日语字幕默认 Noto Serif CJK JP 明朝体。位置以老师画面计算：0＝左/上，100＝右/下。',wraplength=780).grid(row=9,column=0,columnspan=3,sticky='w',pady=6)
+    ttk.Label(page,text='有背景图时，新字幕固定在老师视频下方的背景区域居中显示。\n两行都留在背景内，长句自动分屏；下方空间不足时会提示调整老师画面大小。\n旧工程和旧样式也使用此位置。没有背景图时沿用视频内字幕位置。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')

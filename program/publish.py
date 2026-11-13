@@ -12,8 +12,10 @@ def canvas_style(opts, stream):
     opts['background']=background
     if background:
         if not Path(background).is_file():raise ValueError('请选择有效的背景图，或清空背景图。')
+        # Old projects/presets must also use the newly requested background area.
+        opts['subtitle_area']='below_video'
         return opts,1080,1920
-    opts.update(video_width=100,video_height=100)
+    opts.update(video_width=100,video_height=100,subtitle_area='video')
     return opts,int(stream['width']),int(stream['height'])
 
 
@@ -21,6 +23,15 @@ def layout(opts, stream, w, h):
     scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
     vx=(w-vw)//2;vy=(h-vh)//2
+    if opts.get('subtitle_area','below_video')=='below_video':
+        # A dedicated rectangle below the teacher: never grow a second line
+        # upward into the source video. Keep the bottom 10% clear as well.
+        size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
+        sh=max(h*.12,2*size*1.4+2*opts['subtitle_outline']+16)
+        sw=w*.84;sx=w/2;top=vy+vh+h*.02
+        if top+sh>h*.90:
+            raise ValueError('老师画面下方不足以放下两行字幕。请减小老师画面最大高度，留出下方背景；字幕不会移入老师画面。')
+        return vw,vh,vx,vy,sw,sh,sx,top+sh/2
     sw=vw*opts['subtitle_width']/100;sh=vh*opts['subtitle_height']/100
     sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100
     if sy-sh/2<vy-.01 or sy+sh/2>vy+vh+.01 or sx-sw/2<vx-.01 or sx+sw/2>vx+vw+.01:
@@ -30,7 +41,10 @@ def layout(opts, stream, w, h):
 
 def make_ass(path,cues,opts,stream,duration,w,h):
     opts=normalize_style(opts)
+    if not cues:opts['subtitle_area']='video'
     vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
+    below=opts['subtitle_area']=='below_video'
+    left,top,right,bottom=sx-sw/2,sy-sh/2,sx+sw/2,sy+sh/2
     sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
     title_size=opts['title_font_size'] or round(h*opts['title_size']/100)
     header=f'''[Script Info]
@@ -48,7 +62,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     sizes=[];shrunk=[];split_cues=[];display_cues=[]
     for ident,a,b,text in cues:
         text=clean(text)
-        available=min(vh*.40,max(sh,sy+sh/2-vy-8))
+        available=sh-2*opts['subtitle_outline']-16 if below else min(vh*.40,max(sh,sy+sh/2-vy-8))
         size=round(sub_size)
         # Reflow imported newlines, preserving spaces between Latin words.
         text=re.sub(r'(?<=[A-Za-z0-9])\n(?=[A-Za-z0-9])',' ',text).replace('\n','')
@@ -73,7 +87,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             styled=styled_lines(text,page,opts)
             plain='\n'.join(''.join(c for _,c in row) for row in page)
             display_cues.append((start,end,plain))
-            header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an2\\pos({sx:.1f},{sy+sh/2:.1f})\\fs{size}\\q2}}{styled}\n'
+            # Clip glyphs and outlines to the background rectangle as a final
+            # guard, including font substitutions with different metrics.
+            clip=f'\\clip({math.ceil(left)},{math.ceil(top)},{math.floor(right)},{math.floor(bottom)})' if below else ''
+            header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an2\\pos({sx:.1f},{bottom-8-opts["subtitle_outline"] if below else bottom:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
     actual_title=None
     if opts['title'].strip():
         tx=w*opts['title_x']/100;ty=h*opts['title_y']/100
@@ -99,6 +116,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     Path(path).write_text(header,encoding='utf-8-sig')
     report=dict(subtitle_requested_px=sub_size,subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
                 title_requested_px=title_size,title_actual_px=actual_title,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
+                subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
                 split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue')
     (Path(path).parent/'layout_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     (Path(path).parent/'publish_subtitles.srt').write_text(

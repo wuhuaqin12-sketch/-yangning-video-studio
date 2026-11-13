@@ -29,7 +29,7 @@ tag='v'+version
 out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
 manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
 package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
-subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','修复成片保存路径选择、路径记忆及已有工程导出位置；保留原有字幕、背景和音频处理功能。'],check=True)
+subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','新字幕移至老师视频下方的背景区域，水平居中；两行均限制在背景内，长句继续自动分屏。旧工程和旧样式也使用新位置；下方空间不足时提示调整老师画面大小，不覆盖老师画面。保留声音、倍速、字幕时间轴和字幕写入开关。安装更新并重启后重新导出，已有视频不会自动改变。'],check=True)
 def gh(*args,**kwargs):return subprocess.run(['gh',*args,'--repo',repo],**kwargs)
 result=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
 if result.returncode==0:
@@ -37,7 +37,7 @@ if result.returncode==0:
         print('This version is already published; existing release left unchanged.')
         sys.exit(0)
 else:
-    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','修复一键生成忽略字幕开关的问题。默认不把新字幕写入画面，可在更多设置中开启；继续另存SRT，保留倍速、定位模型和可选背景/标题设置。下载Windows ZIP后完整解压运行INSTALL.bat；已安装用户可在软件中检查更新。','--draft',check=True)
+    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','新字幕移至老师视频下方的背景区域，水平居中；两行均限制在背景内，长句继续自动分屏。旧工程和旧样式也使用新位置；下方空间不足时提示调整老师画面大小，不覆盖老师画面。保留声音、倍速、字幕时间轴和字幕写入开关。安装更新并重启后重新导出，已有视频不会自动改变。','--draft',check=True)
 gh('release','upload',tag,str(out/('YangNing_VideoStudio_Windows_'+version+'.zip')),str(out/'latest.json'),'--clobber',check=True)
 gh('release','edit',tag,'--draft=false','--latest',check=True)
 print('Release published:',tag)
