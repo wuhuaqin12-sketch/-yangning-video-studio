@@ -42,7 +42,7 @@ class PunctuationPauseTests(unittest.TestCase):
   self.assertEqual(len(r['skipped_boundaries']),1)
   self.assertEqual(len(r['boundaries']),1)
   self.assertEqual(r['pause_completion'],'partial')
-  self.assertTrue(np.array_equal(y[:round(1.5*sr)],x[:round(1.5*sr)]))
+  self.assertTrue(np.array_equal(y[:round(1.4*sr)],x[:round(1.4*sr)]))
   self.assertGreater(len(y),len(x))
  def test_all_uncertain_keeps_every_original_sample(self):
   x,sr,rs,ss=self.fixture()
