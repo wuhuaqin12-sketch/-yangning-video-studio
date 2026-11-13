@@ -23,7 +23,7 @@ class StyleTests(unittest.TestCase):
             path.write_text(json.dumps({'format':'YangNingPublishStyle','version':1,'settings':{'subtitle_y':76}}))
             self.assertEqual(load_preset(path)['subtitle_offset_y'],0)
 
-    def test_background_area_keeps_two_lines_below_teacher(self):
+    def test_background_area_keeps_up_to_five_lines_below_teacher(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'below.ass'
             for stream in ({'width':854,'height':480},{'width':640,'height':480}):
@@ -32,12 +32,12 @@ class StyleTests(unittest.TestCase):
                     make_ass(p,[(1,0,8,text)],{},stream,8,1080,1920)
                     report=json.loads((p.parent/'layout_report.json').read_text())
                     vx,vy,vw,vh=report['video_box'];left,top,right,bottom=report['subtitle_box']
-                    self.assertGreaterEqual(top,vy+vh+38)
+                    self.assertGreaterEqual(top,vy+vh+12)
                     self.assertLessEqual(bottom,1920*.9)
                     self.assertEqual(report['subtitle_center'][0],540)
                     cues=parse_srt(p.parent/'publish_subtitles.srt')
-                    self.assertTrue(any(len(t.splitlines())==2 for _,a,b,t in cues))
-                    self.assertTrue(all(len(t.splitlines())<=2 for _,a,b,t in cues))
+                    self.assertTrue(any(len(t.splitlines())>=3 for _,a,b,t in cues))
+                    self.assertTrue(all(len(t.splitlines())<=5 for _,a,b,t in cues))
                     self.assertIn(r'\clip(',p.read_text(encoding='utf-8-sig'))
 
     def test_old_background_preset_migrates_and_no_background_stays_inline(self):
@@ -115,7 +115,7 @@ class StyleTests(unittest.TestCase):
             self.assertGreaterEqual(report['title_actual_px'],10)
             self.assertIn('本来の姿',p.read_text(encoding='utf-8-sig'))
 
-    def test_long_multilingual_cues_split_two_lines_without_shrinking(self):
+    def test_long_multilingual_cues_split_five_lines_without_shrinking(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'test.ass'
             for language,text in [('ja','心を静めて集中する'*22),('en','Focus your attention inward and stay still. '*12),('fr','Concentrez votre esprit vers l’intérieur. '*12),('id','Tenangkan pikiran dan pusatkan perhatian. '*12)]:
@@ -125,7 +125,8 @@ class StyleTests(unittest.TestCase):
                 self.assertEqual(report['shrunk_cues'],[],language)
                 self.assertGreater(report['display_cue_count'],1,language)
                 cues=parse_srt(path.parent/'publish_subtitles.srt')
-                self.assertTrue(all(len(t.splitlines())<=2 for _,a,b,t in cues),language)
+                self.assertTrue(all(len(t.splitlines())<=5 for _,a,b,t in cues),language)
+                self.assertTrue(any(len(t.splitlines())==5 for _,a,b,t in cues),language)
                 self.assertAlmostEqual(cues[0][1],0,delta=.01)
                 self.assertAlmostEqual(cues[-1][2],12,delta=.01)
 
@@ -143,6 +144,29 @@ class StyleTests(unittest.TestCase):
                 self.assertEqual(report['video_box'][2],1080)
 
 class RenderTests(unittest.TestCase):
+    def test_five_lines_render_fully_below_teacher(self):
+        import numpy as np
+        from PIL import Image
+        with tempfile.TemporaryDirectory(prefix='yn-five-lines-') as d:
+            p=Path(d);cancel=threading.Event()
+            run([executable('ffmpeg'),'-v','error','-y','-f','lavfi','-i','color=c=0x555555:s=640x360:r=10:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-c:v','libx264','-threads','2','-c:a','aac','-shortest',str(p/'in.mp4')],cancel)
+            Image.new('RGB',(1080,1920),'black').save(p/'bg.png')
+            for font,text in [('Noto Serif CJK JP','静かな心で慈悲を育む。'*10),('DejaVu Sans','Keep every subtitle line safely below the teacher. '*12)]:
+                (p/'in.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\n'+text+'\n',encoding='utf8')
+                opts=dict(video=str(p/'in.mp4'),srt=str(p/'in.srt'),background=str(p/'bg.png'),output=str(p),font=font,preview_time=.05)
+                preview=Path(compose(opts,cancel,preview=True))
+                with Image.open(preview) as image:pixels=np.asarray(image.convert('RGB'))
+                report=json.loads((preview.parent/'layout_report.json').read_text());left,top,right,bottom=report['subtitle_box']
+                cues=parse_srt(preview.parent/'publish_subtitles.srt')
+                self.assertEqual(len(cues[0][3].splitlines()),5)
+                self.assertEqual(report['subtitle_actual_px'],[70])
+                ys,xs=np.where((pixels[:,:,0]>200)&(pixels[:,:,1]>200)&(pixels[:,:,2]>200))
+                rows=np.unique(ys);self.assertEqual(1+np.count_nonzero(np.diff(rows)>1),5)
+                self.assertGreater(ys.min(),top+3)
+                self.assertLess(ys.max(),bottom-3)
+                self.assertGreater(ys.min(),report['video_box'][1]+report['video_box'][3])
+                self.assertLess(ys.max(),1920*.9)
+
     def test_actual_vertical_shift_preserves_two_lines_and_teacher(self):
         import numpy as np
         from PIL import Image
@@ -150,7 +174,7 @@ class RenderTests(unittest.TestCase):
             p=Path(d);cancel=threading.Event()
             run([executable('ffmpeg'),'-v','error','-y','-f','lavfi','-i','color=c=0x555555:s=640x360:r=10:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-c:v','libx264','-threads','2','-c:a','aac','-shortest',str(p/'in.mp4')],cancel)
             Image.new('RGB',(1080,1920),'black').save(p/'bg.png')
-            (p/'in.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\nKeep both subtitle lines below the teacher video, safely on the black background.\n')
+            (p/'in.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\nCALM MIND CALM MIND CALM MIND\n')
             opts=dict(video=str(p/'in.mp4'),srt=str(p/'in.srt'),background=str(p/'bg.png'),output=str(p),font='DejaVu Sans',preview_time=.5)
             previous=None;glyph_tops={}
             for offset in (0,100,-400,400):

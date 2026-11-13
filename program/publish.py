@@ -24,14 +24,17 @@ def layout(opts, stream, w, h):
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
     vx=(w-vw)//2;vy=(h-vh)//2
     if opts.get('subtitle_area','below_video')=='below_video':
-        # A dedicated rectangle below the teacher: never grow a second line
-        # upward into the source video. Keep the bottom 10% clear as well.
+        # Grow longer captions downward in the background, up to five lines.
+        # Keep the bottom 10% clear and never grow into the source video.
         size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
-        sh=max(h*.12,2*size*1.4+2*opts['subtitle_outline']+16)
+        padding=2*opts['subtitle_outline']+16
+        sh=max(h*.12,opts.get('_subtitle_rows',2)*size*1.2+padding)
         sw=w*.84;sx=w/2
-        min_top=vy+vh+max(12,h*.00625);max_top=h*.90-sh
-        if min_top>max_top:
-            raise ValueError('老师画面下方不足以放下两行字幕。请减小老师画面最大高度，留出下方背景；字幕不会移入老师画面。')
+        min_top=vy+vh+max(12,h*.00625)
+        room=h*.90-min_top
+        if room<2*size*1.2+padding:
+            raise ValueError('老师画面下方不足以放下字幕。请减小老师画面最大高度，留出下方背景；字幕不会移入老师画面。')
+        sh=min(sh,room);max_top=h*.90-sh
         top=max(min_top,min(vy+vh+h*.02+opts.get('subtitle_offset_y',0),max_top))
         return vw,vh,vx,vy,sw,sh,sx,top+sh/2
     sw=vw*opts['subtitle_width']/100;sh=vh*opts['subtitle_height']/100
@@ -41,13 +44,26 @@ def layout(opts, stream, w, h):
     return vw,vh,vx,vy,sw,sh,sx,sy
 
 
+def subtitle_lines(text,opts,size,width):
+    text=clean(text)
+    text=re.sub(r'(?<=[A-Za-z0-9])\n(?=[A-Za-z0-9])',' ',text).replace('\n','')
+    width_factor=.82 if opts['font']=='Noto Serif CJK JP' else 1.1
+    columns=(width-12)/(size*width_factor)
+    if columns<1:
+        raise ValueError('字幕区域太窄，连一个字也放不下，请扩大字幕区域宽度。')
+    return text,line_parts(text,columns)
+
+
 def make_ass(path,cues,opts,stream,duration,w,h):
     opts=normalize_style(opts)
     if not cues:opts['subtitle_area']='video'
     vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
     below=opts['subtitle_area']=='below_video'
-    left,top,right,bottom=sx-sw/2,sy-sh/2,sx+sw/2,sy+sh/2
     sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
+    if below and cues:
+        opts['_subtitle_rows']=min(5,max(len(subtitle_lines(text,opts,round(sub_size),sw)[1]) for _,a,b,text in cues))
+        vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
+    left,top,right,bottom=sx-sw/2,sy-sh/2,sx+sw/2,sy+sh/2
     title_size=opts['title_font_size'] or round(h*opts['title_size']/100)
     header=f'''[Script Info]
 ScriptType: v4.00+
@@ -63,17 +79,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 '''
     sizes=[];shrunk=[];split_cues=[];display_cues=[]
     for ident,a,b,text in cues:
-        text=clean(text)
         available=sh-2*opts['subtitle_outline']-16 if below else min(vh*.40,max(sh,sy+sh/2-vy-8))
         size=round(sub_size)
-        # Reflow imported newlines, preserving spaces between Latin words.
-        text=re.sub(r'(?<=[A-Za-z0-9])\n(?=[A-Za-z0-9])',' ',text).replace('\n','')
-        width_factor=.82 if opts['font']=='Noto Serif CJK JP' else 1.1
-        columns=(sw-12)/(size*width_factor)
-        if columns<1:
-            raise ValueError('字幕区域太窄，连一个字也放不下，请扩大字幕区域宽度。')
-        lines=line_parts(text,columns)
-        max_lines=min(2,int(available//(size*1.4)))
+        text,lines=subtitle_lines(text,opts,size,sw)
+        max_lines=min(5,int((available+.001)//(size*(1.2 if below else 1.4))))
         if max_lines<1:
             raise ValueError('字幕区域高度不足一行，请扩大区域高度或减小统一字号。')
         pages=[lines[i:i+max_lines] for i in range(0,len(lines),max_lines)]

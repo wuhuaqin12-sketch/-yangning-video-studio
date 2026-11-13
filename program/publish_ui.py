@@ -103,7 +103,7 @@ def show(app, open_path):
     ttk.Button(position,text='下移',command=lambda:shift_subtitle(10)).pack(side='left',padx=3)
     ttk.Button(position,text='恢复位置',command=lambda:variables['subtitle_offset_y'].set('0')).pack(side='left',padx=3)
     colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='有背景图时，新字幕默认在老师视频下方居中，最多两行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，两行都不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
+    ttk.Label(page,text='有背景图时，新字幕默认在老师视频下方居中，最多5行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，字幕不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')
@@ -166,7 +166,7 @@ def show(app, open_path):
         msg.set('正在生成封面；完成后自动打开。');app.worker(work)
     ttk.Button(page,text='预览 / 导出封面',command=cover_preview).grid(row=5,column=0,columnspan=2,sticky='w',pady=8)
     line=ttk.Frame(box);line.pack(fill='x',pady=5)
-    ttk.Label(line,text='所有语言字幕统一字号；最多两行，超长字幕自动分屏。').pack(side='left')
+    ttk.Label(line,text='所有语言字幕统一字号；最多5行，空间不足或超长时自动分屏。').pack(side='left')
     ttk.Label(line,text='预览时间 秒').pack(side='left',padx=(12,3));ttk.Entry(line,textvariable=variables['preview_time'],width=7).pack(side='left')
     msg=tk.StringVar(value='先预览字体、字形、颜色、重点词及位置。字体须包含对应语言的文字。')
     ttk.Label(box,textvariable=msg,wraplength=860).pack(anchor='w',pady=4)
