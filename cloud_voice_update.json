@@ -1,17 +1,17 @@
 {
-  "source_revision": "fc38f7df5e4429b09ac855c2d25257da3fff0216",
-  "payload_size": 389898,
-  "payload_sha256": "61fdc9cc5ba2ee8723adb33de14c133237125cb1713b699f1d351e9d9c5c4ebc",
+  "source_revision": "31ea531fec48651dd6d4c18923cef9a6e8c0348e",
+  "payload_size": 435196,
+  "payload_sha256": "3529574599a540aad2467661ea67307985c8cee7d5823462c9463fa516d6c8ed",
   "product": "YangNing Cloud Voice Independent Preview",
-  "version": "0.7-preview.6",
-  "sequence": 14,
+  "version": "0.7-preview.7",
+  "sequence": 15,
   "schema": 1,
-  "display_version": "0.7.5",
+  "display_version": "0.7.6",
   "release_status": "stable",
   "generation_mode": "continuous_full_text",
   "reading_pace_policy": "natural_gentle_no_timeline",
   "punctuation_pause_policy": "aligned_punctuation_minimum_v1",
-  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/d47f6cf434d87f59f8cce06bd42ebbcecf99a839/cloud_voice_payload.json",
-  "release_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/commit/fc38f7df5e4429b09ac855c2d25257da3fff0216",
-  "notes": "CloudVoice 0.7.5：修复标点定位可信度不足导致生成中断。不可靠的位置保留原有声音与停顿，其余可靠位置继续补足，完整导出后提示待检查数量。保留语气辅助、1626音色参考及1.0倍语速。更新重启后，可使用续生成未完成段恢复断点。Windows真实启动和老师音频听感仍待验证。"
+  "payload_url": "https://raw.githubusercontent.com/wuhuaqin12-sketch/-yangning-video-studio/78bf18915139c8a24ba295c1d1885cbb52f72cf9/cloud_voice_payload.json",
+  "release_url": "https://github.com/wuhuaqin12-sketch/-yangning-video-studio/commit/31ea531fec48651dd6d4c18923cef9a6e8c0348e",
+  "notes": "CloudVoice 0.7.6：修复0.7.5更新包遗漏停顿处理模块的问题，完整包含停顿模块并增加打包清单检查。可靠标点补足停顿，不可靠处保留原音并导出后提醒；不加速、不截断。保留语气辅助和1626原声参考。更新后重启，再点击更多设置中的续生成未完成段。Windows实际启动和老师音频听感仍待验证。"
 }
