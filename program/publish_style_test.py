@@ -6,6 +6,23 @@ from publish import make_ass,layout,compose,preview_cover,canvas_style
 from media import run,executable,probe,parse_srt
 
 class StyleTests(unittest.TestCase):
+    def test_vertical_offset_bounds_and_persistence(self):
+        stream={'width':854,'height':480}
+        default=layout(normalize_style({}),stream,1080,1920)
+        moved=layout(normalize_style({'subtitle_offset_y':100}),stream,1080,1920)
+        self.assertAlmostEqual(moved[-1]-default[-1],100)
+        for offset in (-400,400):
+            vw,vh,vx,vy,sw,sh,sx,sy=layout(normalize_style({'subtitle_offset_y':offset}),stream,1080,1920)
+            self.assertGreaterEqual(sy-sh/2,vy+vh+12)
+            self.assertLessEqual(sy+sh/2,1920*.9)
+        for invalid in (-401,401,float('nan'),float('inf'),'abc'):
+            with self.assertRaises(ValueError):normalize_style({'subtitle_offset_y':invalid})
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'style.json';save_preset(path,{'subtitle_offset_y':110})
+            self.assertEqual(load_preset(path)['subtitle_offset_y'],110)
+            path.write_text(json.dumps({'format':'YangNingPublishStyle','version':1,'settings':{'subtitle_y':76}}))
+            self.assertEqual(load_preset(path)['subtitle_offset_y'],0)
+
     def test_background_area_keeps_two_lines_below_teacher(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'below.ass'
@@ -126,6 +143,30 @@ class StyleTests(unittest.TestCase):
                 self.assertEqual(report['video_box'][2],1080)
 
 class RenderTests(unittest.TestCase):
+    def test_actual_vertical_shift_preserves_two_lines_and_teacher(self):
+        import numpy as np
+        from PIL import Image
+        with tempfile.TemporaryDirectory(prefix='yn-offset-') as d:
+            p=Path(d);cancel=threading.Event()
+            run([executable('ffmpeg'),'-v','error','-y','-f','lavfi','-i','color=c=0x555555:s=640x360:r=10:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-c:v','libx264','-threads','2','-c:a','aac','-shortest',str(p/'in.mp4')],cancel)
+            Image.new('RGB',(1080,1920),'black').save(p/'bg.png')
+            (p/'in.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\nKeep both subtitle lines below the teacher video, safely on the black background.\n')
+            opts=dict(video=str(p/'in.mp4'),srt=str(p/'in.srt'),background=str(p/'bg.png'),output=str(p),font='DejaVu Sans',preview_time=.5)
+            previous=None;glyph_tops={}
+            for offset in (0,100,-400,400):
+                preview=Path(compose({**opts,'subtitle_offset_y':offset},cancel,preview=True))
+                with Image.open(preview) as image:pixels=np.asarray(image.convert('RGB'))
+                report=json.loads((preview.parent/'layout_report.json').read_text())
+                vx,vy,vw,vh=report['video_box'];teacher=pixels[vy:vy+vh,vx:vx+vw]
+                if previous is not None:self.assertTrue(np.array_equal(previous,teacher))
+                previous=teacher.copy()
+                ys,xs=np.where((pixels[:,:,0]>200)&(pixels[:,:,1]>200)&(pixels[:,:,2]>200))
+                self.assertGreater(ys.min(),vy+vh)
+                self.assertLess(ys.max(),1920*.9)
+                rows=np.unique(ys);self.assertEqual(1+np.count_nonzero(np.diff(rows)>1),2)
+                glyph_tops[offset]=ys.min()
+            self.assertAlmostEqual(glyph_tops[100]-glyph_tops[0],100,delta=1)
+
     def test_actual_render_highlights_and_cover(self):
         import numpy as np
         from PIL import Image

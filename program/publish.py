@@ -28,9 +28,11 @@ def layout(opts, stream, w, h):
         # upward into the source video. Keep the bottom 10% clear as well.
         size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
         sh=max(h*.12,2*size*1.4+2*opts['subtitle_outline']+16)
-        sw=w*.84;sx=w/2;top=vy+vh+h*.02
-        if top+sh>h*.90:
+        sw=w*.84;sx=w/2
+        min_top=vy+vh+max(12,h*.00625);max_top=h*.90-sh
+        if min_top>max_top:
             raise ValueError('老师画面下方不足以放下两行字幕。请减小老师画面最大高度，留出下方背景；字幕不会移入老师画面。')
+        top=max(min_top,min(vy+vh+h*.02+opts.get('subtitle_offset_y',0),max_top))
         return vw,vh,vx,vy,sw,sh,sx,top+sh/2
     sw=vw*opts['subtitle_width']/100;sh=vh*opts['subtitle_height']/100
     sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100
@@ -117,6 +119,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     report=dict(subtitle_requested_px=sub_size,subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
                 title_requested_px=title_size,title_actual_px=actual_title,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
+                subtitle_offset_requested_px=opts['subtitle_offset_y'],
+                subtitle_offset_applied_px=round(top-(vy+vh+h*.02),3) if below else 0,
                 split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue')
     (Path(path).parent/'layout_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     (Path(path).parent/'publish_subtitles.srt').write_text(

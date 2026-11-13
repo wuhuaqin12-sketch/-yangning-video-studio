@@ -91,8 +91,19 @@ def show(app, open_path):
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
     for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认70）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
+    ttk.Label(page,text='字幕上下微调（像素）').grid(row=4,column=0,sticky='w',pady=6)
+    position=ttk.Frame(page);position.grid(row=4,column=1,columnspan=2,sticky='w')
+    ttk.Spinbox(position,from_=-400,to=400,increment=10,textvariable=variables['subtitle_offset_y'],width=8).pack(side='left',padx=(0,8))
+    def shift_subtitle(amount):
+        try:value=float(variables['subtitle_offset_y'].get())+amount
+        except ValueError:
+            messagebox.showerror('字幕位置','请填写数字；0为默认位置。',parent=win);return
+        variables['subtitle_offset_y'].set(f'{max(-400,min(400,value)):g}')
+    ttk.Button(position,text='上移',command=lambda:shift_subtitle(-10)).pack(side='left',padx=3)
+    ttk.Button(position,text='下移',command=lambda:shift_subtitle(10)).pack(side='left',padx=3)
+    ttk.Button(position,text='恢复位置',command=lambda:variables['subtitle_offset_y'].set('0')).pack(side='left',padx=3)
     colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='有背景图时，新字幕固定在老师视频下方的背景区域居中显示。\n两行都留在背景内，长句自动分屏；下方空间不足时会提示调整老师画面大小。\n旧工程和旧样式也使用此位置。没有背景图时沿用视频内字幕位置。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
+    ttk.Label(page,text='有背景图时，新字幕默认在老师视频下方居中，最多两行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，两行都不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')

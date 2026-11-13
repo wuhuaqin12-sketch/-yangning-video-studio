@@ -29,7 +29,7 @@ tag='v'+version
 out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
 manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
 package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
-subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','新字幕移至老师视频下方的背景区域，水平居中；两行均限制在背景内，长句继续自动分屏。旧工程和旧样式也使用新位置；下方空间不足时提示调整老师画面大小，不覆盖老师画面。保留声音、倍速、字幕时间轴和字幕写入开关。安装更新并重启后重新导出，已有视频不会自动改变。'],check=True)
+subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','字幕默认在老师视频下方背景区居中，最多两行。新增「标题 / 字幕 / 封面 → 字幕 → 字幕上下微调」：可输入像素值，或点击上移、下移，每次10像素；0恢复默认位置，负数上移、正数下移。到达上下安全边界后自动停止，不覆盖老师画面；保存排版或样式会记住微调值。保留声音、倍速、时间轴和字幕写入开关。安装更新并重启后重新导出。'],check=True)
 def gh(*args,**kwargs):return subprocess.run(['gh',*args,'--repo',repo],**kwargs)
 result=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
 if result.returncode==0:
@@ -37,7 +37,7 @@ if result.returncode==0:
         print('This version is already published; existing release left unchanged.')
         sys.exit(0)
 else:
-    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','新字幕移至老师视频下方的背景区域，水平居中；两行均限制在背景内，长句继续自动分屏。旧工程和旧样式也使用新位置；下方空间不足时提示调整老师画面大小，不覆盖老师画面。保留声音、倍速、字幕时间轴和字幕写入开关。安装更新并重启后重新导出，已有视频不会自动改变。','--draft',check=True)
+    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','字幕默认在老师视频下方背景区居中，最多两行。新增「标题 / 字幕 / 封面 → 字幕 → 字幕上下微调」：可输入像素值，或点击上移、下移，每次10像素；0恢复默认位置，负数上移、正数下移。到达上下安全边界后自动停止，不覆盖老师画面；保存排版或样式会记住微调值。保留声音、倍速、时间轴和字幕写入开关。安装更新并重启后重新导出。','--draft',check=True)
 gh('release','upload',tag,str(out/('YangNing_VideoStudio_Windows_'+version+'.zip')),str(out/'latest.json'),'--clobber',check=True)
 gh('release','edit',tag,'--draft=false','--latest',check=True)
 print('Release published:',tag)

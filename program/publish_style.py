@@ -7,14 +7,14 @@ from pathlib import Path
 
 DEFAULTS = dict(title='', font='Noto Serif CJK JP', title_font='Yuji Boku',
     subtitle_color='#FFFFFF', title_color='#34221B', outline_color='#202020',
-    subtitle_outline=3, title_outline=0, subtitle_area='below_video', subtitle_x=50, subtitle_y=76,
+    subtitle_outline=3, title_outline=0, subtitle_area='below_video', subtitle_offset_y=0, subtitle_x=50, subtitle_y=76,
     subtitle_width=92, subtitle_height=32, font_percent=4.5,
     subtitle_font_size=70, title_font_size=230, title_x=50, title_y=25,
     title_width=94, title_size=12, video_width=100, video_height=76,
     auto_fit=True, keywords='', keyword_color='#E53935',
     keyword_ignore_case=True, keyword_whole_words=False)
 
-LIMITS = {'subtitle_x':(0,100), 'subtitle_y':(0,100),
+LIMITS = {'subtitle_offset_y':(-400,400), 'subtitle_x':(0,100), 'subtitle_y':(0,100),
     'subtitle_width':(5,100), 'subtitle_height':(3,80), 'font_percent':(1,25),
     'title_x':(0,100), 'title_y':(0,100), 'title_width':(5,100),
     'title_size':(1,25), 'video_width':(20,100), 'video_height':(20,100),
