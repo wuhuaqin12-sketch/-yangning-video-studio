@@ -30,7 +30,7 @@ MANAGED={
 }
 REQUIRED={"START_CLOUD_VOICE_PREVIEW.bat","launch_cloud_voice_preview.ps1","preview_requirements.txt",
           "preview_version.json","program/cloud_voice_update.py","program/cloud_voice_version.py",
-          "program/cloud_voice_preview.py","program/kaggle_voice.py"}
+          "program/cloud_voice_preview.py","program/kaggle_voice.py","program/punctuation_pause.py"}
 
 
 def allowed_file(name):

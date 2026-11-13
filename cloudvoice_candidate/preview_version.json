@@ -1,8 +1,8 @@
 {
   "name": "YangNing Cloud Voice Independent Preview",
-  "version": "0.7-preview.6",
-  "update_sequence": 14,
-  "source_revision": "4d9ac867b05e42e7f2e7d4dbb105a375859c6897",
+  "version": "0.7-preview.7",
+  "update_sequence": 15,
+  "source_revision": "fc38f7df5e4429b09ac855c2d25257da3fff0216",
   "formal_studio_release": false,
   "local_validation": "Automated regression; real multilingual FLEURS acoustic alignment and silence insertion; see RELEASE_VALIDATION.txt",
   "pending_validation": [
@@ -15,7 +15,7 @@
   "template_waveform_sent_to_model": false,
   "default_tempo_all_languages": 1.0,
   "release_status": "stable",
-  "display_version": "0.7.5",
+  "display_version": "0.7.6",
   "generation_mode": "continuous_full_text",
   "reading_pace_policy": "natural_gentle_no_timeline",
   "punctuation_pause_policy": "aligned_punctuation_minimum_v1",

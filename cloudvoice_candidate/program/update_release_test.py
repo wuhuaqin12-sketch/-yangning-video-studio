@@ -22,17 +22,33 @@ class UpdateReleaseTests(unittest.TestCase):
     if name=='preview_version.json':
      v=json.loads(content);v['source_revision']=self.revision;content=json.dumps(v).encode()
     files[name]=dict(content=base64.b64encode(content).decode(),sha256=hashlib.sha256(content).hexdigest())
-  meta=dict(product=self.product,sequence=14,version='0.7-preview.6',source_revision=self.revision)
+  meta=dict(product=self.product,sequence=15,version='0.7-preview.7',source_revision=self.revision)
   self.payload=json.dumps(dict(meta,files=files)).encode()
   self.descriptor=dict(meta,schema=1,payload_url=updater.PREFIX+self.revision+'/cloud_voice_payload.json',payload_size=len(self.payload),payload_sha256=hashlib.sha256(self.payload).hexdigest(),notes='test')
  def fetch(self,url,limit):return json.dumps(self.descriptor).encode() if url==updater.CHANNEL_URL else self.payload
+ def test_release_builder_includes_every_runtime_module(self):
+  source=Path(__file__).resolve().parents[2]/'build_cloudvoice_payload.py'
+  spec=importlib.util.spec_from_file_location('release_builder',source)
+  builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
+  payload=builder.build(self.revision)
+  content=json.dumps(payload).encode()
+  descriptor=dict(self.descriptor,sequence=payload['sequence'],version=payload['version'],payload_size=len(content),payload_sha256=hashlib.sha256(content).hexdigest())
+  decoded=updater.validate_payload(content,descriptor)
+  self.assertIn('program/punctuation_pause.py',decoded)
+  self.assertIn(b'skip_uncertain=True',decoded['program/punctuation_pause.py'])
+  for name in decoded:
+   self.assertNotIn('references/',name);self.assertNotIn('templates/',name)
+  del payload['files']['program/punctuation_pause.py']
+  broken=json.dumps(payload).encode();descriptor.update(payload_size=len(broken),payload_sha256=hashlib.sha256(broken).hexdigest())
+  with self.assertRaisesRegex(ValueError,'不完整'):updater.validate_payload(broken,descriptor)
+
  def test_detect_verify_stage_apply_preserves_user_files(self):
   for name in ('settings.json','program/references/teacher_reference.wav','program/templates/custom.wav','model_cache/weights.bin'):
    p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'private user content')
   self.assertTrue(updater.check_update(self.root,self.fetch)['available'])
   plan=updater.prepare_update(self.root,self.descriptor,self.fetch,prepare_environment=False)
   updater.apply_plan(plan,health_check=False)
-  self.assertEqual(updater.read_current(self.root)['update_sequence'],14)
+  self.assertEqual(updater.read_current(self.root)['update_sequence'],15)
   for name in ('settings.json','program/references/teacher_reference.wav','program/templates/custom.wav','model_cache/weights.bin'):
    self.assertEqual((self.root/name).read_bytes(),b'private user content')
  def test_corrupt_download_does_not_modify_install(self):
