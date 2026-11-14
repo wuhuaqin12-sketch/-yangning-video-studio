@@ -53,6 +53,7 @@ class SequencePanel:
             ttk.Label(frame,text='方式：仅文字与描边（标准，不做整块区域修复）').pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x',pady=3)
             ttk.Label(row,text='原字幕行区域 x,y,宽,高').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
+            ttk.Button(row,text='横向扩满（长字幕）',command=lambda m=mode:self.expand_subtitle_roi(m)).pack(side='left',padx=3)
             ttk.Button(row,text='15秒修复预览',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
             ttk.Button(row,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
             row=ttk.Frame(frame);row.pack(fill='x')
@@ -106,18 +107,29 @@ class SequencePanel:
     def toggle_details(self):
         self.details_open.set(not self.details_open.get());self.update()
     def decoration_settings(self):
-        win=tk.Toplevel(self.app.root);win.title('可选：片头译名与片尾免责声明');win.geometry('760x610')
+        win=tk.Toplevel(self.app.root);win.title('可选：原文字定位译名与片尾免责声明');win.geometry(f'820x{max(560,min(730,self.app.root.winfo_screenheight()-100))}')
         tabs=ttk.Notebook(win);tabs.pack(fill='both',expand=True,padx=12,pady=12)
         tail=ttk.Frame(tabs,padding=12)
-        for prefix,tab_name in [('opening_title','片头中文标题下加译名'),('opening_topic','片头末尾「经题」译名')]:
-            page=ttk.Frame(tabs,padding=12);tabs.add(page,text=tab_name)
+        for prefix,tab_name in [('opening_title','文字译名1（如讲义标题）'),('opening_topic','文字译名2（如经题）')]:
+            outer=ttk.Frame(tabs);tabs.add(outer,text=tab_name)
+            canvas=tk.Canvas(outer,highlightthickness=0);scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);canvas.configure(yscrollcommand=scroll.set)
+            scroll.pack(side='right',fill='y');canvas.pack(side='left',fill='both',expand=True)
+            page=ttk.Frame(canvas,padding=12);window=canvas.create_window((0,0),window=page,anchor='nw')
+            page.bind('<Configure>',lambda e,c=canvas:c.configure(scrollregion=c.bbox('all')))
+            canvas.bind('<Configure>',lambda e,c=canvas,i=window:c.itemconfigure(i,width=e.width))
             ttk.Checkbutton(page,text='启用此组译名（保留原中文）',variable=self.v[prefix+'_enabled']).pack(anchor='w',pady=5)
-            for suffix,label in [('original','原中文标题（OCR匹配用）'),('text','译名（可手动输入）')]:
+            for suffix,label in [('original','查找原文字（可任意填写）'),('text','对应语言译文（可手动输入）')]:
                 row=ttk.Frame(page);row.pack(fill='x',pady=5);ttk.Label(row,text=label,width=25).pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_'+suffix]).pack(side='left',fill='x',expand=True)
-            ttk.Label(page,text='留空按当前日语／英语填入《金刚经讲义》或「经题」译名；其他标题请提供译名。\nOCR仅定位，不翻译、不配音、不擦除中文。显示持续整个开始—结束时间段。',wraplength=690).pack(anchor='w',pady=5)
+            ttk.Label(page,text='可输入释迦牟尼佛等任意原文字定位；讲义标题、经题、释迦牟尼佛有日英预填译名，其他词请填译文。\nOCR负责定位和取样，不是通用自动翻译；保留原字，译文持续显示整个时间段。',wraplength=750).pack(anchor='w',pady=5)
             for suffix,label in [('start','显示／OCR范围开始秒'),('end','显示／OCR范围结束秒'),('x','译名中心左右（原画面百分比）'),('y','译名首行顶部（原画面百分比）'),('size','译名字号（横版1080高基准）')]:self.number(page,prefix+'_'+suffix,label)
-            ttk.Button(page,text='本地OCR定位原标题下方（需预览）',command=lambda k=prefix:self.detect_title(k)).pack(anchor='w',pady=8)
-            ttk.Label(page,text='缩小到此标题出现的时间范围再识别；最多采样12帧。结果是估计，可手动改时间与位置。原字移动或渐变时，应预览并调整显示范围。',wraplength=690).pack(anchor='w')
+            row=ttk.Frame(page);row.pack(fill='x',pady=3)
+            ttk.Label(row,text='字体').pack(side='left');ttk.Combobox(row,textvariable=self.v[prefix+'_font'],values=('Yuji Boku','Noto Serif CJK JP'),width=23).pack(side='left',padx=4)
+            ttk.Label(row,text='颜色 #RRGGBB').pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_color'],width=10).pack(side='left',padx=4)
+            ttk.Label(row,text='排版').pack(side='left');ttk.Combobox(row,textvariable=self.v[prefix+'_orientation'],values=('horizontal','vertical'),state='readonly',width=11).pack(side='left',padx=4)
+            ttk.Checkbutton(page,text='定位时参考原字颜色、可见字高与横竖排；字体请手动选择相近款',variable=self.v[prefix+'_auto_style']).pack(anchor='w')
+            ttk.Checkbutton(page,text='按最近定位的原字可见高度显示（取消后使用手动字号）',variable=self.v[prefix+'_match_size']).pack(anchor='w')
+            ttk.Button(page,text='本地OCR定位并参考原字样式（需预览）',command=lambda k=prefix:self.detect_title(k)).pack(anchor='w',pady=6)
+            ttk.Label(page,text='竖排中文：日语译名放在旁边；横排中文：译名放在下方。horizontal横排，vertical竖排。\n字号/颜色取样是估计，不保证识别同款字体；移动、渐变与复杂背景须预览、手动微调。',wraplength=750).pack(anchor='w')
         tabs.add(tail,text='片尾免责声明图片')
         ttk.Checkbutton(tail,text='启用片尾免责声明图片',variable=self.v['disclaimer_enabled']).pack(anchor='w',pady=5)
         row=ttk.Frame(tail);row.pack(fill='x',pady=8)
@@ -148,10 +160,21 @@ class SequencePanel:
         except Exception as e:messagebox.showerror('片头标题定位',str(e))
     def title_detected(self,result,prefix='opening_title'):
         for key,value in result.items():
+            if not self.v[prefix+'_auto_style'].get() and key in ('opening_title_color','opening_title_reference_height','opening_title_reference_advance','opening_title_orientation','opening_title_match_size'):continue
             mapped=key.replace('opening_title_',prefix+'_')
             if mapped in self.v:self.v[mapped].set(value)
         self.v[prefix+'_enabled'].set(True);self.enabled.set(True);self.update()
-        messagebox.showinfo('定位结果待预览','识别到：'+result['recognized']+'\n已填写估计时间和原标题下方位置。请生成范围预览，必要时手动调整。')
+        messagebox.showinfo('定位结果待预览','识别到：'+result['recognized']+'\n已填写估计时间、位置及所选样式取样。请生成范围预览，必要时调整字体与大小。')
+    def expand_subtitle_roi(self,mode):
+        if self.app.busy:return
+        try:
+            source=self.app.v['video'].get();roi=self.layout_vars[mode]['repair_roi'].get()
+            def work():
+                from sequence_vnext import full_width_subtitle_roi
+                value=full_width_subtitle_roi(source,roi,self.app.stop)
+                self.app.events.put(('repair_roi_expanded',mode,value))
+            self.app.worker(work)
+        except Exception as e:messagebox.showerror('扩展字幕行',str(e))
     def preview_range(self):
         win=tk.Toplevel(self.app.root);win.title('预览范围');box=ttk.Frame(win,padding=15);box.pack(fill='both',expand=True)
         self.number(box,'preview_start','从第几秒开始');self.number(box,'preview_seconds','预览秒数（1–60）')

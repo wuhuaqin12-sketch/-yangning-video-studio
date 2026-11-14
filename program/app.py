@@ -530,6 +530,8 @@ class App:
                 elif e[0]=='repair_preview_ready':
                     self.sequence_panel.repair_previews[e[1]]=e[2];open_path(e[3])
                 elif e[0]=='opening_title_detected':self.sequence_panel.title_detected(e[2],e[1])
+                elif e[0]=='repair_roi_expanded':
+                    self.sequence_panel.layout_vars[e[1]]['repair_roi'].set(e[2]);self.log_line('字幕行已横向扩满；上下范围不变，请重新生成15秒预览。')
                 elif e[0]=='sequence_preview_ready':
                     self.sequence_panel.last_preview=e[1];self.sequence_panel.update();open_path(e[2])
                 elif e[0]=='separation_preview_ready':

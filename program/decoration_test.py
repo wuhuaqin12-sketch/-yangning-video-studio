@@ -13,10 +13,10 @@ class DecorationTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name);self.cancel=threading.Event()
-    def make_video(self,duration=1):
+    def make_video(self,duration=1,text='金刚经讲义'):
         im=Image.new('RGB',(640,360),'navy');draw=ImageDraw.Draw(im)
         font=ImageFont.truetype(str(Path(__file__).parent/'fonts/NotoSerifCJKjp-Regular.otf'),48)
-        draw.text((145,90),'金刚经讲义',font=font,fill='white')
+        draw.text((145,90),text,font=font,fill='white')
         image=self.root/'title.png';im.save(image);source=self.root/'title.mp4'
         ff(['-loop','1','-i',image,'-f','lavfi','-i',f'sine=frequency=440:duration={duration}','-t',duration,'-r',30,'-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',source],self.cancel)
         return source
@@ -26,10 +26,14 @@ class DecorationTests(unittest.TestCase):
         self.assertIn('金',r['recognized']);self.assertGreater(r['opening_title_y'],40)
         self.assertLess(r['opening_title_y'],70);self.assertGreater(r['opening_title_x'],35)
         self.assertLess(r['opening_title_x'],65)
+        self.assertGreater(int(r['opening_title_color'][1:3],16),200)
+        self.assertGreater(r['opening_title_reference_height'],5)
         with self.assertRaisesRegex(ValueError,'未识别'):detect(source,'完全不同的标题',0,1,self.cancel)
     def test_languages_and_manual_title_and_persisted_optional_fields(self):
         self.assertIn('金剛経',localized_title('','ja'));self.assertIn('Diamond Sutra',localized_title('','en'))
         self.assertEqual(localized_title('','ja','经题'),'経題');self.assertEqual(localized_title('','en','经题'),'Title of the Sutra')
+        self.assertEqual(localized_title('','ja','释迦牟尼佛'),'釈迦牟尼仏')
+        self.assertEqual(localized_title('','en','釋迦牟尼佛'),'Shakyamuni Buddha')
         self.assertEqual(localized_title('My title','en','其他标题'),'My title')
         with self.assertRaisesRegex(ValueError,'填写'):localized_title('','en','其他标题')
         p=defaults();p.update(opening_title_enabled=True,opening_title_text='Manual',disclaimer_enabled=True,disclaimer_image='missing.png',disclaimer_seconds=8,disclaimer_mode='overlay')
@@ -39,7 +43,7 @@ class DecorationTests(unittest.TestCase):
     def test_two_translated_titles_use_independent_multisecond_intervals(self):
         source=self.make_video(duration=9);p=defaults()
         p.update(opening_title_enabled=True,opening_title_start=.5,opening_title_end=5.5,opening_title_y=50,
-                 opening_topic_enabled=True,opening_topic_start=6,opening_topic_end=8,opening_topic_y=65,_language='ja')
+                 opening_topic_enabled=True,opening_topic_start=6,opening_topic_end=8,opening_topic_y=65,opening_topic_color='#FFFFFF',_language='ja')
         out=compose_segment(source,[],{},'landscape',p,self.root,self.cancel,False,'opening')
         ass=(self.root/'opening_landscape.ass').read_text(encoding='utf-8-sig')
         self.assertIn('0:00:00.50,0:00:05.50,OpeningTranslated',ass)
@@ -51,6 +55,31 @@ class DecorationTests(unittest.TestCase):
             if n in (0,4):self.assertLess(count,10)
             else:self.assertGreater(count,100)
         self.assertAlmostEqual(seconds(out,self.cancel),9,delta=.06)
+    def test_arbitrary_entered_term_is_located(self):
+        source=self.make_video(text='释迦牟尼佛')
+        r=detect(source,'释迦牟尼佛',0,1,self.cancel)
+        self.assertIn('佛',r['recognized']);self.assertGreater(r['opening_title_reference_height'],5)
+    def test_black_vertical_ink_style_and_visible_height_are_rendered(self):
+        from opening_caption import sample_style
+        im=Image.new('RGB',(640,360),'white');draw=ImageDraw.Draw(im)
+        font=ImageFont.truetype(str(Path(__file__).parent/'fonts/NotoSerifCJKjp-Regular.otf'),50)
+        draw.text((100,30),'经',font=font,fill='black');draw.text((100,110),'题',font=font,fill='black')
+        frame=np.array(im)[:,:,::-1].copy()
+        style=sample_style(frame,np.array([[100,40],[155,40],[155,180],[100,180]],dtype=float),2)
+        self.assertEqual(style['orientation'],'vertical');self.assertLess(int(style['color'][1:3],16),80)
+        self.assertGreater(style['reference_height'],7)
+        image=self.root/'ink.png';im.save(image);source=self.root/'ink.mp4'
+        ff(['-loop','1','-i',image,'-t',1,'-r',30,'-c:v','libx264','-pix_fmt','yuv420p',source],self.cancel)
+        p=defaults();p.update(opening_topic_enabled=True,opening_topic_start=0,opening_topic_end=1,opening_topic_match_size=True)
+        for key in ('x','y','color','reference_height','orientation'):p['opening_topic_'+key]=style[key]
+        out=compose_segment(source,[],{},'landscape',p,self.root,self.cancel,False,'opening')
+        ass=(self.root/'opening_landscape.ass').read_text(encoding='utf-8-sig')
+        self.assertIn('Yuji Boku',ass);self.assertIn('経',ass);self.assertIn('題',ass)
+        dest=self.root/'ink_frame.png';ff(['-ss',.5,'-i',out,'-frames:v',1,dest],self.cancel)
+        with Image.open(dest) as rendered:
+            a=np.asarray(rendered.convert('RGB'));x=round(style['x']*1920/100);y=round(style['y']*1080/100)
+            area=a[max(0,y-10):min(1080,y+400),max(0,x-160):min(1920,x+160)]
+            self.assertGreater(np.count_nonzero(np.all(area<100,axis=2)),1000)
     def test_title_is_real_overlay_and_keeps_audio_duration(self):
         source=self.make_video();p=defaults();p.update(opening_title_enabled=True,opening_title_start=.1,opening_title_end=.8,opening_title_y=50,_language='ja')
         out=compose_segment(source,[],{},'landscape',p,self.root,self.cancel,False,'opening')

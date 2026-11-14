@@ -6,7 +6,7 @@ from PIL import Image
 import cv2
 from glyph_removal import remove_frame,process
 from project_vnext import defaults,normalize,file_digest
-from sequence_vnext import ff,repair,layout_repair_key
+from sequence_vnext import ff,repair,layout_repair_key,full_width_subtitle_roi
 from media import probe,Cancelled
 
 class GlyphTests(unittest.TestCase):
@@ -49,6 +49,8 @@ class GlyphTests(unittest.TestCase):
             Image.fromarray(image[:,:,::-1]).save(folder/'source.png')
             ff(['-loop','1','-i',folder/'source.png','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=1','-t',1,'-r',30,'-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',source],cancel)
             digest=file_digest(source);layout=defaults()['layouts']['landscape'];layout['repair_roi']='70,115,170,38'
+            layout['repair_roi']=full_width_subtitle_roi(source,layout['repair_roi'],cancel)
+            self.assertEqual(layout['repair_roi'],'0,115,320,38')
             with self.assertRaisesRegex(ValueError,'确认'):repair(source,layout,folder,cancel)
             out=repair(source,layout,folder,cancel,preview=True,start=.2,length=.5)
             info=probe(out,cancel);streams=info['streams'];v=next(s for s in streams if s['codec_type']=='video')

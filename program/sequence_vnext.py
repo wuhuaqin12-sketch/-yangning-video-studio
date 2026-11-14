@@ -158,6 +158,18 @@ def repair_key(source,roi,temporal=False,method='glyph'):
 def layout_repair_key(source,layout):
     return repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True),layout.get('repair_method','glyph'))
 
+def full_width_subtitle_roi(source,roi,cancel):
+    try:_,y,_,h=map(int,roi.split(','))
+    except Exception as e:raise ValueError('请先填写字幕行区域 x,y,宽,高；扩宽只改变横向，保留你选择的上下范围。') from e
+    from engine import square_pixel_stream
+    stream=square_pixel_stream(next(s for s in probe(source,cancel)['streams'] if s['codec_type']=='video'))
+    rotation=int(stream.get('tags',{}).get('rotate',0))
+    for side in stream.get('side_data_list',[]):
+        if 'rotation' in side:rotation=int(side['rotation'])
+    width,height=(stream['height'],stream['width']) if abs(rotation)%180==90 else (stream['width'],stream['height'])
+    if y<0 or h<2 or y+h>height:raise ValueError('字幕行的上下范围超出原视频。')
+    return f'0,{y},{width},{h}'
+
 def repair(source,layout,folder,cancel,preview=False,start=0,length=15,progress=lambda _:None):
     if not layout['remove_chinese']:return source
     if layout.get('clean_video'):
@@ -174,7 +186,7 @@ def repair(source,layout,folder,cancel,preview=False,start=0,length=15,progress=
     for side in stream.get('side_data_list',[]):
         if 'rotation' in side:rotation=int(side['rotation'])
     if abs(rotation)%180==90:stream['width'],stream['height']=stream['height'],stream['width']
-    if min(x,y)<1 or min(w,h)<2 or x+w>=stream['width']-1 or y+h>=stream['height']-1:raise ValueError('字幕修复区域必须在原视频内部，不能裁掉老师画面。')
+    if min(x,y)<0 or min(w,h)<2 or x+w>stream['width'] or y+h>stream['height']:raise ValueError('字幕处理区域须位于原视频内，不能裁掉老师画面。')
     method=layout.get('repair_method','glyph')
     if method!='glyph':raise ValueError('整块区域修复已移除，请重新生成仅文字与描边预览。')
     if not preview and layout.get('repair_approved')!=layout_repair_key(source,layout):raise ValueError('原中文字幕处理尚未确认。请先看15秒预览；更换方式、区域或素材后需重新确认。')

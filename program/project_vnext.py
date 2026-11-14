@@ -16,6 +16,8 @@ DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',i
 DEFAULTS.update(opening_title_enabled=False,opening_title_original='金刚经讲义',opening_title_text='',opening_title_start=0,opening_title_end=15,opening_title_x=50,opening_title_y=70,opening_title_size=64,
     disclaimer_enabled=False,disclaimer_image='',disclaimer_seconds=5,disclaimer_mode='append')
 DEFAULTS.update(opening_topic_enabled=False,opening_topic_original='经题',opening_topic_text='',opening_topic_start=75,opening_topic_end=87,opening_topic_x=50,opening_topic_y=70,opening_topic_size=64)
+for prefix in ('opening_title','opening_topic'):
+    DEFAULTS.update({prefix+'_font':'Yuji Boku',prefix+'_color':'#FFFFFF' if prefix=='opening_title' else '#101010',prefix+'_orientation':'horizontal',prefix+'_auto_style':True,prefix+'_match_size':False,prefix+'_reference_height':0,prefix+'_reference_advance':0})
 
 def defaults():return json.loads(json.dumps(DEFAULTS))
 
@@ -41,13 +43,20 @@ def normalize(value):
         if not math.isfinite(number) or number<0:raise ValueError('时间必须是非负秒数：'+key)
         result[key]=number
     if not 1<=result['preview_seconds']<=60:raise ValueError('预览长度须在1–60秒之间。')
-    for key in (*[prefix+'_'+suffix for prefix in ('opening_title','opening_topic') for suffix in ('start','end','x','y','size')],'disclaimer_seconds'):
+    for key in (*[prefix+'_'+suffix for prefix in ('opening_title','opening_topic') for suffix in ('start','end','x','y','size','reference_height','reference_advance')],'disclaimer_seconds'):
         result[key]=float(result[key])
         if not math.isfinite(result[key]):raise ValueError('数值无效：'+key)
     for prefix in ('opening_title','opening_topic'):
         if not 0<=result[prefix+'_start']<result[prefix+'_end']:raise ValueError('片头译名结束秒必须大于开始秒。')
         if not 0<result[prefix+'_x']<100 or not 0<result[prefix+'_y']<100:raise ValueError('片头译名位置须在画面0–100%内部。')
-        if not 20<=result[prefix+'_size']<=160:raise ValueError('片头译名字号须在20–160之间。')
+        if not 20<=result[prefix+'_size']<=480:raise ValueError('片头译名字号须在20–480之间。')
+        from publish_style import colour,boolean
+        result[prefix+'_color']=colour(result[prefix+'_color'])
+        if not isinstance(result[prefix+'_font'],str) or not result[prefix+'_font'].strip() or any(c in result[prefix+'_font'] for c in ',\r\n\t'):raise ValueError('请选择有效字体。')
+        if result[prefix+'_orientation'] not in ('horizontal','vertical'):raise ValueError('译名横竖排选项无效。')
+        if not 0<=result[prefix+'_reference_height']<=50:raise ValueError('原字参考高度无效，请重新定位。')
+        if not 0<=result[prefix+'_reference_advance']<=100:raise ValueError('原字参考间距无效，请重新定位。')
+        for suffix in ('auto_style','match_size'):result[prefix+'_'+suffix]=boolean(result[prefix+'_'+suffix])
     if not 2<=result['disclaimer_seconds']<=30:raise ValueError('免责声明显示秒数须在2–30之间。')
     if result['disclaimer_mode'] not in ('append','overlay'):raise ValueError('免责声明方式无效。')
     return result
