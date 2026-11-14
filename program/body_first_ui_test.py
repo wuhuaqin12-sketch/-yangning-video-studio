@@ -62,5 +62,8 @@ class BodyFirstUITests(unittest.TestCase):
         p.v['disclaimer_mode'].set('overlay');p.v['disclaimer_seconds'].set('8')
         self.assertEqual(p.project()['sequence']['disclaimer_seconds'],8)
         self.assertEqual(p.project()['sequence']['disclaimer_mode'],'overlay')
+        p.v['disclaimer_seconds'].set('')
+        with self.assertRaises(ValueError):self.app.settings()
+        p.v['disclaimer_seconds'].set('8')
         dialog.destroy()
 if __name__=='__main__':unittest.main()

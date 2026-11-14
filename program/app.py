@@ -359,6 +359,9 @@ class App:
             self.v[k].set(remember(selected) if k=='output' else selected)
     def settings(self):
         j={k:v.get() for k,v in self.v.items()};j['publish_settings']=dict(self.pending_style);j['trim']=self.auto_cut.get();j.pop('preview_time',None)
+        # Validate current optional fields; never export an earlier cached value
+        # while a currently edited title time/disclaimer duration is invalid.
+        if self.sequence_panel.enabled.get():self.sequence_settings=self.sequence_panel.value()
         if self.sequence_settings:j['sequence']=self.sequence_settings
         if self.sequence_settings and self.sequence_panel.pause_override is not None:j['_pause_override']=self.sequence_panel.pause_override
         if not 1<=float(j['font_percent'])<=15:raise ValueError('字号应为1–15%')
