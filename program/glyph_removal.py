@@ -4,12 +4,15 @@ from pathlib import Path
 import numpy as np
 from media import executable,run,Cancelled
 
-ALGORITHM='white-outline-v1'
+ALGORITHM='white-outline-v2'
 
 def text_mask(frame,roi):
     try:import cv2
     except ImportError as e:raise RuntimeError('仅文字与描边处理缺少OpenCV，请重新运行测试版安装器；不会自动改用整块修复。') from e
-    x,y,w,h=roi
+    x,y,w,h=roi;full_h,full_w=frame.shape[:2]
+    # Work near the caption row, not over every pixel of a large video frame.
+    left=max(0,x-9);top=max(0,y-46);right=min(full_w,x+w+9);bottom=min(full_h,y+h+9)
+    frame=frame[top:bottom,left:right];x-=left;y-=top
     gray=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
     # Current validated scope: near-white lettering with a dark outline.
     white=(np.min(frame,axis=2)>180)&((np.max(frame,axis=2).astype(int)-np.min(frame,axis=2))<70)
@@ -24,12 +27,16 @@ def text_mask(frame,roi):
     protected[a:b,x:x+w]=(gray[a:b,x:x+w]<100).astype(np.uint8)*255
     protected=cv2.dilate(protected,np.ones((11,11),np.uint8))
     mask[protected>0]=0
-    return mask
+    full=np.zeros((full_h,full_w),np.uint8);full[top:bottom,left:right]=mask
+    return full
 
 def remove_frame(frame,roi):
     import cv2
     mask=text_mask(frame,roi)
-    fixed=cv2.inpaint(frame,mask,5,cv2.INPAINT_TELEA) if np.any(mask) else frame.copy()
+    fixed=frame.copy()
+    if np.any(mask):
+        x,y,w,h=roi;left=max(0,x-9);top=max(0,y-9);right=min(frame.shape[1],x+w+9);bottom=min(frame.shape[0],y+h+9)
+        fixed[top:bottom,left:right]=cv2.inpaint(frame[top:bottom,left:right],mask[top:bottom,left:right],5,cv2.INPAINT_TELEA)
     # Enforce the contract, including against unexpected library changes.
     fixed[mask==0]=frame[mask==0]
     return fixed,mask

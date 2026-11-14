@@ -152,7 +152,8 @@ def choose_modes(p,total,source_stream):
 
 def repair_key(source,roi,temporal=False,method='glyph'):
     if method!='glyph':raise ValueError('整块区域修复已移除，请重新生成仅文字与描边预览。')
-    return file_digest(source)+':'+roi+':white-outline-v1'
+    from glyph_removal import ALGORITHM
+    return file_digest(source)+':'+roi+':'+ALGORITHM
 
 def layout_repair_key(source,layout):
     return repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True),layout.get('repair_method','glyph'))
