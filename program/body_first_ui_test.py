@@ -31,6 +31,7 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertEqual(p.layout_vars['landscape']['subtitle_font_size'].get(),'84')
         self.assertEqual(p.layout_vars['portrait']['subtitle_font_size'].get(),'')
         self.assertEqual(p.layout_vars['landscape']['repair_method'].get(),'glyph')
+        self.assertTrue(p.layout_vars['landscape']['repair_full_width'].get())
         self.app.v['video'].set('ordinary.mp4');self.root.update();self.assertFalse(p.enabled.get())
         self.assertLess(self.app.main_button.winfo_rooty()+self.app.main_button.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
         self.assertTrue(callable(self.app.advanced));self.assertTrue(callable(self.app.timing_settings));self.assertTrue(callable(self.app.final_export))

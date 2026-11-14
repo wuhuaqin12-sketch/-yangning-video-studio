@@ -11,8 +11,8 @@ DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',i
     cover_seconds=3,cover_transition='cut',cover_fit='ask',background='',
     combined=False,combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
     preview_start=0,preview_seconds=15,layouts={
-      'landscape':dict(remove_chinese=True,repair_method='glyph',repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='84',style={}),
-      'portrait':dict(remove_chinese=False,repair_method='glyph',repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
+      'landscape':dict(remove_chinese=True,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='84',style={}),
+      'portrait':dict(remove_chinese=False,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
 DEFAULTS.update(opening_title_enabled=False,opening_title_original='金刚经讲义',opening_title_text='',opening_title_start=0,opening_title_end=15,opening_title_x=50,opening_title_y=70,opening_title_size=64,
     disclaimer_enabled=False,disclaimer_image='',disclaimer_seconds=5,disclaimer_mode='append')
 DEFAULTS.update(opening_topic_enabled=False,opening_topic_original='经题',opening_topic_text='',opening_topic_start=75,opening_topic_end=87,opening_topic_x=50,opening_topic_y=70,opening_topic_size=64)
@@ -28,6 +28,9 @@ def normalize(value):
         result['layouts'][mode].update(saved)
         # Preserve explicit sizes; obsolete rectangle approvals must be reviewed again.
         if saved and saved.get('repair_method')!='glyph':result['layouts'][mode]['repair_approved']=''
+        if saved and 'repair_full_width' not in saved:result['layouts'][mode]['repair_approved']=''
+        from publish_style import boolean
+        result['layouts'][mode]['repair_full_width']=boolean(result['layouts'][mode]['repair_full_width'])
         result['layouts'][mode]['repair_method']='glyph'
         result['layouts'][mode]['repair_temporal']=False
     if result['output_mode'] not in ('auto','landscape','portrait','both'):raise ValueError('输出比例选项无效。')

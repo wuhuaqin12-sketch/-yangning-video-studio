@@ -156,7 +156,8 @@ def repair_key(source,roi,temporal=False,method='glyph'):
     return file_digest(source)+':'+roi+':'+ALGORITHM
 
 def layout_repair_key(source,layout):
-    return repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True),layout.get('repair_method','glyph'))
+    key=repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True),layout.get('repair_method','glyph'))
+    return key+':full-width' if layout.get('repair_full_width',True) else key
 
 def full_width_subtitle_roi(source,roi,cancel):
     try:_,y,_,h=map(int,roi.split(','))
@@ -186,6 +187,8 @@ def repair(source,layout,folder,cancel,preview=False,start=0,length=15,progress=
     for side in stream.get('side_data_list',[]):
         if 'rotation' in side:rotation=int(side['rotation'])
     if abs(rotation)%180==90:stream['width'],stream['height']=stream['height'],stream['width']
+    if layout.get('repair_full_width',True):
+        x=0;w=stream['width'];progress(f'字幕区默认横向全宽：0,{y},{w},{h}；上下范围不变。')
     if min(x,y)<0 or min(w,h)<2 or x+w>stream['width'] or y+h>stream['height']:raise ValueError('字幕处理区域须位于原视频内，不能裁掉老师画面。')
     method=layout.get('repair_method','glyph')
     if method!='glyph':raise ValueError('整块区域修复已移除，请重新生成仅文字与描边预览。')

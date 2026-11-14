@@ -67,10 +67,10 @@ class SequencePanel:
             frame=ttk.Frame(self.layouts,padding=6);self.layouts.add(frame,text=label)
             variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items() if key!='style'};self.layout_vars[mode]=variables;self.layout_styles[mode]={}
             ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕（独立开关）',variable=variables['remove_chinese']).pack(anchor='w')
+            ttk.Checkbutton(frame,text='字幕区横向全宽（默认，上下范围保持不变）',variable=variables['repair_full_width']).pack(anchor='w')
             ttk.Label(frame,text='方式：仅文字与描边（标准，不做整块区域修复）').pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x',pady=3)
-            ttk.Label(row,text='原字幕行区域 x,y,宽,高').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
-            ttk.Button(row,text='横向扩满（长字幕）',command=lambda m=mode:self.expand_subtitle_roi(m)).pack(side='left',padx=3)
+            ttk.Label(row,text='字幕行 x,y,宽,高（全宽时忽略x和宽）').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
             ttk.Button(row,text='15秒修复预览',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
             ttk.Button(row,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
             row=ttk.Frame(frame);row.pack(fill='x')

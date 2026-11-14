@@ -38,7 +38,9 @@ class GlyphTests(unittest.TestCase):
             q=p['layouts']['landscape'];q['repair_roi']='20,120,280,30'
             key=layout_repair_key(f,q);q['repair_method']='rectangle'
             with self.assertRaisesRegex(ValueError,'已移除'):layout_repair_key(f,q)
-            q['repair_method']='glyph';q['repair_roi']='20,121,280,29'
+            q['repair_method']='glyph';q['repair_full_width']=False
+            self.assertNotEqual(key,layout_repair_key(f,q))
+            q['repair_full_width']=True;q['repair_roi']='20,121,280,29'
             self.assertNotEqual(key,layout_repair_key(f,q))
     def test_real_stream_preserves_audio_timing_and_source_and_stops(self):
         with tempfile.TemporaryDirectory() as d:
@@ -49,15 +51,15 @@ class GlyphTests(unittest.TestCase):
             Image.fromarray(image[:,:,::-1]).save(folder/'source.png')
             ff(['-loop','1','-i',folder/'source.png','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=1','-t',1,'-r',30,'-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',source],cancel)
             digest=file_digest(source);layout=defaults()['layouts']['landscape'];layout['repair_roi']='70,115,170,38'
-            layout['repair_roi']=full_width_subtitle_roi(source,layout['repair_roi'],cancel)
-            self.assertEqual(layout['repair_roi'],'0,115,320,38')
+            self.assertTrue(layout['repair_full_width'])
+            self.assertEqual(full_width_subtitle_roi(source,layout['repair_roi'],cancel),'0,115,320,38')
             with self.assertRaisesRegex(ValueError,'确认'):repair(source,layout,folder,cancel)
             out=repair(source,layout,folder,cancel,preview=True,start=.2,length=.5)
             info=probe(out,cancel);streams=info['streams'];v=next(s for s in streams if s['codec_type']=='video')
             self.assertEqual((v['width'],v['height']),(320,180));self.assertTrue(any(s['codec_type']=='audio' for s in streams))
             self.assertAlmostEqual(float(info['format']['duration']),.5,delta=.06)
             record=json.loads(Path(out).with_suffix('.glyph.json').read_text(encoding='utf8'))
-            self.assertEqual(record['frames'],15);self.assertGreater(record['changed_mask_pixels'],0)
+            self.assertEqual(record['roi'],[0,115,320,38]);self.assertEqual(record['frames'],15);self.assertGreater(record['changed_mask_pixels'],0)
             self.assertEqual(file_digest(source),digest)
             cancel.set()
             with self.assertRaises(Cancelled):process(source,folder/'cancel.mp4',v,(70,115,170,38),cancel,duration=.5)
