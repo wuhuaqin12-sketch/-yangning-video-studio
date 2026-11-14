@@ -1,0 +1,32 @@
+name: Isolated stable recovery rehearsal
+on:
+  push:
+    branches: [test/intro-main-outro]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  restore-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: choco install ffmpeg --no-progress -y
+      - run: python -m unittest stable_recovery_test desktop_update_test
+        working-directory: program
+      - run: python ci/stable_recovery_windows.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-recovery-evidence
+          path: |
+            ${{ runner.temp }}/YangNingStableRecovery/install/protected/*.json
+            ${{ runner.temp }}/YangNingStableRecovery/install/backups/**/manifest.json
+          if-no-files-found: warn
