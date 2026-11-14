@@ -1,7 +1,7 @@
 name: Isolated stable recovery rehearsal
 on:
   push:
-    branches: [test/intro-main-outro]
+    branches: [test/intro-main-outro, fix/complete-video-audio-gaps]
     paths: ['program/**','ci/**','make_release.py','.github/workflows/recovery-test.yml']
   workflow_dispatch:
 permissions:
@@ -29,6 +29,7 @@ jobs:
           }
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
+      - run: python ci/fetch_noise_model.py
       - name: Fetch and verify pinned original stable archive
         run: python -c "import sys; sys.path.insert(0,'program'); from stable_recovery import preserve_archive; from pathlib import Path; import shutil,tempfile; t=tempfile.TemporaryDirectory(); p=preserve_archive(Path(t.name)); Path('recovery').mkdir(exist_ok=True); shutil.copyfile(p,'recovery/v0.12.11-original.zip'); t.cleanup()"
       - run: python -m unittest sequence_vnext_test simple_ui_test pixel_aspect_test
@@ -44,7 +45,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-test-package
-          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.0.zip
+          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.2.zip
           if-no-files-found: error
           retention-days: 30
   restore-windows:

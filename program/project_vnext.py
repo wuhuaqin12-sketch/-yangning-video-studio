@@ -4,7 +4,7 @@ from pathlib import Path
 from desktop_update import atomic_json
 
 SCHEMA=1
-DEFAULTS=dict(output_mode='auto',intro_enabled=False,intro_video='',intro_mode='original',
+DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',intro_enabled=False,intro_video='',intro_mode='original',
     intro_audio='',intro_srt='',intro_target_srt='',intro_clean_audio=False,
     intro_separation_approved='',intro_separation_model='htdemucs_ft',intro_music_gain=1.0,
     outro_enabled=False,outro_video='',cover='',cover_landscape='',cover_portrait='',
@@ -20,14 +20,14 @@ def normalize(value):
     result=defaults();result.update({k:v for k,v in (value or {}).items() if k!='layouts' and k in result})
     for mode in ('landscape','portrait'):result['layouts'][mode].update((value or {}).get('layouts',{}).get(mode,{}))
     if result['output_mode'] not in ('auto','landscape','portrait','both'):raise ValueError('输出比例选项无效。')
-    if result['intro_mode'] not in ('original','music_voice'):raise ValueError('片头声音选项无效。')
+    if result['intro_mode'] not in ('original','music_voice','external_music'):raise ValueError('片头声音选项无效。')
     result['cover_seconds']=int(result['cover_seconds'])
     if result['cover_seconds'] not in (2,3,5):raise ValueError('封面时长请选择2、3或5秒。')
     if result['cover_transition'] not in ('cut','dissolve'):raise ValueError('封面转场无效。')
     if result['cover_fit'] not in ('ask','contain','crop'):raise ValueError('封面适配方式无效。')
     result['intro_music_gain']=float(result['intro_music_gain'])
     if not math.isfinite(result['intro_music_gain']) or not 0<=result['intro_music_gain']<=2:raise ValueError('片头音乐音量倍数须在0–2之间。')
-    for key in ('combined_intro_end','combined_outro_start','combined_audio_split','preview_start','preview_seconds'):
+    for key in ('background_audio_offset','combined_intro_end','combined_outro_start','combined_audio_split','preview_start','preview_seconds'):
         number=float(result[key])
         if not math.isfinite(number) or number<0:raise ValueError('时间必须是非负秒数：'+key)
         result[key]=number
@@ -40,7 +40,7 @@ def media_paths(job):
     for k in ('intro_video','intro_audio','intro_srt','intro_target_srt'):
         if p['intro_enabled'] and p.get(k):result[k]=p[k]
     if p['outro_enabled'] and p['outro_video']:result['outro_video']=p['outro_video']
-    for k in ('cover','cover_landscape','cover_portrait','background'):
+    for k in ('cover','cover_landscape','cover_portrait','background','background_audio'):
         if p[k]:result[k]=p[k]
     for mode in ('landscape','portrait'):
         if p['layouts'][mode].get('clean_video'):result[mode+'_clean_video']=p['layouts'][mode]['clean_video']
@@ -60,7 +60,7 @@ def load_project(path):
         return str((base/value).resolve())
     for key in ('video','audio','source_srt','target_srt','audio_reference_srt','output'):
         if job.get(key):job[key]=absolute(job[key])
-    for key in ('intro_video','intro_audio','intro_srt','intro_target_srt','outro_video','cover','cover_landscape','cover_portrait','background'):
+    for key in ('intro_video','intro_audio','intro_srt','intro_target_srt','outro_video','cover','cover_landscape','cover_portrait','background','background_audio'):
         if job['sequence'].get(key):job['sequence'][key]=absolute(job['sequence'][key])
     for layout in job['sequence']['layouts'].values():
         if layout.get('clean_video'):layout['clean_video']=absolute(layout['clean_video'])

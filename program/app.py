@@ -61,6 +61,10 @@ class App:
         for text,command in [('降噪 / 人声分离 / 试听',self.sound_settings),('停顿 / 速度',self.timing_settings),('标题 / 字幕 / 封面',self.publish)]:ttk.Button(quick,text=text,command=command).pack(side='left',padx=5)
         from next_ui import SequencePanel
         self.sequence_panel=SequencePanel(self,pane)
+        ttk.Label(form,text='背景音乐（可选，已去人声）').grid(row=8,column=0,sticky='w',pady=6)
+        ttk.Entry(form,textvariable=self.sequence_panel.v['background_audio']).grid(row=8,column=1,sticky='ew')
+        ttk.Button(form,text='选择',command=self.sequence_panel.pick_background_audio).grid(row=8,column=2,padx=(6,0))
+        ttk.Button(form,text='背景音乐用途 / 音量',command=self.sequence_panel.background_audio_settings).grid(row=9,column=1,sticky='w',pady=4)
         self.target_label=ttk.Label(form,text='独立配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
@@ -426,7 +430,7 @@ class App:
         try:j=self.current(True);folder=Path(j['analysis'])
         except Exception:messagebox.showinfo('先分析','请选中已完成分析的任务。');return
         if j.get('sequence'):
-            try:folder=Path(json.loads((folder/'report.json').read_text())['body_analysis'])
+            try:folder=Path(json.loads((folder/'report.json').read_text(encoding='utf8'))['body_analysis'])
             except Exception:messagebox.showinfo('先处理正文','请先完成新版项目预览，再试听正文配音。');return
         if (folder/'clean_project.json').is_file():self.clean_review();return
         def go():
@@ -437,7 +441,7 @@ class App:
         if self.busy:return
         try:
             j=self.current(True);base=Path(j['analysis'])
-            if j.get('sequence'):base=Path(json.loads((base/'report.json').read_text())['body_analysis'])
+            if j.get('sequence'):base=Path(json.loads((base/'report.json').read_text(encoding='utf8'))['body_analysis'])
             path=base/'pause_plan.csv';rows=import_plan(path)
         except Exception:messagebox.showinfo('先分析','请先分析选中的任务。');return
         win=tk.Toplevel(self.root);win.title('停顿表 · 双击修改，取消行即可保留原停顿');win.geometry('900x420')

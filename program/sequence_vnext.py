@@ -25,7 +25,7 @@ def aligned(job,folder,cancel,progress):
     key=processing_key(j);cache=folder/'processing_cache'/key;cache.mkdir(parents=True,exist_ok=True)
     index=cache/'index.json'
     if index.is_file():
-        record=json.loads(index.read_text());candidate=Path(record['folder'])
+        record=json.loads(index.read_text(encoding='utf8'));candidate=Path(record['folder'])
         if (candidate/'video.mp4').is_file() and (candidate/'report.json').is_file():
             if record.get('video_sha256')==file_digest(candidate/'video.mp4') and record.get('srt_sha256')==file_digest(candidate/'subtitles.srt'):
                 if record.get('plan_sha256')!=file_digest(candidate/'pause_plan.csv'):
@@ -51,12 +51,31 @@ def target_cues(srt,audio,target,folder,language,cancel,progress):
     if cues[-1][2]>seconds(audio,cancel)+.03:raise ValueError('片头配音字幕超出音频时长。')
     return refs,cues
 
+def imported_background(p,source,folder,cancel,progress):
+    path=valid_file(p['background_audio'],'已经去人声的背景音频')
+    meta=probe(path,cancel);track=next((x for x in meta['streams'] if x['codec_type']=='audio'),None)
+    if not track:raise ValueError('所选背景音乐文件没有音轨。')
+    audio_length=float(track.get('duration',meta['format']['duration']))
+    length=seconds(source,cancel);offset=p['background_audio_offset'];available=audio_length-offset
+    if available+.12<length:raise ValueError(f'背景音频可用{available:.2f}秒，片头需要{length:.2f}秒。请提供足够长的纯音乐；不会自动循环或变速。')
+    progress(f'导入外部背景音乐，仅用于片头{length:.2f}秒；替换该段原声，不执行人声分离')
+    out=folder/'imported_background.wav'
+    ff(['-ss',offset,'-i',path,'-vn','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={length},atrim=duration={length}','-c:a','pcm_s16le',out],cancel)
+    return str(out)
+
 def opening(job,p,folder,cancel,progress):
     source=valid_file(p['intro_video'],'片头视频')
-    if p['intro_mode']=='original':return source,[]
+    if p['intro_mode']=='original':
+        if p.get('background_audio'):raise ValueError('已导入背景音乐，请选择使用导入背景音乐或替换讲话模式；保留全部原声不会混用外部音乐。')
+        return source,[]
+    background=imported_background(p,source,folder,cancel,progress) if p.get('background_audio') else None
+    if p['intro_mode']=='external_music':
+        if not background:raise ValueError('请选择已经去人声的背景音乐文件。')
+        out=folder/'intro_external_music.mp4'
+        ff(['-i',source,'-i',background,'-map','0:v:0','-map','1:a:0','-c:v','copy','-af',f'volume={p["intro_music_gain"]}','-c:a','aac','-b:a','192k',out],cancel)
+        return str(out),[]
     audio=valid_file(p['intro_audio'],'片头配音');srt=valid_file(p['intro_srt'],'片头SRT')
-    background=None
-    if not p['intro_clean_audio']:
+    if not background and not p['intro_clean_audio']:
         token=file_digest(source)+':'+p['intro_separation_model']
         if p['intro_separation_approved']!=token:raise ValueError('片头中文与音乐仍混合时，请先执行20秒背景声分离试听并确认结果，或提供已去人声的片头。当前未经听审的分离不能直接导出。')
         from background_separation import separate
@@ -236,7 +255,10 @@ def concat_clips(clips,out,folder,cancel):
     ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c:v','copy','-af','aresample=48000:async=1:first_pts=0','-c:a','aac','-b:a','192k','-movflags','+faststart',out],cancel)
 
 def process(job,cancel,progress=lambda s:None,preview=False):
-    p=normalize(job.get('sequence'));output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
+    p=normalize(job.get('sequence'))
+    if p.get('background_audio') and not (p['intro_enabled'] or (p['combined'] and p['combined_intro_end']>0)):
+        raise ValueError('外部背景音乐当前用于片头。请启用独立片头，或在完整视频模式中填写片头结束秒。')
+    output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
     folder=Path(tempfile.mkdtemp(prefix='YangNing_Next_',dir=output))
     cache_root=output/'.yangning_cache';cache_root.mkdir(exist_ok=True)
     atomic_json(folder/'project.json',{'schema':1,'job':job})
