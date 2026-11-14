@@ -9,8 +9,8 @@ class SimpleUITests(unittest.TestCase):
     def test_main_button_and_advanced_controls(self):
         src=Path(__file__).with_name('app.py').read_text(encoding='utf8')
         self.assertIn("text='一键生成视频',command=self.one_click_simple",src)
-        self.assertIn("text='降噪 / 人声分离 / 试听'",src)
-        self.assertIn("text='标题 / 字幕 / 封面'",src)
+        self.assertIn("'降噪 / 人声分离 / 试听'",src)
+        self.assertIn("'标题 / 字幕 / 封面'",src)
         self.assertIn("burn=False",src)
         self.assertIn("text='把新字幕写入视频画面'",src)
         self.assertNotIn("self.v['burn'].set(True)",src)

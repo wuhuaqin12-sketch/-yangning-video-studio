@@ -77,7 +77,7 @@ def opening(job,p,folder,cancel,progress):
     # Lower background music only while narration is present, preserving the
     # original full-length music track; no global mute or fake denoising.
     music_index=2 if background else 0
-    filters=[f'[{music_index}:a]aresample=48000,aformat=channel_layouts=stereo[music]',f'[1:a]asplit={len(segments)}'+''.join(f'[a{i}]' for i in range(len(segments)))]
+    filters=[f'[{music_index}:a]aresample=48000,aformat=channel_layouts=stereo,volume={p["intro_music_gain"]}[music]',f'[1:a]asplit={len(segments)}'+''.join(f'[a{i}]' for i in range(len(segments)))]
     for i,(a,b,start) in enumerate(segments):filters.append(f'[a{i}]atrim=start={a}:end={b},asetpts=PTS-STARTPTS,adelay={round(start*1000)}:all=1[v{i}]')
     filters.append(''.join(f'[v{i}]' for i in range(len(segments)))+f'amix=inputs={len(segments)}:normalize=0:duration=longest,apad=whole_dur={duration},atrim=duration={duration},asplit=2[voice][key]')
     filters.append('[music][key]sidechaincompress=threshold=0.025:ratio=5:attack=20:release=300[duck]')

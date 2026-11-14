@@ -6,7 +6,7 @@ from desktop_update import atomic_json
 SCHEMA=1
 DEFAULTS=dict(output_mode='auto',intro_enabled=False,intro_video='',intro_mode='original',
     intro_audio='',intro_srt='',intro_target_srt='',intro_clean_audio=False,
-    intro_separation_approved='',intro_separation_model='htdemucs_ft',
+    intro_separation_approved='',intro_separation_model='htdemucs_ft',intro_music_gain=1.0,
     outro_enabled=False,outro_video='',cover='',cover_landscape='',cover_portrait='',
     cover_seconds=3,cover_transition='cut',cover_fit='ask',background='',
     combined=False,combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
@@ -25,6 +25,8 @@ def normalize(value):
     if result['cover_seconds'] not in (2,3,5):raise ValueError('封面时长请选择2、3或5秒。')
     if result['cover_transition'] not in ('cut','dissolve'):raise ValueError('封面转场无效。')
     if result['cover_fit'] not in ('ask','contain','crop'):raise ValueError('封面适配方式无效。')
+    result['intro_music_gain']=float(result['intro_music_gain'])
+    if not math.isfinite(result['intro_music_gain']) or not 0<=result['intro_music_gain']<=2:raise ValueError('片头音乐音量倍数须在0–2之间。')
     for key in ('combined_intro_end','combined_outro_start','combined_audio_split','preview_start','preview_seconds'):
         number=float(result[key])
         if not math.isfinite(number) or number<0:raise ValueError('时间必须是非负秒数：'+key)

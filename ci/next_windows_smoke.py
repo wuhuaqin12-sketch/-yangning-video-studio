@@ -11,6 +11,11 @@ def main():
     import tkinter as tk
     from app import App
     root=tk.Tk();app=App(root);panel=app.sequence_panel
+    def widgets(parent):
+        for child in parent.winfo_children():
+            yield child;yield from widgets(child)
+    labels=[w.cget('text') for w in widgets(root) if w.winfo_class()=='TButton']
+    for label in ('降噪 / 人声分离 / 试听','停顿 / 速度','标题 / 字幕 / 封面'):assert labels.count(label)==1
     assert app.v['burn'].get() is False
     panel.enabled.set(True);panel.v['intro_enabled'].set(True);panel.v['outro_enabled'].set(True)
     panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
