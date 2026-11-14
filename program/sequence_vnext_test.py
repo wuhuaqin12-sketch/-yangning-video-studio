@@ -65,6 +65,21 @@ class RenderTests(unittest.TestCase):
         data=probe(out,self.cancel);v=next(x for x in data['streams'] if x['codec_type']=='video')
         self.assertEqual((v['width'],v['height']),(1080,1920));self.assertGreater(float(data['format']['duration']),1.5)
         ass=(self.root/'body_portrait.ass').read_text();self.assertIn('金剛経',ass);self.assertIn('\\clip',ass)
+    def test_short_opening_voice_keeps_full_music_and_join_timestamps(self):
+        voice=self.root/'voice.wav'
+        s.ff(['-f','lavfi','-i','sine=frequency=880:duration=0.2',voice],self.cancel)
+        refs=self.root/'head.srt';s.write_srt(refs,[(1,.1,.3,'試聴')])
+        timing=self.root/'voice.srt';s.write_srt(timing,[(1,0,.18,'試聴')])
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='music_voice',intro_audio=str(voice),intro_srt=str(refs),intro_target_srt=str(timing),intro_clean_audio=True)
+        mixed,_=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        streams=probe(mixed,self.cancel)['streams'];a=next(x for x in streams if x['codec_type']=='audio')
+        self.assertAlmostEqual(float(a['duration']),.8,delta=.03)
+        joined=self.root/'continuous.mp4';s.concat_clips([mixed,self.clip],joined,self.root,self.cancel)
+        from media import run,executable
+        packets=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-of','json',str(joined)],self.cancel))['packets']
+        self.assertLess(max(float(x.get('duration_time',0)) for x in packets),.05)
+        times=[float(x['pts_time']) for x in packets];self.assertLess(max(b-a for a,b in zip(times,times[1:])),.05)
+
     def test_repair_needs_review_and_never_crops(self):
         q=p.defaults()['layouts']['landscape'];q['repair_roi']='20,120,280,30'
         with self.assertRaisesRegex(ValueError,'确认'):s.repair(str(self.clip),q,self.root,self.cancel)

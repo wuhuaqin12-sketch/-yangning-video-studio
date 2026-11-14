@@ -77,10 +77,13 @@ def opening(job,p,folder,cancel,progress):
     # Lower background music only while narration is present, preserving the
     # original full-length music track; no global mute or fake denoising.
     music_index=2 if background else 0
-    filters=[f'[{music_index}:a]aresample=48000,aformat=channel_layouts=stereo,volume={p["intro_music_gain"]}[music]',f'[1:a]asplit={len(segments)}'+''.join(f'[a{i}]' for i in range(len(segments)))]
+    filters=[f'[{music_index}:a]aresample=48000,aformat=channel_layouts=stereo,volume={p["intro_music_gain"]},apad=whole_dur={duration},atrim=duration={duration}[music]',f'[1:a]asplit={len(segments)}'+''.join(f'[a{i}]' for i in range(len(segments)))]
     for i,(a,b,start) in enumerate(segments):filters.append(f'[a{i}]atrim=start={a}:end={b},asetpts=PTS-STARTPTS,adelay={round(start*1000)}:all=1[v{i}]')
     filters.append(''.join(f'[v{i}]' for i in range(len(segments)))+f'amix=inputs={len(segments)}:normalize=0:duration=longest,apad=whole_dur={duration},atrim=duration={duration},asplit=2[voice][key]')
-    filters.append('[music][key]sidechaincompress=threshold=0.025:ratio=5:attack=20:release=300[duck]')
+    # The compressor ends when its key ends. Keep a silent key beyond the
+    # complete music track so a short narration cannot truncate the music.
+    filters.append(f'[key]apad=pad_dur={duration}[fullkey]')
+    filters.append('[music][fullkey]sidechaincompress=threshold=0.025:ratio=5:attack=20:release=300[duck]')
     filters.append('[duck][voice]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.89:level=0:latency=1[mix]')
     dest=folder/'intro_mixed.mp4'
     inputs=['-i',source,'-i',audio]+(['-i',background] if background else [])
@@ -207,7 +210,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     has_audio=any(s['codec_type']=='audio' for s in probe(source,cancel)['streams'])
     if not has_audio:inputs+=['-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={duration}']
     audio_index=0 if has_audio else (2 if p['background'] else 1)
-    ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af','aresample=48000,aformat=channel_layouts=stereo','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k','-t',duration,out],cancel,cwd=folder)
+    ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={duration},atrim=duration={duration}','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k','-t',duration,out],cancel,cwd=folder)
     return out
 
 def cover_clip(image,mode,p,folder,cancel):
@@ -224,10 +227,13 @@ def cover_clip(image,mode,p,folder,cancel):
     return out
 
 def concat_clips(clips,out,folder,cancel):
+    for clip in clips:
+        streams=probe(clip,cancel)['streams'];v=next(x for x in streams if x['codec_type']=='video');a=next(x for x in streams if x['codec_type']=='audio')
+        if abs(float(v['duration'])-float(a['duration']))>.08:raise RuntimeError('拼接片段的音轨未覆盖全部画面，已停止，避免下一段无声。')
     # Inputs are freshly encoded homogeneous local paths; no user text enters concat syntax.
     listing=folder/('concat_'+uuid.uuid4().hex+'.txt')
     listing.write_text(''.join("file '"+str(Path(p).resolve()).replace("'","'\\''")+"'\n" for p in clips),encoding='utf8')
-    ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c','copy','-movflags','+faststart',out],cancel)
+    ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c:v','copy','-af','aresample=48000:async=1:first_pts=0','-c:a','aac','-b:a','192k','-movflags','+faststart',out],cancel)
 
 def process(job,cancel,progress=lambda s:None,preview=False):
     p=normalize(job.get('sequence'));output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
@@ -273,6 +279,12 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',transition],cancel)
             parts=[transition,*parts[2:]]
         concat_clips(parts,full,folder,cancel)
+        packet_data=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(full)],cancel))['packets']
+        previous=None
+        for packet in packet_data:
+            timestamp=float(packet.get('pts_time',0));span=float(packet.get('duration_time',0))
+            if span>.08 or (previous is not None and timestamp-previous>.08):raise RuntimeError('音频时间戳存在异常缺口，已停止交付。')
+            previous=timestamp
         actual=seconds(full,cancel)
         if abs(actual-offset)>.3:raise RuntimeError('拼接时长检查失败，未标记完成。')
         streams=probe(full,cancel)['streams'];video_stream=next(v for v in streams if v['codec_type']=='video');audio_stream=next(v for v in streams if v['codec_type']=='audio')
