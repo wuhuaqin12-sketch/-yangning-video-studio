@@ -8,9 +8,9 @@ from project_vnext import defaults,normalize,save_project,load_project,preview_k
 class SequencePanel:
     def __init__(self,app,parent):
         self.app=app;self.v={};self.layout_vars={};self.saved_timer=None;self.restoring=True
-        self.repair_previews={};self.last_preview='';self.approved_preview='';self.separation_preview_token=''
+        self.repair_previews={};self.last_preview='';self.approved_preview='';self.separation_preview_token='';self.layout_styles={};self.pause_override=None
         self.enabled=tk.BooleanVar(value=False)
-        self.box=ttk.LabelFrame(parent,text='背景 / 封面 / 横竖版与片头片尾',padding=10);self.box.pack(fill='x',pady=6)
+        self.box=ttk.LabelFrame(parent,text='③ 背景 / 封面 / 横竖版与片头片尾',padding=10);self.box.pack(fill='x',pady=6)
         ttk.Checkbutton(self.box,text='启用新版完整项目流程（关闭时沿用原版正文流程）',variable=self.enabled,command=self.update).pack(anchor='w')
         self.controls=ttk.Frame(self.box)
         self.mode=tk.StringVar(value='智能自动选择');self.v['output_mode']=tk.StringVar(value='auto')
@@ -30,6 +30,7 @@ class SequencePanel:
             ttk.Button(r,text='选择',command=lambda:self.pick(key)).pack(side='left',padx=4)
             return r
         file_row(self.controls,'background','背景图（可选）')
+        self.cover_anchor=ttk.Frame(self.controls);self.cover_anchor.pack(fill='x')
         self.cover_single=file_row(self.controls,'cover','封面图（可选）')
         self.cover_l=file_row(self.controls,'cover_landscape','横版封面图16:9')
         self.cover_p=file_row(self.controls,'cover_portrait','竖版封面图9:16')
@@ -61,7 +62,7 @@ class SequencePanel:
         self.layouts=ttk.Notebook(self.controls);self.layouts.pack(fill='x',pady=5)
         for mode,label in [('landscape','横版设置'),('portrait','竖版设置')]:
             frame=ttk.Frame(self.layouts,padding=6);self.layouts.add(frame,text=label)
-            variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items()};self.layout_vars[mode]=variables
+            variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items() if key!='style'};self.layout_vars[mode]=variables;self.layout_styles[mode]={}
             ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕（与新字幕写入独立）',variable=variables['remove_chinese']).pack(anchor='w')
             ttk.Checkbutton(frame,text='只对修复区域做3帧平滑，减少闪烁（可能出现拖影）',variable=variables['repair_temporal']).pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x',pady=3)
@@ -70,6 +71,9 @@ class SequencePanel:
             ttk.Button(row,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
             row=ttk.Frame(frame);row.pack(fill='x')
             ttk.Label(row,text='新字幕上下偏移（像素）').pack(side='left');ttk.Entry(row,textvariable=variables['subtitle_offset_y'],width=10).pack(side='left',padx=5)
+            for key,label in [('title_y','标题上下位置（百分比，可空）'),('title_font_size','标题字号（像素，可空）'),('subtitle_font_size','新字幕字号（像素，可空）')]:
+                row=ttk.Frame(frame);row.pack(fill='x');ttk.Label(row,text=label).pack(side='left');ttk.Entry(row,textvariable=variables[key],width=12).pack(side='left',padx=5)
+            ttk.Button(frame,text='为此比例保存当前标题 / 字幕完整样式',command=lambda m=mode:self.save_style(m)).pack(anchor='w',pady=3)
             ttk.Label(frame,text='优先选择无字幕原片；低资源区域修复可能模糊/闪烁，不能保证恢复衣服和桌子细节。不是AI连续帧重建。',wraplength=850).pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x')
             ttk.Label(row,text='无字幕原片（可选）').pack(side='left');ttk.Entry(row,textvariable=variables['clean_video']).pack(side='left',fill='x',expand=True)
@@ -96,8 +100,11 @@ class SequencePanel:
     def change_mode(self,event=None):
         self.v['output_mode'].set(dict(zip(('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),('auto','landscape','portrait','both')))[self.mode.get()]);self.update()
     def value(self):
-        p={k:v.get() for k,v in self.v.items()};p['layouts']={m:{k:v.get() for k,v in d.items()} for m,d in self.layout_vars.items()}
+        p={k:v.get() for k,v in self.v.items()};p['layouts']={m:{**{k:v.get() for k,v in d.items()},'style':self.layout_styles[m]} for m,d in self.layout_vars.items()}
         return normalize(p)
+    def save_style(self,mode):
+        self.layout_styles[mode]=dict(self.app.pending_style);self.changed()
+        messagebox.showinfo('样式已分别保存','已为'+('横版' if mode=='landscape' else '竖版')+'保存当前标题和字幕样式。另一比例的样式保持不变。')
     def changed(self):
         try:self.app.sequence_settings=self.value() if self.enabled.get() else {}
         except (ValueError,tk.TclError):return
@@ -107,13 +114,15 @@ class SequencePanel:
     def update(self):
         self.controls.pack(fill='x') if self.enabled.get() else self.controls.pack_forget()
         for row in (self.cover_single,self.cover_l,self.cover_p):row.pack_forget()
-        for row in ((self.cover_l,self.cover_p) if self.v['output_mode'].get()=='both' else (self.cover_single,)):row.pack(fill='x',pady=3,before=self.combined)
+        for row in ((self.cover_l,self.cover_p) if self.v['output_mode'].get()=='both' else (self.cover_single,)):row.pack(fill='x',pady=3,before=self.cover_anchor)
         self.intro.pack(fill='x',pady=5,before=self.combined) if self.v['intro_enabled'].get() else self.intro.pack_forget()
         self.intro_voice.pack(fill='x') if self.v['intro_mode'].get()=='music_voice' else self.intro_voice.pack_forget()
         self.outro.pack(fill='x',pady=5,before=self.combined) if self.v['outro_enabled'].get() else self.outro.pack_forget()
         self.changed()
     def project(self):
-        j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get());return j
+        j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get())
+        if self.pause_override is not None:j['_pause_override']=self.pause_override
+        return j
     def auto_save(self):
         self.saved_timer=None
         try:save_project(self.autosave,self.project())
@@ -136,9 +145,11 @@ class SequencePanel:
             labels={'ja':'日语','en':'英语','fr':'法语','de':'德语','id':'印尼语','zh':'中文','ko':'韩语','es':'西班牙语','pt':'葡萄牙语','it':'意大利语'}
             self.app.language_name.set(labels.get(job.get('language'),'其他语言'))
             self.app.pending_style=job.get('publish_settings') or {}
+            self.pause_override=job.get('_pause_override')
             for key,var in self.v.items():var.set(job['sequence'][key])
             for mode,d in self.layout_vars.items():
                 for key,var in d.items():var.set(job['sequence']['layouts'][mode][key])
+                self.layout_styles[mode]=dict(job['sequence']['layouts'][mode].get('style') or {})
             self.enabled.set(job.get('next_enabled',True));self.mode.set(dict(zip(('auto','landscape','portrait','both'),('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版')))[self.v['output_mode'].get()]);self.update()
             if missing:messagebox.showwarning('素材需要重新选择','以下素材已移动或删除：\n'+'\n'.join(missing.values()))
         except Exception as e:messagebox.showerror('打开项目',str(e))
@@ -187,18 +198,25 @@ class SequencePanel:
         if self.app.busy:return
         try:
             from background_separation import preview
-            source=self.v['intro_video'].get();folder=Path(self.app.v['output'].get())/('背景声试听_'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+            combined=self.v['combined'].get()
+            source=self.app.v['video'].get() if combined else self.v['intro_video'].get();folder=Path(self.app.v['output'].get())/('背景声试听_'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
             model=self.v['intro_separation_model'].get();start=float(self.v['preview_start'].get())
+            head=float(self.v['combined_intro_end'].get()) if combined else 0
+            if combined and not 0<=start<head:raise ValueError('完整视频的背景声试听范围必须在已指定的片头范围内。')
             def work():
                 from project_vnext import file_digest
-                path=preview(source,folder,self.app.stop,self.app.progress,model,start)
-                self.app.events.put(('separation_preview_ready',file_digest(source)+':'+model,path))
+                if combined:
+                    from background_separation import separate
+                    path=separate(source,folder,self.app.stop,self.app.progress,model,limit=min(20,head-start),start=start)
+                else:path=preview(source,folder,self.app.stop,self.app.progress,model,start)
+                self.app.events.put(('separation_preview_ready',file_digest(source)+':'+model+(':intro_end='+str(head) if combined else ''),path))
             self.app.worker(work)
         except Exception as e:messagebox.showerror('背景声试听',str(e))
     def approve_separation(self):
         try:
             from project_vnext import file_digest
-            token=file_digest(self.v['intro_video'].get())+':'+self.v['intro_separation_model'].get()
+            combined=self.v['combined'].get();source=self.app.v['video'].get() if combined else self.v['intro_video'].get()
+            token=file_digest(source)+':'+self.v['intro_separation_model'].get()+(':intro_end='+str(float(self.v['combined_intro_end'].get())) if combined else '')
             if token!=self.separation_preview_token:raise ValueError('请先为当前片头生成20秒背景声分离试听。')
             if messagebox.askyesno('确认分离质量','请确认已听过当前试听，接受中文残留、混响及音乐损伤程度。若不满意，请取消，不会修改原片。'):
                 self.v['intro_separation_approved'].set(token)

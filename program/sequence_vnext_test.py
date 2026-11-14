@@ -31,6 +31,13 @@ class ProjectTests(unittest.TestCase):
             first=p.unique_output(d,'sutra','ja','portrait');first.write_bytes(b'keep')
             second=p.unique_output(d,'sutra','ja','portrait')
             self.assertNotEqual(first,second);self.assertEqual(first.read_bytes(),b'keep')
+    def test_portable_project_resolves_paths_from_its_own_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'assets').mkdir();(root/'assets/body.mp4').write_bytes(b'media')
+            p.save_project(root/'project.json',dict(video='assets/body.mp4',output='output',sequence=p.defaults()))
+            job,missing=p.load_project(root/'project.json')
+            self.assertFalse(missing);self.assertEqual(job['video'],str(root/'assets/body.mp4'))
+            self.assertEqual(job['output'],str(root/'output'))
     def test_manual_modes_preserve_long_content_selection(self):
         q=p.defaults();q['output_mode']='both'
         self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['landscape','portrait'])
@@ -87,5 +94,31 @@ class RenderTests(unittest.TestCase):
         j={**job,'publish_settings':{'title':''},'burn':False}
         cached=s.aligned(j,self.root/'out/.yangning_cache',self.cancel,lambda _:None)
         self.assertEqual((cached/'analysis.json').stat().st_mtime_ns,before)
+    def test_complete_mp4_protects_explicit_ending(self):
+        full=self.root/'full.mp4';s.concat_clips([self.clip,self.clip,self.clip],full,self.root,self.cancel)
+        voice=self.root/'voice.wav';s.ff(['-i',full,'-t','1.6','-c:a','pcm_s16le',voice],self.cancel)
+        ref=self.root/'ref.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n第一句。\n\n2\n00:00:00,900 --> 00:00:01,500\n第二句。\n',encoding='utf8')
+        q=p.defaults();q.update(output_mode='portrait',combined=True,combined_outro_start=1.6)
+        job=dict(video=str(full),audio=str(voice),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'combined_out'),sequence=q,name='combined')
+        folder=Path(s.process(job,self.cancel));report=json.loads((folder/'report.json').read_text())
+        self.assertGreater(report['results'][0]['duration'],2.3)
+        self.assertLess(report['results'][0]['duration'],2.7)
+        # An SRT ending at 1.5 sec cannot truncate the music-only ending.
+        self.assertGreater(report['results'][0]['duration'],1.5+.7)
+        q.update(combined_intro_end=.8,combined_audio_split=.8,intro_clean_audio=True)
+        split=self.root/'split';split.mkdir()
+        body,parts=s.split_combined(job,q,split,self.cancel,lambda _:None)
+        self.assertEqual(len(parse_srt(parts['intro_srt'])),1)
+        self.assertEqual(len(parse_srt(body['source_srt'])),1)
+        self.assertAlmostEqual(s.seconds(parts['outro_video'],self.cancel),.8,delta=.1)
+    def test_phone_tail_metadata_cannot_request_nonexistent_frames(self):
+        from engine import prepare,render
+        ref=self.root/'tail.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n正文。\n',encoding='utf8')
+        job=dict(video=str(self.clip),audio=str(self.clip),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'tail_out'))
+        folder=Path(prepare(job,self.cancel));meta=json.loads((folder/'analysis.json').read_text());meta['video_duration']+=2/30
+        (folder/'analysis.json').write_text(json.dumps(meta))
+        render(folder,self.cancel)
+        report=json.loads((folder/'report.json').read_text())
+        self.assertEqual(report['decoded_source_frames'],24);self.assertTrue(report['full_decode_passed'])
 
 if __name__=='__main__':unittest.main()

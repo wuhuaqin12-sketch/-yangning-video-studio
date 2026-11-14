@@ -4,7 +4,7 @@ Speech generation is intentionally absent. Original inputs are read-only.
 """
 import json,math,os,shutil,tempfile,uuid
 from pathlib import Path
-from PIL import Image
+from PIL import Image,ImageOps
 from media import executable,run,probe,parse_srt,stamp,Cancelled
 from desktop_update import atomic_json
 from project_vnext import normalize,processing_key,unique_output,file_digest
@@ -19,7 +19,7 @@ def valid_file(value,label):
 
 def aligned(job,folder,cancel,progress):
     """Use existing engine unchanged; reuse completed sound/timeline computation."""
-    from engine import prepare,render,fingerprint
+    from engine import prepare,render
     from workflow import normalize as normalize_job
     j=normalize_job({**job,'publish_settings':{},'burn':False})
     key=processing_key(j);cache=folder/'processing_cache'/key;cache.mkdir(parents=True,exist_ok=True)
@@ -27,13 +27,16 @@ def aligned(job,folder,cancel,progress):
     if index.is_file():
         record=json.loads(index.read_text());candidate=Path(record['folder'])
         if (candidate/'video.mp4').is_file() and (candidate/'report.json').is_file():
-            m=json.loads((candidate/'analysis.json').read_text())
-            if m['fingerprint']==fingerprint(j):
+            if record.get('video_sha256')==file_digest(candidate/'video.mp4') and record.get('srt_sha256')==file_digest(candidate/'subtitles.srt'):
+                if record.get('plan_sha256')!=file_digest(candidate/'pause_plan.csv'):
+                    progress('停顿表已修改；复用定位结果，重新匹配画面与音频')
+                    render(candidate,cancel,progress)
+                    atomic_json(index,{'folder':str(candidate),'key':key,'video_sha256':file_digest(candidate/'video.mp4'),'srt_sha256':file_digest(candidate/'subtitles.srt'),'plan_sha256':file_digest(candidate/'pause_plan.csv')})
                 progress('复用已完成的配音处理与逐句音画匹配')
                 return candidate
     j['output']=str(cache)
     result=Path(prepare(j,cancel,progress));render(result,cancel,progress)
-    atomic_json(index,{'folder':str(result),'key':key})
+    atomic_json(index,{'folder':str(result),'key':key,'video_sha256':file_digest(result/'video.mp4'),'srt_sha256':file_digest(result/'subtitles.srt'),'plan_sha256':file_digest(result/'pause_plan.csv')})
     return result
 
 def target_cues(srt,audio,target,folder,language,cancel,progress):
@@ -95,9 +98,9 @@ def split_combined(job,p,folder,cancel,progress):
     if p['outro_enabled'] and p['outro_video']:raise ValueError('完整视频已有受保护片尾，不能同时再导入独立片尾；请关闭其中一个，避免重复。')
     refs=parse_srt(j['source_srt'])
     if any(a<tail<b for _,a,b,_ in refs):raise ValueError('指定片尾边界穿过一句字幕，请调整边界。')
-    def cut(name,a,b):
+    def cut(name,a,b,input_source=None):
         out=folder/name
-        ff(['-i',source,'-ss',a,'-t',b-a,'-map','0:v:0','-map','0:a:0?','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac',out],cancel)
+        ff(['-i',input_source or source,'-ss',a,'-t',b-a,'-map','0:v:0','-map','0:a:0?','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac',out],cancel)
         return str(out)
     p.update(outro_enabled=True,outro_video=cut('protected_ending.mp4',tail,duration))
     if head:
@@ -111,11 +114,20 @@ def split_combined(job,p,folder,cancel,progress):
         for name,a,b in [('combined_intro.wav',0,split),('combined_body.wav',split,seconds(j['audio'],cancel))]:
             ff(['-i',j['audio'],'-ss',a,'-t',b-a,'-c:a','pcm_s16le',folder/name],cancel)
         p.update(intro_enabled=True,intro_video=cut('combined_opening.mp4',0,head),intro_audio=str(folder/'combined_intro.wav'),intro_srt=str(folder/'combined_intro.srt'),intro_target_srt='',intro_mode='music_voice')
+        approved=file_digest(source)+':'+p['intro_separation_model']+':intro_end='+str(head)
+        if p['intro_separation_approved']==approved:p['intro_separation_approved']=file_digest(p['intro_video'])+':'+p['intro_separation_model']
         j.update(video=cut('combined_body.mp4',head,tail),audio=str(folder/'combined_body.wav'),source_srt=str(folder/'combined_body.srt'),target_srt='',alignment='auto')
     else:
         body=[c for c in refs if c[1]<tail]
         write_srt(folder/'combined_body.srt',body)
         j.update(video=cut('combined_body.mp4',0,tail),source_srt=str(folder/'combined_body.srt'))
+    for mode,layout in p['layouts'].items():
+        if layout.get('repair_approved')==repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True)):
+            layout['repair_approved']=repair_key(j['video'],layout['repair_roi'],layout.get('repair_temporal',True))
+        if layout.get('clean_video'):
+            clean=valid_file(layout['clean_video'],'完整无字幕原片')
+            if abs(seconds(clean,cancel)-duration)>.1:raise ValueError('完整无字幕原片与完整视频时长不同。')
+            layout['clean_video']=cut('clean_body_'+mode+'.mp4',head,tail,clean)
     return j,p
 
 def choose_modes(p,total,source_stream):
@@ -136,15 +148,21 @@ def repair(source,layout,folder,cancel,preview=False,start=0,length=15):
     try:x,y,w,h=map(int,roi.split(','))
     except Exception:raise ValueError('清除原中文字幕需要先设置区域 x,y,宽,高，并生成15秒修复预览。')
     stream=next(s for s in probe(source,cancel)['streams'] if s['codec_type']=='video')
+    from engine import square_pixel_stream
+    stream=square_pixel_stream(stream)
+    rotation=int(stream.get('tags',{}).get('rotate',0))
+    for side in stream.get('side_data_list',[]):
+        if 'rotation' in side:rotation=int(side['rotation'])
+    if abs(rotation)%180==90:stream['width'],stream['height']=stream['height'],stream['width']
     if min(x,y)<1 or min(w,h)<2 or x+w>=stream['width']-1 or y+h>=stream['height']-1:raise ValueError('字幕修复区域必须在原视频内部，不能裁掉老师画面。')
     if not preview and layout.get('repair_approved')!=repair_key(source,roi,layout.get('repair_temporal',True)):raise ValueError('横版原中文字幕修复尚未确认。请先看15秒区域修复预览；低资源方法可能模糊或闪烁，不能承诺AI级还原。')
     name=('repair_preview_' if preview else 'repaired_')+uuid.uuid4().hex[:8]+'.mp4';out=folder/name
     args=['-i',source]
     if preview:args+=['-ss',start,'-t',length]
     if layout.get('repair_temporal',True):
-        graph=f'[0:v]split=2[base][work];[work]delogo=x={x}:y={y}:w={w}:h={h}:show=0,crop={w}:{h}:{x}:{y},tmix=frames=3:weights=1 2 1[patch];[base][patch]overlay={x}:{y}[v]'
+        graph=f'[0:v]scale={stream["width"]}:{stream["height"]},setsar=1,split=2[base][work];[work]delogo=x={x}:y={y}:w={w}:h={h}:show=0,crop={w}:{h}:{x}:{y},tmix=frames=3:weights=1 2 1[patch];[base][patch]overlay={x}:{y}[v]'
         filters=['-filter_complex_threads','1','-filter_complex',graph,'-map','[v]','-map','0:a:0?']
-    else:filters=['-vf',f'delogo=x={x}:y={y}:w={w}:h={h}:show=0']
+    else:filters=['-vf',f'scale={stream["width"]}:{stream["height"]},setsar=1,delogo=x={x}:y={y}:w={w}:h={h}:show=0']
     ff([*args,*filters,'-c:v','libx264','-preset','fast','-crf','18','-c:a','copy',out],cancel)
     return str(out)
 
@@ -154,12 +172,22 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     width,height=(1920,1080) if mode=='landscape' else (1080,1920)
     if repair_chinese:source=repair(source,p['layouts'][mode],folder,cancel)
     stream=next(s for s in probe(source,cancel)['streams'] if s['codec_type']=='video')
+    from engine import square_pixel_stream
+    stream=square_pixel_stream(stream)
+    rotation=int(stream.get('tags',{}).get('rotate',0))
+    for side in stream.get('side_data_list',[]):
+        if 'rotation' in side:rotation=int(side['rotation'])
+    if abs(rotation)%180==90:stream['width'],stream['height']=stream['height'],stream['width']
     duration=seconds(source,cancel)
-    opts=normalize_style(style or {})
+    layout=p['layouts'][mode]
+    chosen={**(style or {}),**layout.get('style',{})} if label=='body' else dict(style or {})
+    for k in ('title_y','title_font_size','subtitle_font_size'):
+        if layout.get(k) not in ('',None) and label=='body':chosen[k]=float(layout[k])
+    opts=normalize_style(chosen)
     opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=p['layouts'][mode]['subtitle_offset_y'])
     if mode=='landscape':
-        opts.update(video_width=100,video_height=100,subtitle_font_size=opts['subtitle_font_size'] or 48)
-    else:opts.update(video_width=100,video_height=76)
+        opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',100),subtitle_font_size=opts['subtitle_font_size'] or 48)
+    else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))
     # Use the same existing subtitle/title styling. No title auto-single-line change.
     ass=folder/(label+'_'+mode+'.ass')
     visible=cues if burn else []
@@ -184,13 +212,15 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
 
 def cover_clip(image,mode,p,folder,cancel):
     width,height=(1920,1080) if mode=='landscape' else (1080,1920)
-    with Image.open(image) as im:ratio=im.width/im.height
+    normalized=folder/('cover_image_'+mode+'.png')
+    with Image.open(image) as im:
+        im=ImageOps.exif_transpose(im).convert('RGB');ratio=im.width/im.height;im.save(normalized)
     target=width/height
     if abs(ratio-target)>.04 and p['cover_fit']=='ask':raise ValueError('封面比例与输出不符。请选择对应封面，或明确选择等比例留边/裁切；不会拉伸。')
     fit='increase' if p['cover_fit']=='crop' else 'decrease'
     vf=f'scale={width}:{height}:force_original_aspect_ratio={fit},'+(f'crop={width}:{height}' if fit=='increase' else f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black')+',setsar=1,fps=30'
     out=folder/('cover_'+mode+'.mp4')
-    ff(['-loop','1','-i',image,'-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={p["cover_seconds"]}','-vf',vf,'-t',p['cover_seconds'],'-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',out],cancel)
+    ff(['-loop','1','-i',normalized,'-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={p["cover_seconds"]}','-vf',vf,'-t',p['cover_seconds'],'-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',out],cancel)
     return out
 
 def concat_clips(clips,out,folder,cancel):
@@ -264,5 +294,5 @@ def process(job,cancel,progress=lambda s:None,preview=False):
         results.append({'mode':mode,'path':str(dest),'duration':actual,'full_decode_passed':True})
     # Keep UI-compatible folder entry points without flattening editable originals.
     shutil.copyfile(results[0]['path'],folder/'video.mp4')
-    atomic_json(folder/'report.json',{'status':'completed','results':results,'preview':preview,'listening_review':'not_performed','limitations':['低资源字幕区域修复不等于AI背景重建，需预览确认。','人声分离效果需用户试听确认；未默认启用未通过的模型。']})
+    atomic_json(folder/'report.json',{'status':'completed','body_analysis':str(main),'results':results,'preview':preview,'listening_review':'not_performed','limitations':['低资源字幕区域修复不等于AI背景重建，需预览确认。','人声分离效果需用户试听确认；未默认启用未通过的模型。']})
     return str(folder)

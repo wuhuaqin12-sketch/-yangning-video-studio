@@ -15,6 +15,7 @@ def main():
     if (root/'preview_profile.json').is_file():env['YANGNING_DATA_ROOT']=str(root/'profile'/'YangNingStudio')
     if current.get('legacy_profile'):
         env['LOCALAPPDATA']=str(runtime_root/'profile');env.pop('YANGNING_DATA_ROOT',None)
+        env['PATH']=str(runtime_root/'tools')+os.pathsep+env.get('PATH','')
     python=runtime_root/'runtime'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
     with (root/'launch.log').open('a',encoding='utf8') as log:
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}

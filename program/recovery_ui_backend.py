@@ -2,7 +2,7 @@
 import json,os,sys,shutil
 from pathlib import Path
 from desktop_update import install_root,atomic_json
-from stable_recovery import preserve_archive,stage_stable,snapshot,STABLE_VERSION
+from stable_recovery import preserve_archive,stage_stable,snapshot,STABLE_VERSION,SETTINGS
 from media import run
 
 def restore_isolated(cancel,progress=lambda s:None):
@@ -17,7 +17,24 @@ def restore_isolated(cancel,progress=lambda s:None):
     bundled=Path(__file__).parent.parent/'recovery/v0.12.11-original.zip'
     archive=preserve_archive(root,bundled if bundled.is_file() else None,cancel=cancel);target=stage_stable(root,archive)
     isolated=root/'stable-v12.11';isolated.mkdir(exist_ok=True)
-    env={'YANGNING_INSTALL_ROOT':str(isolated),'LOCALAPPDATA':str(isolated/'profile')}
+    tools=isolated/'tools';tools.mkdir(exist_ok=True)
+    for name in ('ffmpeg','ffprobe'):
+        source=Path(__file__).parent/'tools'/(name+'.exe')
+        if not source.is_file() or source.stat().st_size<1000000:raise RuntimeError('恢复需要完整测试包内的FFmpeg/FFprobe，当前文件不完整；未切换版本。')
+        shutil.copyfile(source,tools/source.name)
+    legacy_settings=isolated/'profile/YangNingStudio';legacy_settings.mkdir(parents=True,exist_ok=True)
+    production=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudioDesktop'
+    try:compatible=json.loads((production/'current.json').read_text())['version']==STABLE_VERSION
+    except (OSError,ValueError,KeyError):compatible=False
+    if compatible:
+        originals=production.parent/'YangNingStudio'
+        for name in SETTINGS:
+            old=originals/name
+            if old.is_file() and not (legacy_settings/name).exists():
+                try:json.loads(old.read_text(encoding='utf-8-sig'))
+                except (ValueError,OSError):continue
+                shutil.copyfile(old,legacy_settings/name)
+    env={'YANGNING_INSTALL_ROOT':str(isolated),'LOCALAPPDATA':str(isolated/'profile'),'PATH':str(tools)+os.pathsep+os.environ.get('PATH','')}
     python=isolated/'runtime/Scripts/python.exe'
     progress('在独立运行环境准备v12.11，不修改新版或原稳定版依赖…')
     script=isolated/'prepare_stable.py'

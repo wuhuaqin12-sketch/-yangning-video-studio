@@ -41,4 +41,15 @@ def main():
     assert (settings/'user_settings.json').read_text()=='keep'
     assert not (preview/'update_config.json').exists()
     print('ISOLATED_TEST_INSTALL_PASS',flush=True)
+    # Exercise the actual GUI recovery backend, not only the low-level mock tests.
+    recovery=sandbox/'run_installed_recovery.py'
+    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.0/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
+    subprocess.run([sys.executable,str(recovery)],check=True)
+    restored=json.loads((preview/'current.json').read_text())
+    assert restored['version']=='0.12.11';assert restored['runtime_scope']=='stable-v12.11'
+    assert (preview/'runtime/Scripts/python.exe').exists()
+    assert (preview/'stable-v12.11/runtime/Scripts/python.exe').exists()
+    assert json.loads((prod/'current.json').read_text())['version']=='0.12.11'
+    assert (settings/'user_settings.json').read_text()=='keep'
+    print('INTEGRATED_STABLE_RECOVERY_PASS',flush=True)
 if __name__=='__main__':main()

@@ -2,6 +2,7 @@ name: Isolated stable recovery rehearsal
 on:
   push:
     branches: [test/intro-main-outro]
+    paths: ['program/**','ci/**','make_release.py','.github/workflows/recovery-test.yml']
   workflow_dispatch:
 permissions:
   contents: read

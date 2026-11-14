@@ -11,8 +11,8 @@ DEFAULTS=dict(output_mode='auto',intro_enabled=False,intro_video='',intro_mode='
     cover_seconds=3,cover_transition='cut',cover_fit='ask',background='',
     combined=False,combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
     preview_start=0,preview_seconds=15,layouts={
-      'landscape':dict(remove_chinese=True,repair_roi='',repair_approved='',repair_temporal=True,subtitle_offset_y=0,clean_video=''),
-      'portrait':dict(remove_chinese=False,repair_roi='',repair_approved='',repair_temporal=True,subtitle_offset_y=0,clean_video='')})
+      'landscape':dict(remove_chinese=True,repair_roi='',repair_approved='',repair_temporal=True,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={}),
+      'portrait':dict(remove_chinese=False,repair_roi='',repair_approved='',repair_temporal=True,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
 
 def defaults():return json.loads(json.dumps(DEFAULTS))
 
@@ -77,13 +77,15 @@ def processing_key(job):
     # not only beginning/end fingerprints, so interior changes invalidate cache.
     value={k:job.get(k) for k in ('language','alignment','speed','trim','audio_profile','audio_separate','_pause_override')}
     value['cache_schema']=1
+    from engine import VERSION
+    value['processing_version']=VERSION
     value['files']={k:file_digest(job[k]) for k in ('video','audio','source_srt','target_srt','audio_reference_srt') if job.get(k)}
     return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
 
 def preview_key(job):
     settings=normalize(job.get('sequence'))
     settings.pop('preview_start',None);settings.pop('preview_seconds',None)
-    value={k:job.get(k) for k in ('language','alignment','speed','trim','audio_profile','audio_separate','burn','publish_settings')}
+    value={k:job.get(k) for k in ('language','alignment','speed','trim','audio_profile','audio_separate','burn','publish_settings','_pause_override')}
     value['sequence']=settings
     value['files']={k:file_digest(v) for k,v in media_paths(job).items()}
     return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
