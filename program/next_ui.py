@@ -46,6 +46,7 @@ class SequencePanel:
         row=ttk.Frame(self.intro);row.pack(fill='x')
         ttk.Radiobutton(row,text='保留片头全部原声',variable=self.v['intro_mode'],value='original',command=self.update).pack(side='left')
         ttk.Radiobutton(row,text='保留背景音乐，替换中文讲话',variable=self.v['intro_mode'],value='music_voice',command=self.update).pack(side='left',padx=12)
+        ttk.Radiobutton(self.intro,text='使用导入的片头背景音乐（不加配音或SRT）',variable=self.v['intro_mode'],value='external_music',command=self.update).pack(anchor='w')
         self.intro_voice=ttk.Frame(self.intro)
         file_row(self.intro_voice,'intro_audio','提前准备的片头配音')
         file_row(self.intro_voice,'intro_srt','片头原画面SRT')
@@ -95,6 +96,21 @@ class SequencePanel:
         self.update();app.root.after(1200,self.offer_recover)
     def number(self,parent,key,label):
         row=ttk.Frame(parent);row.pack(fill='x',pady=3);ttk.Label(row,text=label).pack(side='left');ttk.Entry(row,textvariable=self.v[key],width=14).pack(side='left',padx=8)
+    def pick_background_audio(self):
+        path=filedialog.askopenfilename(filetypes=[('音频 / 已去人声片头','*.wav *.mp3 *.m4a *.flac *.mp4 *.mov'),('全部文件','*.*')])
+        if path:
+            self.v['background_audio'].set(path)
+            if self.v['intro_mode'].get()=='original':self.v['intro_mode'].set('external_music')
+            self.enabled.set(True);self.update()
+    def background_audio_settings(self):
+        win=tk.Toplevel(self.app.root);win.title('片头背景音乐与音量');win.geometry('680x270')
+        box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
+        ttk.Label(box,text='当前作用范围：片头。完整视频模式按“片头结束秒”确定范围。',wraplength=620).pack(anchor='w',pady=6)
+        self.number(box,'background_audio_offset','从背景音乐文件第几秒开始')
+        self.number(box,'intro_music_gain','背景音乐音量倍数（0–2）')
+        ttk.Label(box,text='导入的是已去掉讲话的音乐，不是自动人声分离。\n只替换片头原声，可与片头日语配音混合；正文和片尾不加这条音乐。\n音乐过短会提示，不自动循环、加速或铺满整片。',wraplength=620).pack(anchor='w',pady=8)
+        ttk.Button(box,text='清除背景音乐',command=lambda:self.v['background_audio'].set('')).pack(anchor='w')
+
     def pick(self,key):
         p=filedialog.askopenfilename()
         if p:self.v[key].set(p)
@@ -110,6 +126,8 @@ class SequencePanel:
         self.layout_styles[mode]=dict(self.app.pending_style);self.changed()
         messagebox.showinfo('样式已分别保存','已为'+('横版' if mode=='landscape' else '竖版')+'保存当前标题和字幕样式。另一比例的样式保持不变。')
     def changed(self):
+        if not self.restoring and self.v['background_audio'].get() and not self.enabled.get():
+            self.enabled.set(True);self.update();return
         try:self.app.sequence_settings=self.value() if self.enabled.get() else {}
         except (ValueError,tk.TclError):return
         if self.restoring:return

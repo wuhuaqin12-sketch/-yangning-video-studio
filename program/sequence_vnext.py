@@ -25,7 +25,7 @@ def aligned(job,folder,cancel,progress):
     key=processing_key(j);cache=folder/'processing_cache'/key;cache.mkdir(parents=True,exist_ok=True)
     index=cache/'index.json'
     if index.is_file():
-        record=json.loads(index.read_text());candidate=Path(record['folder'])
+        record=json.loads(index.read_text(encoding='utf8'));candidate=Path(record['folder'])
         if (candidate/'video.mp4').is_file() and (candidate/'report.json').is_file():
             if record.get('video_sha256')==file_digest(candidate/'video.mp4') and record.get('srt_sha256')==file_digest(candidate/'subtitles.srt'):
                 if record.get('plan_sha256')!=file_digest(candidate/'pause_plan.csv'):
@@ -51,12 +51,31 @@ def target_cues(srt,audio,target,folder,language,cancel,progress):
     if cues[-1][2]>seconds(audio,cancel)+.03:raise ValueError('片头配音字幕超出音频时长。')
     return refs,cues
 
+def imported_background(p,source,folder,cancel,progress):
+    path=valid_file(p['background_audio'],'已经去人声的背景音频')
+    meta=probe(path,cancel);track=next((x for x in meta['streams'] if x['codec_type']=='audio'),None)
+    if not track:raise ValueError('所选背景音乐文件没有音轨。')
+    audio_length=float(track.get('duration',meta['format']['duration']))
+    length=seconds(source,cancel);offset=p['background_audio_offset'];available=audio_length-offset
+    if available+.12<length:raise ValueError(f'背景音频可用{available:.2f}秒，片头需要{length:.2f}秒。请提供足够长的纯音乐；不会自动循环或变速。')
+    progress(f'导入外部背景音乐，仅用于片头{length:.2f}秒；替换该段原声，不执行人声分离')
+    out=folder/'imported_background.wav'
+    ff(['-ss',offset,'-i',path,'-vn','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={length},atrim=duration={length}','-c:a','pcm_s16le',out],cancel)
+    return str(out)
+
 def opening(job,p,folder,cancel,progress):
     source=valid_file(p['intro_video'],'片头视频')
-    if p['intro_mode']=='original':return source,[]
+    if p['intro_mode']=='original':
+        if p.get('background_audio'):raise ValueError('已导入背景音乐，请选择使用导入背景音乐或替换讲话模式；保留全部原声不会混用外部音乐。')
+        return source,[]
+    background=imported_background(p,source,folder,cancel,progress) if p.get('background_audio') else None
+    if p['intro_mode']=='external_music':
+        if not background:raise ValueError('请选择已经去人声的背景音乐文件。')
+        out=folder/'intro_external_music.mp4'
+        ff(['-i',source,'-i',background,'-map','0:v:0','-map','1:a:0','-c:v','copy','-af',f'volume={p["intro_music_gain"]}','-c:a','aac','-b:a','192k',out],cancel)
+        return str(out),[]
     audio=valid_file(p['intro_audio'],'片头配音');srt=valid_file(p['intro_srt'],'片头SRT')
-    background=None
-    if not p['intro_clean_audio']:
+    if not background and not p['intro_clean_audio']:
         token=file_digest(source)+':'+p['intro_separation_model']
         if p['intro_separation_approved']!=token:raise ValueError('片头中文与音乐仍混合时，请先执行20秒背景声分离试听并确认结果，或提供已去人声的片头。当前未经听审的分离不能直接导出。')
         from background_separation import separate
@@ -74,17 +93,12 @@ def opening(job,p,folder,cancel,progress):
         end=start+b-a
         if end>duration+.02:raise ValueError(f'片头第{ref[0]}句无法完整放入片头，请提供更长片头或调整停顿；未截断配音。')
         segments.append((a,b,start));placed.append((ref[0],start+cue[1]-a,start+cue[2]-a,ref[3]));previous=end
-    # Lower background music only while narration is present, preserving the
-    # original full-length music track; no global mute or fake denoising.
-    music_index=2 if background else 0
-    filters=[f'[{music_index}:a]aresample=48000,aformat=channel_layouts=stereo,volume={p["intro_music_gain"]}[music]',f'[1:a]asplit={len(segments)}'+''.join(f'[a{i}]' for i in range(len(segments)))]
-    for i,(a,b,start) in enumerate(segments):filters.append(f'[a{i}]atrim=start={a}:end={b},asetpts=PTS-STARTPTS,adelay={round(start*1000)}:all=1[v{i}]')
-    filters.append(''.join(f'[v{i}]' for i in range(len(segments)))+f'amix=inputs={len(segments)}:normalize=0:duration=longest,apad=whole_dur={duration},atrim=duration={duration},asplit=2[voice][key]')
-    filters.append('[music][key]sidechaincompress=threshold=0.025:ratio=5:attack=20:release=300[duck]')
-    filters.append('[duck][voice]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.89:level=0:latency=1[mix]')
+    from opening_audio import mix
+    mixed=mix(audio,background or source,segments,duration,p['intro_music_gain'],folder,cancel,progress)
     dest=folder/'intro_mixed.mp4'
-    inputs=['-i',source,'-i',audio]+(['-i',background] if background else [])
-    ff([*inputs,'-filter_complex',';'.join(filters),'-map','0:v:0','-map','[mix]','-c:v','copy','-c:a','aac','-b:a','192k',dest],cancel)
+    ff(['-i',source,'-f','f32le','-ar','48000','-ac','2','-i',mixed,'-map','0:v:0','-map','1:a:0','-c:v','copy','-af',f'alimiter=limit=0.89:level=0:latency=1,apad=whole_dur={duration},atrim=duration={duration}','-c:a','aac','-b:a','192k','-t',duration,dest],cancel)
+    streams=probe(dest,cancel)['streams'];track=next(x for x in streams if x['codec_type']=='audio')
+    if abs(float(track['duration'])-duration)>.08:raise RuntimeError('片头混音音轨未覆盖完整画面，已停止。')
     if abs(seconds(dest,cancel)-duration)>.15:raise RuntimeError('片头混音改变了时长。')
     write_srt(folder/'intro_aligned.srt',placed)
     return str(dest),placed
@@ -207,7 +221,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     has_audio=any(s['codec_type']=='audio' for s in probe(source,cancel)['streams'])
     if not has_audio:inputs+=['-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={duration}']
     audio_index=0 if has_audio else (2 if p['background'] else 1)
-    ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af','aresample=48000,aformat=channel_layouts=stereo','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k','-t',duration,out],cancel,cwd=folder)
+    ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={duration},atrim=duration={duration}','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k','-t',duration,out],cancel,cwd=folder)
     return out
 
 def cover_clip(image,mode,p,folder,cancel):
@@ -224,13 +238,19 @@ def cover_clip(image,mode,p,folder,cancel):
     return out
 
 def concat_clips(clips,out,folder,cancel):
+    for clip in clips:
+        streams=probe(clip,cancel)['streams'];v=next(x for x in streams if x['codec_type']=='video');a=next(x for x in streams if x['codec_type']=='audio')
+        if abs(float(v['duration'])-float(a['duration']))>.08:raise RuntimeError('拼接片段的音轨未覆盖全部画面，已停止，避免下一段无声。')
     # Inputs are freshly encoded homogeneous local paths; no user text enters concat syntax.
     listing=folder/('concat_'+uuid.uuid4().hex+'.txt')
     listing.write_text(''.join("file '"+str(Path(p).resolve()).replace("'","'\\''")+"'\n" for p in clips),encoding='utf8')
-    ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c','copy','-movflags','+faststart',out],cancel)
+    ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c:v','copy','-af','aresample=48000:async=1:first_pts=0','-c:a','aac','-b:a','192k','-movflags','+faststart',out],cancel)
 
 def process(job,cancel,progress=lambda s:None,preview=False):
-    p=normalize(job.get('sequence'));output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
+    p=normalize(job.get('sequence'))
+    if p.get('background_audio') and not (p['intro_enabled'] or (p['combined'] and p['combined_intro_end']>0)):
+        raise ValueError('外部背景音乐当前用于片头。请启用独立片头，或在完整视频模式中填写片头结束秒。')
+    output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
     folder=Path(tempfile.mkdtemp(prefix='YangNing_Next_',dir=output))
     cache_root=output/'.yangning_cache';cache_root.mkdir(exist_ok=True)
     atomic_json(folder/'project.json',{'schema':1,'job':job})
@@ -273,6 +293,12 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',transition],cancel)
             parts=[transition,*parts[2:]]
         concat_clips(parts,full,folder,cancel)
+        packet_data=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(full)],cancel))['packets']
+        previous=None
+        for packet in packet_data:
+            timestamp=float(packet.get('pts_time',0));span=float(packet.get('duration_time',0))
+            if span>.08 or (previous is not None and timestamp-previous>.08):raise RuntimeError('音频时间戳存在异常缺口，已停止交付。')
+            previous=timestamp
         actual=seconds(full,cancel)
         if abs(actual-offset)>.3:raise RuntimeError('拼接时长检查失败，未标记完成。')
         streams=probe(full,cancel)['streams'];video_stream=next(v for v in streams if v['codec_type']=='video');audio_stream=next(v for v in streams if v['codec_type']=='audio')

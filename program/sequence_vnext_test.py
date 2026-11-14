@@ -38,6 +38,11 @@ class ProjectTests(unittest.TestCase):
             job,missing=p.load_project(root/'project.json')
             self.assertFalse(missing);self.assertEqual(Path(job['video']).resolve(),(root/'assets/body.mp4').resolve())
             self.assertEqual(Path(job['output']).resolve(),(root/'output').resolve())
+            (root/'assets/music.wav').write_bytes(b'music')
+            job['sequence']['background_audio']='assets/music.wav'
+            p.save_project(root/'music.json',job)
+            loaded,missing=p.load_project(root/'music.json')
+            self.assertFalse(missing);self.assertEqual(Path(loaded['sequence']['background_audio']).resolve(),(root/'assets/music.wav').resolve())
     def test_manual_modes_preserve_long_content_selection(self):
         q=p.defaults();q['output_mode']='both'
         self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['landscape','portrait'])
@@ -65,6 +70,54 @@ class RenderTests(unittest.TestCase):
         data=probe(out,self.cancel);v=next(x for x in data['streams'] if x['codec_type']=='video')
         self.assertEqual((v['width'],v['height']),(1080,1920));self.assertGreater(float(data['format']['duration']),1.5)
         ass=(self.root/'body_portrait.ass').read_text();self.assertIn('金剛経',ass);self.assertIn('\\clip',ass)
+    def test_short_opening_voice_keeps_full_music_and_join_timestamps(self):
+        voice=self.root/'voice.wav'
+        s.ff(['-f','lavfi','-i','sine=frequency=880:duration=0.2',voice],self.cancel)
+        refs=self.root/'head.srt';s.write_srt(refs,[(1,.1,.3,'試聴')])
+        timing=self.root/'voice.srt';s.write_srt(timing,[(1,0,.18,'試聴')])
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='music_voice',intro_audio=str(voice),intro_srt=str(refs),intro_target_srt=str(timing),intro_clean_audio=True)
+        mixed,_=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        streams=probe(mixed,self.cancel)['streams'];a=next(x for x in streams if x['codec_type']=='audio')
+        self.assertAlmostEqual(float(a['duration']),.8,delta=.03)
+        joined=self.root/'continuous.mp4';s.concat_clips([mixed,self.clip],joined,self.root,self.cancel)
+        from media import run,executable
+        packets=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-of','json',str(joined)],self.cancel))['packets']
+        self.assertLess(max(float(x.get('duration_time',0)) for x in packets),.05)
+        times=[float(x['pts_time']) for x in packets];self.assertLess(max(b-a for a,b in zip(times,times[1:])),.05)
+
+    def test_imported_music_replaces_original_without_separation(self):
+        music=self.root/'music.wav';s.ff(['-f','lavfi','-i','sine=frequency=660:duration=1',music],self.cancel)
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='external_music',background_audio=str(music),intro_clean_audio=False)
+        with patch('background_separation.separate',side_effect=AssertionError('must not separate')):
+            out,cues=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        self.assertFalse(cues)
+        from media import executable
+        import numpy as np,subprocess
+        raw=subprocess.check_output([executable('ffmpeg'),'-v','error','-i',out,'-vn','-ar','8000','-ac','1','-f','f32le','-'])
+        samples=np.frombuffer(raw,np.float32);peak=np.argmax(abs(np.fft.rfft(samples)))*8000/len(samples)
+        self.assertAlmostEqual(peak,660,delta=3)
+        q['background_audio_offset']=.7
+        with self.assertRaisesRegex(ValueError,'不会自动循环'):s.imported_background(q,str(self.clip),self.root,self.cancel,lambda _:None)
+        q['intro_mode']='original'
+        with self.assertRaisesRegex(ValueError,'已导入'):s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+    def test_imported_music_with_voice_skips_original_speech(self):
+        music=self.root/'music.wav';voice=self.root/'voice.wav'
+        s.ff(['-f','lavfi','-i','sine=frequency=660:duration=1',music],self.cancel)
+        s.ff(['-f','lavfi','-i','sine=frequency=880:duration=0.2',voice],self.cancel)
+        refs=self.root/'head.srt';s.write_srt(refs,[(1,.1,.3,'試聴')])
+        timing=self.root/'voice.srt';s.write_srt(timing,[(1,0,.18,'試聴')])
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='music_voice',intro_audio=str(voice),intro_srt=str(refs),intro_target_srt=str(timing),background_audio=str(music))
+        with patch('background_separation.separate',side_effect=AssertionError('must not separate')):
+            out,cues=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        self.assertEqual(len(cues),1)
+        a=next(x for x in probe(out,self.cancel)['streams'] if x['codec_type']=='audio');self.assertAlmostEqual(float(a['duration']),.8,delta=.03)
+        import numpy as np,subprocess
+        from media import executable
+        raw=subprocess.check_output([executable('ffmpeg'),'-v','error','-ss','0.55','-i',out,'-t','0.2','-ar','8000','-ac','1','-f','f32le','-'])
+        tail=np.frombuffer(raw,np.float32);self.assertGreater(float(np.sqrt(np.mean(tail*tail))),.01)
+        peak=np.argmax(abs(np.fft.rfft(tail)))*8000/len(tail);self.assertAlmostEqual(peak,660,delta=8)
+
+
     def test_repair_needs_review_and_never_crops(self):
         q=p.defaults()['layouts']['landscape'];q['repair_roi']='20,120,280,30'
         with self.assertRaisesRegex(ValueError,'确认'):s.repair(str(self.clip),q,self.root,self.cancel)
