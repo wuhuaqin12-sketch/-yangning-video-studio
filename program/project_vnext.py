@@ -99,6 +99,8 @@ def unique_output(folder,name,language,mode):
     stem=f'{safe(name)}_{safe(label)}_'+('横版_16x9' if mode=='landscape' else '竖版_9x16')
     for i in range(10000):
         p=folder/(stem+(f'_{i}' if i else '')+'.mp4')
+        # Keep orphaned subtitle files too; never silently replace an old SRT.
+        if p.with_suffix('.srt').exists():continue
         # Reserve the filename atomically, avoiding concurrent export collisions.
         try:
             fd=os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY);os.close(fd);return p

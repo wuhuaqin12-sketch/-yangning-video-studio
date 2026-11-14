@@ -31,6 +31,9 @@ class ProjectTests(unittest.TestCase):
             first=p.unique_output(d,'sutra','ja','portrait');first.write_bytes(b'keep')
             second=p.unique_output(d,'sutra','ja','portrait')
             self.assertNotEqual(first,second);self.assertEqual(first.read_bytes(),b'keep')
+            first.with_suffix('.srt').write_text('keep subtitles',encoding='utf8');first.unlink()
+            third=p.unique_output(d,'sutra','ja','portrait');self.assertNotEqual(first,third)
+            self.assertEqual(first.with_suffix('.srt').read_text(encoding='utf8'),'keep subtitles')
     def test_portable_project_resolves_paths_from_its_own_folder(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);(root/'assets').mkdir();(root/'assets/body.mp4').write_bytes(b'media')
@@ -164,6 +167,17 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(len(parse_srt(parts['intro_srt'])),1)
         self.assertEqual(len(parse_srt(body['source_srt'])),1)
         self.assertAlmostEqual(s.seconds(parts['outro_video'],self.cancel),.8,delta=.1)
+    def test_dual_exports_label_both_mp4_and_srt_and_keep_full_content(self):
+        ref=self.root/'dual.srt';s.write_srt(ref,[(1,.1,.7,'横版と竖版の字幕。')])
+        q=p.defaults();q.update(output_mode='both');q['layouts']['landscape']['remove_chinese']=False
+        job=dict(video=str(self.clip),audio=str(self.clip),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'dual_out'),sequence=q,name='金刚经')
+        folder=Path(s.process(job,self.cancel));report=json.loads((folder/'report.json').read_text(encoding='utf8'))
+        self.assertEqual(len(report['results']),2)
+        for result,label in zip(report['results'],('横版_16x9','竖版_9x16')):
+            path=Path(result['path']);self.assertIn(label,path.stem);self.assertTrue(path.with_suffix('.srt').is_file())
+            self.assertIn(label,path.with_suffix('.srt').name);self.assertEqual(len(parse_srt(path.with_suffix('.srt'))),1)
+            self.assertGreater(result['duration'],.75);self.assertLess(result['duration'],.95)
+
     def test_phone_tail_metadata_cannot_request_nonexistent_frames(self):
         from engine import prepare,render
         ref=self.root/'tail.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n正文。\n',encoding='utf8')
