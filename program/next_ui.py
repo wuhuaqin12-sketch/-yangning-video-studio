@@ -24,6 +24,7 @@ class SequencePanel:
         ttk.Label(row,text='输出比例').pack(side='left')
         cb=ttk.Combobox(row,textvariable=self.mode,state='readonly',values=('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),width=22);cb.pack(side='left',padx=8);cb.bind('<<ComboboxSelected>>',self.change_mode)
         ttk.Button(row,text='标题与字幕样式',command=app.publish).pack(side='left',padx=8)
+        ttk.Button(row,text='片头译名 / 片尾免责声明',command=self.decoration_settings).pack(side='left',padx=4)
         p=defaults()
         for key,value in p.items():
             if key in ('output_mode','layouts'):continue
@@ -49,9 +50,9 @@ class SequencePanel:
             frame=ttk.Frame(self.layouts,padding=6);self.layouts.add(frame,text=label)
             variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items() if key!='style'};self.layout_vars[mode]=variables;self.layout_styles[mode]={}
             ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕（独立开关）',variable=variables['remove_chinese']).pack(anchor='w')
-            ttk.Checkbutton(frame,text='只对修复区域做3帧平滑，减少闪烁（可能出现拖影）',variable=variables['repair_temporal']).pack(anchor='w')
+            ttk.Label(frame,text='方式：仅文字与描边（标准，不做整块区域修复）').pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x',pady=3)
-            ttk.Label(row,text='低资源修复区域 x,y,宽,高').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
+            ttk.Label(row,text='原字幕行区域 x,y,宽,高').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
             ttk.Button(row,text='15秒修复预览',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
             ttk.Button(row,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
             row=ttk.Frame(frame);row.pack(fill='x')
@@ -59,7 +60,7 @@ class SequencePanel:
             for key,label in [('title_y','标题上下位置（百分比，可空）'),('title_font_size','标题字号（像素，可空）'),('subtitle_font_size','新字幕字号（像素，可空）')]:
                 row=ttk.Frame(frame);row.pack(fill='x');ttk.Label(row,text=label).pack(side='left');ttk.Entry(row,textvariable=variables[key],width=12).pack(side='left',padx=5)
             ttk.Button(frame,text='为此比例保存当前标题 / 字幕完整样式',command=lambda m=mode:self.save_style(m)).pack(anchor='w',pady=3)
-            ttk.Label(frame,text='优先选择无字幕原片；低资源区域修复可能模糊/闪烁，不能保证恢复衣服和桌子细节。不是AI连续帧重建。',wraplength=850).pack(anchor='w')
+            ttk.Label(frame,text='标准方式：在框选字幕行内提取白字与深色描边，只补文字遮罩；其他视频须重新框选。坐标按原视频像素填写，非导出画布。复杂画面仍可能误判、残留或模糊，先预览确认；不是OCR或AI背景重建。',wraplength=850).pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x')
             ttk.Label(row,text='无字幕原片（可选）').pack(side='left');ttk.Entry(row,textvariable=variables['clean_video']).pack(side='left',fill='x',expand=True)
             ttk.Button(row,text='选择',command=lambda m=mode:self.pick_clean(m)).pack(side='left')
@@ -104,6 +105,53 @@ class SequencePanel:
         self.appearance_open.set(not self.appearance_open.get());self.update()
     def toggle_details(self):
         self.details_open.set(not self.details_open.get());self.update()
+    def decoration_settings(self):
+        win=tk.Toplevel(self.app.root);win.title('可选：片头译名与片尾免责声明');win.geometry('760x610')
+        tabs=ttk.Notebook(win);tabs.pack(fill='both',expand=True,padx=12,pady=12)
+        tail=ttk.Frame(tabs,padding=12)
+        for prefix,tab_name in [('opening_title','片头中文标题下加译名'),('opening_topic','片头末尾「经题」译名')]:
+            page=ttk.Frame(tabs,padding=12);tabs.add(page,text=tab_name)
+            ttk.Checkbutton(page,text='启用此组译名（保留原中文）',variable=self.v[prefix+'_enabled']).pack(anchor='w',pady=5)
+            for suffix,label in [('original','原中文标题（OCR匹配用）'),('text','译名（可手动输入）')]:
+                row=ttk.Frame(page);row.pack(fill='x',pady=5);ttk.Label(row,text=label,width=25).pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_'+suffix]).pack(side='left',fill='x',expand=True)
+            ttk.Label(page,text='留空按当前日语／英语填入《金刚经讲义》或「经题」译名；其他标题请提供译名。\nOCR仅定位，不翻译、不配音、不擦除中文。显示持续整个开始—结束时间段。',wraplength=690).pack(anchor='w',pady=5)
+            for suffix,label in [('start','显示／OCR范围开始秒'),('end','显示／OCR范围结束秒'),('x','译名中心左右（原画面百分比）'),('y','译名首行顶部（原画面百分比）'),('size','译名字号（横版1080高基准）')]:self.number(page,prefix+'_'+suffix,label)
+            ttk.Button(page,text='本地OCR定位原标题下方（需预览）',command=lambda k=prefix:self.detect_title(k)).pack(anchor='w',pady=8)
+            ttk.Label(page,text='缩小到此标题出现的时间范围再识别；最多采样12帧。结果是估计，可手动改时间与位置。原字移动或渐变时，应预览并调整显示范围。',wraplength=690).pack(anchor='w')
+        tabs.add(tail,text='片尾免责声明图片')
+        ttk.Checkbutton(tail,text='启用片尾免责声明图片',variable=self.v['disclaimer_enabled']).pack(anchor='w',pady=5)
+        row=ttk.Frame(tail);row.pack(fill='x',pady=8)
+        ttk.Entry(row,textvariable=self.v['disclaimer_image']).pack(side='left',fill='x',expand=True)
+        def image():
+            path=filedialog.askopenfilename(filetypes=[('免责声明图片','*.png *.jpg *.jpeg *.webp *.bmp'),('全部文件','*.*')])
+            if path:self.v['disclaimer_image'].set(path)
+        ttk.Button(row,text='选择图片',command=image).pack(side='left',padx=5)
+        row=ttk.Frame(tail);row.pack(fill='x',pady=6)
+        ttk.Label(row,text='显示秒数（2–30）').pack(side='left');ttk.Combobox(row,textvariable=self.v['disclaimer_seconds'],values=('3','5','8','10','15'),width=10).pack(side='left',padx=5)
+        choices={'追加图片（完整保留原片尾，延长时长）':'append','叠加原片尾下方（不延长，保留音乐）':'overlay'}
+        choice=tk.StringVar(value=next(k for k,v in choices.items() if v==self.v['disclaimer_mode'].get()))
+        cb=ttk.Combobox(tail,textvariable=choice,values=tuple(choices),state='readonly',width=52);cb.pack(anchor='w',pady=8)
+        cb.bind('<<ComboboxSelected>>',lambda e:self.v['disclaimer_mode'].set(choices[choice.get()]))
+        ttk.Label(tail,text='默认追加：完整播放原片尾后，再显示静音免责声明图片。\n叠加：只在最后几秒的下方显示图片卡片，原片尾画面与音乐继续播放。\n图片始终等比例显示；横竖版不会强制拉伸。请预览检查文字是否足够大、停留是否够读。',wraplength=690).pack(anchor='w',pady=8)
+        ttk.Button(win,text='完成',command=win.destroy).pack(anchor='e',padx=16,pady=8)
+    def detect_title(self,prefix='opening_title'):
+        if self.app.busy:return
+        try:
+            source=self.v['intro_video'].get() if self.segment_mode.get()==SEGMENT_MODES[1] and self.v['intro_enabled'].get() else self.app.v['video'].get()
+            if not source or not Path(source).is_file():raise ValueError('请先导入含原中文标题的视频。')
+            target=self.v[prefix+'_original'].get();start=float(self.v[prefix+'_start'].get());end=float(self.v[prefix+'_end'].get())
+            def work():
+                from opening_caption import detect
+                found=detect(source,target,start,end,self.app.stop,self.app.progress)
+                self.app.events.put(('opening_title_detected',prefix,found))
+            self.app.worker(work)
+        except Exception as e:messagebox.showerror('片头标题定位',str(e))
+    def title_detected(self,result,prefix='opening_title'):
+        for key,value in result.items():
+            mapped=key.replace('opening_title_',prefix+'_')
+            if mapped in self.v:self.v[mapped].set(value)
+        self.v[prefix+'_enabled'].set(True);self.enabled.set(True);self.update()
+        messagebox.showinfo('定位结果待预览','识别到：'+result['recognized']+'\n已填写估计时间和原标题下方位置。请生成范围预览，必要时手动调整。')
     def preview_range(self):
         win=tk.Toplevel(self.app.root);win.title('预览范围');box=ttk.Frame(win,padding=15);box.pack(fill='both',expand=True)
         self.number(box,'preview_start','从第几秒开始');self.number(box,'preview_seconds','预览秒数（1–60）')
@@ -113,7 +161,7 @@ class SequencePanel:
         return normalize(p)
     def custom_appearance(self):
         p=self.raw_value();base=defaults()
-        keys=('output_mode','background','cover','cover_landscape','cover_portrait','cover_seconds','cover_transition','cover_fit','layouts')
+        keys=('output_mode','background','cover','cover_landscape','cover_portrait','cover_seconds','cover_transition','cover_fit','layouts',*[k for k in p if k.startswith('opening_title_') or k.startswith('opening_topic_') or k.startswith('disclaimer_')])
         def same(value,default):
             if isinstance(default,dict):return set(value)==set(default) and all(same(value[k],default[k]) for k in default)
             if isinstance(default,(int,float)) and not isinstance(default,bool):
@@ -265,16 +313,16 @@ class SequencePanel:
             folder=Path(self.app.v['output'].get())/('修复预览_'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
             start=float(self.v['preview_start'].get())
             def work():
-                path=repair(source,layout,folder,self.app.stop,True,start,15)
-                from sequence_vnext import repair_key
-                token=repair_key(source,layout['repair_roi'],layout.get('repair_temporal',True))
+                path=repair(source,layout,folder,self.app.stop,True,start,15,progress=self.app.progress)
+                from sequence_vnext import layout_repair_key
+                token=layout_repair_key(source,layout)
                 self.app.events.put(('repair_preview_ready',mode,token,path))
             self.app.worker(work)
         except Exception as e:messagebox.showerror('字幕修复预览',str(e))
     def approve_repair(self,mode):
-        from sequence_vnext import repair_key
+        from sequence_vnext import layout_repair_key
         try:
-            token=repair_key(self.app.v['video'].get(),self.layout_vars[mode]['repair_roi'].get(),self.layout_vars[mode]['repair_temporal'].get())
+            token=layout_repair_key(self.app.v['video'].get(),{k:v.get() for k,v in self.layout_vars[mode].items()})
             if self.repair_previews.get(mode)!=token:raise ValueError('请先为同一视频、同一区域生成15秒修复预览。')
             if messagebox.askyesno('确认预览质量','你是否已经看过同一素材、同一区域的修复预览，接受可能的模糊、残影和闪烁？'):
                 self.layout_vars[mode]['repair_approved'].set(token)

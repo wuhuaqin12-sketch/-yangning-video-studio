@@ -526,6 +526,7 @@ class App:
                 elif e[0]=='desktop_update':self.desktop_updates.handle(e[1:])
                 elif e[0]=='repair_preview_ready':
                     self.sequence_panel.repair_previews[e[1]]=e[2];open_path(e[3])
+                elif e[0]=='opening_title_detected':self.sequence_panel.title_detected(e[2],e[1])
                 elif e[0]=='sequence_preview_ready':
                     self.sequence_panel.last_preview=e[1];self.sequence_panel.update();open_path(e[2])
                 elif e[0]=='separation_preview_ready':
