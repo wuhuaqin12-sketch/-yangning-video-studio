@@ -162,6 +162,7 @@ def process(source,folder,token,cancel,progress,seconds=None,start=0,allow_charg
         temp.replace(music)
     except Cancelled:raise
     except Exception:raise CloudError('Music 下载失败，重试将继续原任务。') from None
+    if fingerprint(source,cancel)!=identity['original_sha256']:raise CloudError('等待云端时原始视频发生变化；请重新从原始素材试听。')
     md=float(probe(music,cancel)['format']['duration'])
     if abs(md-length)>.12:raise CloudError(f'Music 时长 {md:.3f} 秒与原片段 {length:.3f} 秒不一致；不加速、不截断讲话，已停止。')
     # Write a unique output. Original pictures are stream-copied for full videos.

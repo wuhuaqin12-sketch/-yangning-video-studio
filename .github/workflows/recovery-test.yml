@@ -29,6 +29,7 @@ jobs:
           }
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
+      - run: python ci/fetch_noise_model.py
       - name: Fetch and verify pinned original stable archive
         run: python -c "import sys; sys.path.insert(0,'program'); from stable_recovery import preserve_archive; from pathlib import Path; import shutil,tempfile; t=tempfile.TemporaryDirectory(); p=preserve_archive(Path(t.name)); Path('recovery').mkdir(exist_ok=True); shutil.copyfile(p,'recovery/v0.12.11-original.zip'); t.cleanup()"
       - run: python -m unittest mvsep_music_test sequence_vnext_test simple_ui_test pixel_aspect_test

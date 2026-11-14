@@ -428,7 +428,7 @@ class App:
         try:j=self.current(True);folder=Path(j['analysis'])
         except Exception:messagebox.showinfo('先分析','请选中已完成分析的任务。');return
         if j.get('sequence'):
-            try:folder=Path(json.loads((folder/'report.json').read_text())['body_analysis'])
+            try:folder=Path(json.loads((folder/'report.json').read_text(encoding='utf8'))['body_analysis'])
             except Exception:messagebox.showinfo('先处理正文','请先完成新版项目预览，再试听正文配音。');return
         if (folder/'clean_project.json').is_file():self.clean_review();return
         def go():
