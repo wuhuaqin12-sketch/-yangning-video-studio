@@ -92,7 +92,10 @@ def stage_package(archive,root,expected_version=None):
                 raise ValueError('更新包展开后过大。')
             names=set()
             for i in infos:
-                name=i.filename
+                # ZipInfo normalizes Windows separators in filename while
+                # reading. Validate the original central-directory name before
+                # extraction so platform normalization cannot bypass checks.
+                name=i.orig_filename
                 parts=name.replace('\\','/').split('/')
                 if name.startswith(('/','\\')) or '\\' in name or ':' in name or '..' in parts:
                     raise ValueError('更新包含不安全的文件路径。')

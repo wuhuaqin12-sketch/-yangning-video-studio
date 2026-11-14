@@ -7,7 +7,7 @@ class Cancelled(Exception): pass
 
 def executable(name):
     local = Path(__file__).parent / 'tools' / (name + '.exe')
-    found = str(local) if local.exists() else shutil.which(name)
+    found = str(local) if os.name=='nt' and local.exists() else shutil.which(name)
     if not found and os.name == 'nt':
         link = Path(os.environ.get('LOCALAPPDATA','')) / 'Microsoft/WinGet/Links' / (name+'.exe')
         if link.exists(): found = str(link)

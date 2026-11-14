@@ -1,4 +1,4 @@
-import os,json,math,tempfile,threading,hashlib,sys,shutil,subprocess,bisect
+import os,json,math,tempfile,threading,hashlib,sys,shutil,subprocess,bisect,re
 from pathlib import Path
 from fractions import Fraction
 import numpy as np
@@ -168,7 +168,17 @@ def render(folder,cancel,progress=lambda s:None):
     size=float(job.get('font_percent',5.6))
     if not 1<=size<=15:raise ValueError('字号须为高度的1–15%')
     write_subs(adjusted,folder,w,h,font,round(h*size/100))
-    tx=[0]+[a for i,a,b,txt in adjusted[1:]]+[total];sx=[0]+[a for i,a,b,txt in src[1:]]+[vd]
+    # Some phone/remuxed clips overstate their last displayed frame by a few
+    # ticks. Count the actual CFR decoder output before building the inverse map;
+    # do not request non-existent tail frames or hide a broken decode with black.
+    progress('核对实际可解码画面，避免手机剪辑的尾部时间戳误差')
+    count_log=run([executable('ffmpeg'),'-v','error','-xerror','-i',job['video'],'-an','-vf',f'fps={fps}','-f','null','-','-progress','pipe:1'],cancel)
+    counts=re.findall(r'^frame=(\d+)\s*$',count_log,re.M)
+    if not counts or int(counts[-1])<1:raise RuntimeError('无法确认原视频实际可解码帧数。')
+    decoded_frames=int(counts[-1]);decoded_vd=decoded_frames/f
+    if abs(decoded_vd-vd)>max(.5,3/f):raise RuntimeError('视频声明时长与实际画面相差过大，请先检查原片。')
+    if src[-1][2]>decoded_vd+.15:raise ValueError('原字幕超出实际可解码画面，请检查字幕末尾。')
+    tx=[0]+[a for i,a,b,txt in adjusted[1:]]+[total];sx=[0]+[a for i,a,b,txt in src[1:]]+[decoded_vd]
     if any(b<=a for a,b in zip(tx,tx[1:])) or any(b<=a for a,b in zip(sx,sx[1:])):raise ValueError('逐句对应关系无法形成递增时间轴')
     inv=PchipInterpolator(tx,sx);n=math.ceil(total*f)
     # Keep the source bitrate rather than a fixed 480x854 preset. CRF fallback is explicit.
@@ -206,7 +216,7 @@ def render(folder,cancel,progress=lambda s:None):
             sample_ids=set(int(t*f) for t in tx if t<total)
             for k in range(n):
                 if cancel.is_set():raise Cancelled()
-                st=float(inv(min(total,k/f)));wanted=min(round(st*f),max(0,math.floor(vd*f)-1))
+                st=float(inv(min(total,k/f)));wanted=min(round(st*f),decoded_frames-1)
                 while current<wanted:
                     buf=bytearray();need=w*h*3
                     while len(buf)<need:
@@ -249,7 +259,7 @@ def render(folder,cancel,progress=lambda s:None):
         write_cover({**COVER_DEFAULTS,**opts},folder,cancel,final)
     shutil.copyfile(folder/json.loads((folder/'audio_versions.json').read_text(encoding='utf8'))['B'],folder/'voice.m4a')
     durations={'original_video_seconds':vd,'original_audio_seconds':m['audio_duration'],'output_seconds':float(pi['format']['duration']),'pause_reductions':sum(e['kind']=='cut' and '结尾' not in e['reason'] for e in events),'pause_additions':sum(e['kind']=='add' for e in events),'removed_seconds':sum(e['end']-e['start'] for e in events if e['kind']=='cut'),'added_seconds':sum(e['seconds'] for e in events if e['kind']=='add')}
-    report={'version':VERSION,**durations,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':False,'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。'],'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
+    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':False,'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。'],'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
     save_json(folder/'report.json',report)
     (folder/'停顿压缩结果.txt').write_text(pause_summary(m['audio_duration'],total,events,playback_speed(job))+f'\n输出倍速{speed:g}倍，保持音调；请试听并检查同步。\n',encoding='utf-8-sig')
     progress('完成并通过解码检查：'+str(final)+'；'+pause_summary(m['audio_duration'],total,events,playback_speed(job)));return str(folder)

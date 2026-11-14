@@ -38,7 +38,7 @@ def layout(opts, stream, w, h):
         top=max(min_top,min(vy+vh+h*.02+opts.get('subtitle_offset_y',0),max_top))
         return vw,vh,vx,vy,sw,sh,sx,top+sh/2
     sw=vw*opts['subtitle_width']/100;sh=vh*opts['subtitle_height']/100
-    sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100
+    sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100+opts.get('subtitle_offset_y',0)
     if sy-sh/2<vy-.01 or sy+sh/2>vy+vh+.01 or sx-sw/2<vx-.01 or sx+sw/2>vx+vw+.01:
         raise ValueError('字幕区域超出老师画面。请移动字幕中心，或减小区域宽度/高度。')
     return vw,vh,vx,vy,sw,sh,sx,sy

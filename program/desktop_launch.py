@@ -4,12 +4,19 @@ from pathlib import Path
 
 def main():
     root=Path(__file__).resolve().parent
-    version=json.loads((root/'current.json').read_text(encoding='utf8'))['version']
+    current=json.loads((root/'current.json').read_text(encoding='utf8'));version=current['version']
     if not isinstance(version,str) or not re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}',version):
         raise ValueError('软件版本指针无效，请重新安装。')
     program=root/'versions'/version/'program'
-    env=os.environ.copy();env['YANGNING_INSTALL_ROOT']=str(root);env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8'
-    python=root/'runtime'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+    scope=current.get('runtime_scope','')
+    if scope not in ('','stable-v12.11'):raise ValueError('运行环境目录无效。')
+    runtime_root=root/scope if scope else root
+    env=os.environ.copy();env['YANGNING_INSTALL_ROOT']=str(runtime_root);env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8'
+    if (root/'preview_profile.json').is_file():env['YANGNING_DATA_ROOT']=str(root/'profile'/'YangNingStudio')
+    if current.get('legacy_profile'):
+        env['LOCALAPPDATA']=str(runtime_root/'profile');env.pop('YANGNING_DATA_ROOT',None)
+        env['PATH']=str(runtime_root/'tools')+os.pathsep+env.get('PATH','')
+    python=runtime_root/'runtime'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
     with (root/'launch.log').open('a',encoding='utf8') as log:
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
         result=subprocess.run([str(python),str(program/'bootstrap.py')],cwd=program,env=env,stdout=log,stderr=log,**flags)

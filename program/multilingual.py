@@ -113,7 +113,8 @@ def worker(request):
     import torch
     torch.set_num_threads(max(1,min(4,os.cpu_count() or 1)))
     data=json.loads(Path(request).read_text(encoding='utf8'))
-    cache=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))/'YangNingStudio'/'models';cache.mkdir(parents=True,exist_ok=True)
+    base=Path(os.environ['YANGNING_DATA_ROOT']) if os.environ.get('YANGNING_DATA_ROOT') else Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))/'YangNingStudio'
+    cache=base/'models';cache.mkdir(parents=True,exist_ok=True)
     from model_cache import load_stable_model
     model,model_name=load_with_fallback(stable_whisper,cache,status)
     def update(done,total):status(f'本地多语言定位 {min(100,round(100*done/max(total,.01)))}%')
