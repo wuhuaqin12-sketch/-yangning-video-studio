@@ -1,7 +1,7 @@
 name: Isolated stable recovery rehearsal
 on:
   push:
-    branches: [test/intro-main-outro, fix/complete-video-audio-gaps]
+    branches: [test/intro-main-outro, fix/complete-video-audio-gaps, ui/body-first]
     paths: ['program/**','ci/**','make_release.py','.github/workflows/recovery-test.yml']
   workflow_dispatch:
 permissions:
@@ -32,7 +32,7 @@ jobs:
       - run: python ci/fetch_noise_model.py
       - name: Fetch and verify pinned original stable archive
         run: python -c "import sys; sys.path.insert(0,'program'); from stable_recovery import preserve_archive; from pathlib import Path; import shutil,tempfile; t=tempfile.TemporaryDirectory(); p=preserve_archive(Path(t.name)); Path('recovery').mkdir(exist_ok=True); shutil.copyfile(p,'recovery/v0.12.11-original.zip'); t.cleanup()"
-      - run: python -m unittest sequence_vnext_test simple_ui_test pixel_aspect_test
+      - run: python -m unittest sequence_vnext_test simple_ui_test pixel_aspect_test caption_top_test glyph_removal_test decoration_test body_first_ui_test publish_style_test.StyleTests encoding_regression_test
         working-directory: program
       - run: python ci/next_windows_smoke.py
       - uses: actions/upload-artifact@v4
@@ -40,12 +40,12 @@ jobs:
         with:
           name: next-windows-evidence
           path: |
-            ${{ runner.temp }}/YangNingNextAcceptance/new_ui.png
+            ${{ runner.temp }}/YangNingNextAcceptance/*.png
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: windows-test-package
-          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.2.zip
+          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.5.zip
           if-no-files-found: error
           retention-days: 30
   restore-windows:

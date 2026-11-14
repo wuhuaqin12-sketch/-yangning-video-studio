@@ -35,7 +35,7 @@ def layout(opts, stream, w, h):
         if room<2*size*1.2+padding:
             raise ValueError('老师画面下方不足以放下字幕。请减小老师画面最大高度，留出下方背景；字幕不会移入老师画面。')
         sh=min(sh,room);max_top=h*.90-sh
-        top=max(min_top,min(vy+vh+h*.02+opts.get('subtitle_offset_y',0),max_top))
+        top=max(min_top,min(min_top+opts.get('subtitle_offset_y',0),max_top))
         return vw,vh,vx,vy,sw,sh,sx,top+sh/2
     sw=vw*opts['subtitle_width']/100;sh=vh*opts['subtitle_height']/100
     sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100+opts.get('subtitle_offset_y',0)
@@ -101,7 +101,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # Clip glyphs and outlines to the background rectangle as a final
             # guard, including font substitutions with different metrics.
             clip=f'\\clip({math.ceil(left)},{math.ceil(top)},{math.floor(right)},{math.floor(bottom)})' if below else ''
-            header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an2\\pos({sx:.1f},{bottom-8-opts["subtitle_outline"] if below else bottom:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
+            anchor=8 if below else 2
+            baseline=top+opts['subtitle_outline']+4 if below else bottom
+            header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an{anchor}\\pos({sx:.1f},{baseline:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
     actual_title=None
     if opts['title'].strip():
         tx=w*opts['title_x']/100;ty=h*opts['title_y']/100
@@ -129,7 +131,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 title_requested_px=title_size,title_actual_px=actual_title,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],
-                subtitle_offset_applied_px=round(top-(vy+vh+h*.02),3) if below else 0,
+                subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else 0,
                 split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue')
     (Path(path).parent/'layout_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     (Path(path).parent/'publish_subtitles.srt').write_text(

@@ -136,8 +136,8 @@ def split_combined(job,p,folder,cancel,progress):
         write_srt(folder/'combined_body.srt',body)
         j.update(video=cut('combined_body.mp4',0,tail),source_srt=str(folder/'combined_body.srt'))
     for mode,layout in p['layouts'].items():
-        if layout.get('repair_approved')==repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True)):
-            layout['repair_approved']=repair_key(j['video'],layout['repair_roi'],layout.get('repair_temporal',True))
+        if layout.get('repair_approved')==layout_repair_key(source,layout):
+            layout['repair_approved']=layout_repair_key(j['video'],layout)
         if layout.get('clean_video'):
             clean=valid_file(layout['clean_video'],'完整无字幕原片')
             if abs(seconds(clean,cancel)-duration)>.1:raise ValueError('完整无字幕原片与完整视频时长不同。')
@@ -150,9 +150,27 @@ def choose_modes(p,total,source_stream):
     # Recommendation only. Manual output mode always overrides it.
     return ['portrait'] if total<=180 and source_stream['height']>=source_stream['width'] else ['landscape']
 
-def repair_key(source,roi,temporal=True):return file_digest(source)+':'+roi+':'+str(bool(temporal))
+def repair_key(source,roi,temporal=False,method='glyph'):
+    if method!='glyph':raise ValueError('整块区域修复已移除，请重新生成仅文字与描边预览。')
+    from glyph_removal import ALGORITHM
+    return file_digest(source)+':'+roi+':'+ALGORITHM
 
-def repair(source,layout,folder,cancel,preview=False,start=0,length=15):
+def layout_repair_key(source,layout):
+    return repair_key(source,layout.get('repair_roi',''),layout.get('repair_temporal',True),layout.get('repair_method','glyph'))
+
+def full_width_subtitle_roi(source,roi,cancel):
+    try:_,y,_,h=map(int,roi.split(','))
+    except Exception as e:raise ValueError('请先填写字幕行区域 x,y,宽,高；扩宽只改变横向，保留你选择的上下范围。') from e
+    from engine import square_pixel_stream
+    stream=square_pixel_stream(next(s for s in probe(source,cancel)['streams'] if s['codec_type']=='video'))
+    rotation=int(stream.get('tags',{}).get('rotate',0))
+    for side in stream.get('side_data_list',[]):
+        if 'rotation' in side:rotation=int(side['rotation'])
+    width,height=(stream['height'],stream['width']) if abs(rotation)%180==90 else (stream['width'],stream['height'])
+    if y<0 or h<2 or y+h>height:raise ValueError('字幕行的上下范围超出原视频。')
+    return f'0,{y},{width},{h}'
+
+def repair(source,layout,folder,cancel,preview=False,start=0,length=15,progress=lambda _:None):
     if not layout['remove_chinese']:return source
     if layout.get('clean_video'):
         clean=valid_file(layout['clean_video'],'无字幕原片')
@@ -168,17 +186,15 @@ def repair(source,layout,folder,cancel,preview=False,start=0,length=15):
     for side in stream.get('side_data_list',[]):
         if 'rotation' in side:rotation=int(side['rotation'])
     if abs(rotation)%180==90:stream['width'],stream['height']=stream['height'],stream['width']
-    if min(x,y)<1 or min(w,h)<2 or x+w>=stream['width']-1 or y+h>=stream['height']-1:raise ValueError('字幕修复区域必须在原视频内部，不能裁掉老师画面。')
-    if not preview and layout.get('repair_approved')!=repair_key(source,roi,layout.get('repair_temporal',True)):raise ValueError('横版原中文字幕修复尚未确认。请先看15秒区域修复预览；低资源方法可能模糊或闪烁，不能承诺AI级还原。')
+    if min(x,y)<0 or min(w,h)<2 or x+w>stream['width'] or y+h>stream['height']:raise ValueError('字幕处理区域须位于原视频内，不能裁掉老师画面。')
+    method=layout.get('repair_method','glyph')
+    if method!='glyph':raise ValueError('整块区域修复已移除，请重新生成仅文字与描边预览。')
+    if not preview and layout.get('repair_approved')!=layout_repair_key(source,layout):raise ValueError('原中文字幕处理尚未确认。请先看15秒预览；更换方式、区域或素材后需重新确认。')
     name=('repair_preview_' if preview else 'repaired_')+uuid.uuid4().hex[:8]+'.mp4';out=folder/name
-    args=['-i',source]
-    if preview:args+=['-ss',start,'-t',length]
-    if layout.get('repair_temporal',True):
-        graph=f'[0:v]scale={stream["width"]}:{stream["height"]},setsar=1,split=2[base][work];[work]delogo=x={x}:y={y}:w={w}:h={h}:show=0,crop={w}:{h}:{x}:{y},tmix=frames=3:weights=1 2 1[patch];[base][patch]overlay={x}:{y}[v]'
-        filters=['-filter_complex_threads','1','-filter_complex',graph,'-map','[v]','-map','0:a:0?']
-    else:filters=['-vf',f'scale={stream["width"]}:{stream["height"]},setsar=1,delogo=x={x}:y={y}:w={w}:h={h}:show=0']
-    ff([*args,*filters,'-c:v','libx264','-preset','fast','-crf','18','-c:a','copy',out],cancel)
-    return str(out)
+    from glyph_removal import process
+    duration=min(length,seconds(source,cancel)-start) if preview else seconds(source,cancel)
+    if duration<=0:raise ValueError('预览起点超出视频时长。')
+    return process(source,out,stream,(x,y,w,h),cancel,start if preview else 0,duration,progress)
 
 def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chinese=False):
     from publish import make_ass
@@ -206,6 +222,12 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     ass=folder/(label+'_'+mode+'.ass')
     visible=cues if burn else []
     vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height)
+    title_scope=label=='opening' or (label=='body' and not p['intro_enabled'])
+    opening_title=title_scope and (p['opening_title_enabled'] or p['opening_topic_enabled'])
+    if opening_title:
+        from opening_caption import add_ass
+        for prefix in ('opening_title','opening_topic'):
+            if p[prefix+'_enabled']:add_ass(ass,p,p.get('_language','ja'),(vx,vy,vw,vh),duration,prefix)
     # make_ass places empty caption tracks over video; keep the normal source fit.
     base=f'color=c=black:s={width}x{height}:r=30:d={duration}[bg]'
     inputs=['-i',source]
@@ -213,7 +235,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
         inputs+=['-loop','1','-i',valid_file(p['background'],'背景图')]
         base=f'[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30[bg]'
     vf=base+f';[0:v]scale={vw}:{vh}:flags=lanczos,setsar=1,fps=30[src];[bg][src]overlay={vx}:{vy}:shortest=1'
-    if burn or opts.get('title'):vf+=f",ass=filename='{ass.name}':fontsdir=fonts"
+    if burn or opts.get('title') or opening_title:vf+=f",ass=filename='{ass.name}':fontsdir=fonts"
     vf+='[v]'
     fonts=Path(__file__).parent/'fonts'
     if fonts.exists() and not (folder/'fonts').exists():shutil.copytree(fonts,folder/'fonts')
@@ -256,6 +278,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
     atomic_json(folder/'project.json',{'schema':1,'job':job})
     main_job=dict(job)
     if p['combined']:main_job,p=split_combined(main_job,p,folder,cancel,progress)
+    p['_language']=main_job.get('language','ja')
     intro,intro_cues=opening(main_job,p,folder,cancel,progress) if p['intro_enabled'] else (None,[])
     main=aligned(main_job,cache_root,cancel,progress)
     body=main/'video.mp4';body_cues=parse_srt(main/'subtitles.srt')
@@ -264,6 +287,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
     duration=seconds(body,cancel)+(seconds(intro,cancel) if intro else 0)+(seconds(ending,cancel) if ending else 0)
     results=[]
     recommendation_duration=duration+(p['cover_seconds'] if any(p.get(k) for k in ('cover','cover_landscape','cover_portrait')) else 0)
+    if p['disclaimer_enabled'] and p['disclaimer_mode']=='append':recommendation_duration+=p['disclaimer_seconds']
     for mode in choose_modes(p,recommendation_duration,stream):
         progress(('预览' if preview else '导出')+'：'+('横版16:9' if mode=='landscape' else '竖版9:16'))
         parts=[];cues=[];offset=0
@@ -275,8 +299,8 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             clean_job={**main_job,'video':clean}
             mode_body=aligned(clean_job,cache_root,cancel,progress)/'video.mp4'
         elif layout['remove_chinese']:
-            if layout.get('repair_approved')==repair_key(main_job['video'],layout.get('repair_roi',''),layout.get('repair_temporal',True)):
-                layout['repair_approved']=repair_key(body,layout['repair_roi'],layout.get('repair_temporal',True))
+            if layout.get('repair_approved')==layout_repair_key(main_job['video'],layout):
+                layout['repair_approved']=layout_repair_key(body,layout)
         cover=p['cover_'+mode] if p['output_mode']=='both' else p['cover'] or p['cover_'+mode]
         if cover:
             parts.append(cover_clip(valid_file(cover,'封面图'),mode,p,folder,cancel));offset=p['cover_seconds']
@@ -285,6 +309,10 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             part=compose_segment(source,subs,style,mode,p,folder,cancel,job.get('burn',False),label,repair_chinese=label=='body' and not layout.get('clean_video'))
             parts.append(part)
             base=len(cues);cues.extend((base+i+1,a+offset,b+offset,t) for i,(_,a,b,t) in enumerate(subs));offset+=seconds(part,cancel)
+        if p['disclaimer_enabled'] and p['disclaimer_mode']=='append':
+            from ending_card import append_card
+            card=append_card(p['disclaimer_image'],mode,p['disclaimer_seconds'],folder,cancel)
+            parts.append(card);offset+=seconds(card,cancel)
         full=folder/('assembled_'+mode+'.mp4')
         if cover and p['cover_transition']=='dissolve':
             # Fade between two actual images. Hold only the next segment's first
@@ -293,6 +321,11 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',transition],cancel)
             parts=[transition,*parts[2:]]
         concat_clips(parts,full,folder,cancel)
+        if p['disclaimer_enabled'] and p['disclaimer_mode']=='overlay':
+            if ending and p['disclaimer_seconds']>seconds(ending,cancel):raise ValueError('免责声明显示秒数超过原片尾，会遮挡正文；请缩短秒数或选择追加图片。')
+            from ending_card import overlay
+            annotated=overlay(full,p['disclaimer_image'],mode,p['disclaimer_seconds'],folder,cancel)
+            os.replace(annotated,full)
         packet_data=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(full)],cancel))['packets']
         previous=None
         for packet in packet_data:
