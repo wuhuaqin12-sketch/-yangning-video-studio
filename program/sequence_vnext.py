@@ -93,20 +93,12 @@ def opening(job,p,folder,cancel,progress):
         end=start+b-a
         if end>duration+.02:raise ValueError(f'片头第{ref[0]}句无法完整放入片头，请提供更长片头或调整停顿；未截断配音。')
         segments.append((a,b,start));placed.append((ref[0],start+cue[1]-a,start+cue[2]-a,ref[3]));previous=end
-    # Lower background music only while narration is present, preserving the
-    # original full-length music track; no global mute or fake denoising.
-    music_index=2 if background else 0
-    filters=[f'[{music_index}:a]aresample=48000,aformat=channel_layouts=stereo,volume={p["intro_music_gain"]},apad=whole_dur={duration},atrim=duration={duration}[music]',f'[1:a]asplit={len(segments)}'+''.join(f'[a{i}]' for i in range(len(segments)))]
-    for i,(a,b,start) in enumerate(segments):filters.append(f'[a{i}]atrim=start={a}:end={b},asetpts=PTS-STARTPTS,adelay={round(start*1000)}:all=1[v{i}]')
-    filters.append(''.join(f'[v{i}]' for i in range(len(segments)))+f'amix=inputs={len(segments)}:normalize=0:duration=longest,apad=whole_dur={duration},atrim=duration={duration},asplit=2[voice][key]')
-    # The compressor ends when its key ends. Keep a silent key beyond the
-    # complete music track so a short narration cannot truncate the music.
-    filters.append(f'[key]apad=pad_dur={duration}[fullkey]')
-    filters.append('[music][fullkey]sidechaincompress=threshold=0.025:ratio=5:attack=20:release=300[duck]')
-    filters.append('[duck][voice]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.89:level=0:latency=1[mix]')
+    from opening_audio import mix
+    mixed=mix(audio,background or source,segments,duration,p['intro_music_gain'],folder,cancel,progress)
     dest=folder/'intro_mixed.mp4'
-    inputs=['-i',source,'-i',audio]+(['-i',background] if background else [])
-    ff([*inputs,'-filter_complex',';'.join(filters),'-map','0:v:0','-map','[mix]','-c:v','copy','-c:a','aac','-b:a','192k',dest],cancel)
+    ff(['-i',source,'-f','f32le','-ar','48000','-ac','2','-i',mixed,'-map','0:v:0','-map','1:a:0','-c:v','copy','-af',f'alimiter=limit=0.89:level=0:latency=1,apad=whole_dur={duration},atrim=duration={duration}','-c:a','aac','-b:a','192k','-t',duration,dest],cancel)
+    streams=probe(dest,cancel)['streams'];track=next(x for x in streams if x['codec_type']=='audio')
+    if abs(float(track['duration'])-duration)>.08:raise RuntimeError('片头混音音轨未覆盖完整画面，已停止。')
     if abs(seconds(dest,cancel)-duration)>.15:raise RuntimeError('片头混音改变了时长。')
     write_srt(folder/'intro_aligned.srt',placed)
     return str(dest),placed

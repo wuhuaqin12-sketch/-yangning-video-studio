@@ -111,6 +111,12 @@ class RenderTests(unittest.TestCase):
             out,cues=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
         self.assertEqual(len(cues),1)
         a=next(x for x in probe(out,self.cancel)['streams'] if x['codec_type']=='audio');self.assertAlmostEqual(float(a['duration']),.8,delta=.03)
+        import numpy as np,subprocess
+        from media import executable
+        raw=subprocess.check_output([executable('ffmpeg'),'-v','error','-ss','.55','-i',out,'-t','.2','-ar','8000','-ac','1','-f','f32le','-'])
+        tail=np.frombuffer(raw,np.float32);self.assertGreater(float(np.sqrt(np.mean(tail*tail))),.01)
+        peak=np.argmax(abs(np.fft.rfft(tail)))*8000/len(tail);self.assertAlmostEqual(peak,660,delta=8)
+
 
     def test_repair_needs_review_and_never_crops(self):
         q=p.defaults()['layouts']['landscape'];q['repair_roi']='20,120,280,30'
