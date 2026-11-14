@@ -36,8 +36,8 @@ class ProjectTests(unittest.TestCase):
             root=Path(d);(root/'assets').mkdir();(root/'assets/body.mp4').write_bytes(b'media')
             p.save_project(root/'project.json',dict(video='assets/body.mp4',output='output',sequence=p.defaults()))
             job,missing=p.load_project(root/'project.json')
-            self.assertFalse(missing);self.assertEqual(job['video'],str(root/'assets/body.mp4'))
-            self.assertEqual(job['output'],str(root/'output'))
+            self.assertFalse(missing);self.assertEqual(Path(job['video']).resolve(),(root/'assets/body.mp4').resolve())
+            self.assertEqual(Path(job['output']).resolve(),(root/'output').resolve())
     def test_manual_modes_preserve_long_content_selection(self):
         q=p.defaults();q['output_mode']='both'
         self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['landscape','portrait'])
