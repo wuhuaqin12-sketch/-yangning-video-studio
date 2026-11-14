@@ -42,7 +42,7 @@ class ProjectTests(unittest.TestCase):
             job['sequence']['background_audio']='assets/music.wav'
             p.save_project(root/'music.json',job)
             loaded,missing=p.load_project(root/'music.json')
-            self.assertFalse(missing);self.assertEqual(loaded['sequence']['background_audio'],str(root/'assets/music.wav'))
+            self.assertFalse(missing);self.assertEqual(Path(loaded['sequence']['background_audio']).resolve(),(root/'assets/music.wav').resolve())
     def test_manual_modes_preserve_long_content_selection(self):
         q=p.defaults();q['output_mode']='both'
         self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['landscape','portrait'])
