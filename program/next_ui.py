@@ -46,7 +46,7 @@ class SequencePanel:
         row=ttk.Frame(self.intro);row.pack(fill='x')
         ttk.Radiobutton(row,text='保留片头全部原声',variable=self.v['intro_mode'],value='original',command=self.update).pack(side='left')
         ttk.Radiobutton(row,text='保留背景音乐，替换中文讲话',variable=self.v['intro_mode'],value='music_voice',command=self.update).pack(side='left',padx=12)
-        ttk.Radiobutton(self.intro,text='使用导入背景音乐（不加配音或SRT）',variable=self.v['intro_mode'],value='external_music',command=self.update).pack(anchor='w')
+        ttk.Radiobutton(self.intro,text='使用导入的片头背景音乐（不加配音或SRT）',variable=self.v['intro_mode'],value='external_music',command=self.update).pack(anchor='w')
         self.intro_voice=ttk.Frame(self.intro)
         file_row(self.intro_voice,'intro_audio','提前准备的片头配音')
         file_row(self.intro_voice,'intro_srt','片头原画面SRT')
@@ -103,7 +103,7 @@ class SequencePanel:
             if self.v['intro_mode'].get()=='original':self.v['intro_mode'].set('external_music')
             self.enabled.set(True);self.update()
     def background_audio_settings(self):
-        win=tk.Toplevel(self.app.root);win.title('背景音乐用途与音量');win.geometry('680x270')
+        win=tk.Toplevel(self.app.root);win.title('片头背景音乐与音量');win.geometry('680x270')
         box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
         ttk.Label(box,text='当前作用范围：片头。完整视频模式按“片头结束秒”确定范围。',wraplength=620).pack(anchor='w',pady=6)
         self.number(box,'background_audio_offset','从背景音乐文件第几秒开始')

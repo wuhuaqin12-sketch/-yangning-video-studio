@@ -38,7 +38,7 @@ def media_paths(job):
     result={k:job.get(k) for k in ('video','audio','source_srt','target_srt') if job.get(k)}
     p=normalize(job.get('sequence'))
     for k in ('intro_video','intro_audio','intro_srt','intro_target_srt'):
-        if p['intro_enabled'] and p.get(k):result[k]=p[k]
+        if p['intro_enabled'] and p.get(k) and (k=='intro_video' or p['intro_mode']=='music_voice'):result[k]=p[k]
     if p['outro_enabled'] and p['outro_video']:result['outro_video']=p['outro_video']
     for k in ('cover','cover_landscape','cover_portrait','background','background_audio'):
         if p[k]:result[k]=p[k]

@@ -61,10 +61,11 @@ class App:
         for text,command in [('降噪 / 人声分离 / 试听',self.sound_settings),('停顿 / 速度',self.timing_settings),('标题 / 字幕 / 封面',self.publish)]:ttk.Button(quick,text=text,command=command).pack(side='left',padx=5)
         from next_ui import SequencePanel
         self.sequence_panel=SequencePanel(self,pane)
-        ttk.Label(form,text='背景音乐（可选，已去人声）').grid(row=8,column=0,sticky='w',pady=6)
+        ttk.Label(form,text='片头背景音乐（可选）').grid(row=8,column=0,sticky='w',pady=6)
         ttk.Entry(form,textvariable=self.sequence_panel.v['background_audio']).grid(row=8,column=1,sticky='ew')
         ttk.Button(form,text='选择',command=self.sequence_panel.pick_background_audio).grid(row=8,column=2,padx=(6,0))
-        ttk.Button(form,text='背景音乐用途 / 音量',command=self.sequence_panel.background_audio_settings).grid(row=9,column=1,sticky='w',pady=4)
+        ttk.Label(form,text='仅作用于片头；请导入已去人声音乐').grid(row=9,column=0,sticky='w')
+        ttk.Button(form,text='片头背景音乐 / 音量',command=self.sequence_panel.background_audio_settings).grid(row=9,column=1,sticky='w',pady=4)
         self.target_label=ttk.Label(form,text='独立配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))

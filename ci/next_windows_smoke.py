@@ -26,7 +26,7 @@ def main():
     for label in ('降噪 / 人声分离 / 试听','停顿 / 速度','标题 / 字幕 / 封面'):assert labels.count(label)==1
     assert app.v['burn'].get() is False
     assert panel.v['background_audio'].get()==''
-    assert p_label_present(root, '背景音乐（可选，已去人声）')
+    assert p_label_present(root, '片头背景音乐（可选）')
     panel.enabled.set(True);panel.v['intro_enabled'].set(True);panel.v['outro_enabled'].set(True)
     panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
     assert app.sequence_settings['output_mode']=='both'
