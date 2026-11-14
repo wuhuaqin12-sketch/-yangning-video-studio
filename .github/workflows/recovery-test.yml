@@ -41,6 +41,12 @@ jobs:
           path: |
             ${{ runner.temp }}/YangNingNextAcceptance/new_ui.png
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-package
+          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.0.zip
+          if-no-files-found: error
+          retention-days: 30
   restore-windows:
     runs-on: windows-latest
     timeout-minutes: 20
