@@ -11,7 +11,9 @@ class SimpleUITests(unittest.TestCase):
         self.assertIn("text='一键生成视频',command=self.one_click_simple",src)
         self.assertIn("text='降噪 / 人声分离 / 试听'",src)
         self.assertIn("text='标题 / 字幕 / 封面'",src)
-        self.assertIn("self.v['burn'].set(True)",src)
+        self.assertIn("burn=False",src)
+        self.assertIn("text='把新字幕写入视频画面'",src)
+        self.assertNotIn("self.v['burn'].set(True)",src)
     def test_optional_audio_uses_source_audio(self):
         with TemporaryDirectory() as d:
             paths=[Path(d)/n for n in ('video.mp4','source.srt')]

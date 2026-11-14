@@ -6,6 +6,40 @@ on:
 permissions:
   contents: read
 jobs:
+  next-features-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: choco install ffmpeg --no-progress -y
+      - name: Bundle real Windows media executables
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force program/tools | Out-Null
+          foreach ($n in @('ffmpeg','ffprobe')) {
+            Copy-Item "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/$n.exe" "program/tools/$n.exe"
+          }
+      - run: python -m pip install -r program/requirements.txt
+      - run: python ci/fetch_fonts.py
+      - name: Fetch and verify pinned original stable archive
+        run: python -c "import sys; sys.path.insert(0,'program'); from stable_recovery import preserve_archive; from pathlib import Path; import shutil,tempfile; t=tempfile.TemporaryDirectory(); p=preserve_archive(Path(t.name)); Path('recovery').mkdir(exist_ok=True); shutil.copyfile(p,'recovery/v0.12.11-original.zip'); t.cleanup()"
+      - run: python -m unittest sequence_vnext_test simple_ui_test pixel_aspect_test
+        working-directory: program
+      - run: python ci/next_windows_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: next-windows-evidence
+          path: |
+            ${{ runner.temp }}/YangNingNextAcceptance/new_ui.png
+          if-no-files-found: warn
   restore-windows:
     runs-on: windows-latest
     timeout-minutes: 20

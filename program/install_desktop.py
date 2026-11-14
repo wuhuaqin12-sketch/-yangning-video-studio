@@ -5,8 +5,22 @@ from desktop_update import APP_VERSION,install_root,stage_package,activate,versi
 
 def install():
     if os.name!='nt':raise RuntimeError('此安装器用于 Windows 10 / 11。')
-    root=install_root();source=Path(__file__).resolve().parent.parent
+    source=Path(__file__).resolve().parent.parent
+    release=json.loads((source/'release.json').read_text())
+    if release.get('channel')=='test':
+        os.environ['YANGNING_INSTALL_ROOT']=str(Path(os.environ['LOCALAPPDATA'])/'YangNingStudioDesktopPreview')
+        os.environ['YANGNING_DATA_ROOT']=str(install_root()/'profile'/'YangNingStudio')
+        os.environ['YANGNING_SHORTCUT_NAME']='杨宁视频工作室 测试版'
+    root=install_root()
     root.mkdir(parents=True,exist_ok=True)
+    if release.get('channel')=='test':
+        from desktop_update import atomic_json
+        atomic_json(root/'preview_profile.json',{'channel':'test','isolated_profile':True})
+        from stable_recovery import preserve_archive,snapshot
+        preserve_archive(root,source/'recovery/v0.12.11-original.zip')
+        production=Path(os.environ['LOCALAPPDATA'])/'YangNingStudioDesktop'
+        if production.exists():snapshot(production,Path(os.environ['LOCALAPPDATA'])/'YangNingStudio')
+        snapshot(root,Path(os.environ['YANGNING_DATA_ROOT']))
     if (root/'current.json').exists():
         current=json.loads((root/'current.json').read_text())['version']
         if version_tuple(current)>version_tuple(APP_VERSION):
@@ -26,7 +40,6 @@ def install():
     from windows_shortcut import create_shortcuts
     create_shortcuts(root/'runtime'/'Scripts'/'pythonw.exe',root/'desktop_launch.py',root)
     activate(root,APP_VERSION)
-    release=json.loads((source/'release.json').read_text())
     if release.get('update_manifest_url') and not (root/'update_config.json').exists():
         save_config(release['update_manifest_url'],root)
     print('安装完成：以后请双击桌面的“杨宁视频工作室”。')

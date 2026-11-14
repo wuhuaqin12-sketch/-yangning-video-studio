@@ -1,6 +1,7 @@
 """Create Unicode shell links without Windows Script Host's ANSI Save path."""
 import ctypes as C
 import uuid
+import os
 from pathlib import Path
 
 
@@ -34,7 +35,9 @@ def create_shortcuts(python, launcher, root):
             path=C.create_unicode_buffer(32768)
             check(shell.SHGetFolderPathW(None,folder_id,None,0,path))
             directory=Path(path.value);directory.mkdir(parents=True,exist_ok=True)
-            check(call(persist,6,[C.c_wchar_p,C.c_int],str(directory/'杨宁视频工作室.lnk'),1))
+            label=os.environ.get('YANGNING_SHORTCUT_NAME','杨宁视频工作室')
+            if label not in ('杨宁视频工作室','杨宁视频工作室 测试版'):raise ValueError('快捷方式名称无效。')
+            check(call(persist,6,[C.c_wchar_p,C.c_int],str(directory/(label+'.lnk')),1))
     finally:
         if persist.value:call(persist,2,[])
         if link.value:call(link,2,[])

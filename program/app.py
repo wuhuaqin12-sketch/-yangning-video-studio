@@ -7,7 +7,7 @@ from engine import preview_audio,Cancelled,VERSION
 from workflow import normalize,execute
 from output_destination import preferred, remember, deliver
 from audio_edit import import_plan,export_plan
-DATA=Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'YangNingStudio'
+DATA=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'YangNingStudio')
 DATA.mkdir(parents=True,exist_ok=True)
 # Keep old queues intact; stale settings and analysis from old versions are not run.
 STATE=DATA/'queue_noerase_v055.json'
@@ -22,6 +22,7 @@ class App:
         defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.1',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
         defaults['output']=preferred(defaults['output'])
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
+        self.sequence_settings={}
         self.auto_cut=tk.BooleanVar(value=True)
         self.v['audio_separate']=tk.BooleanVar(value=False)
         try:
@@ -55,6 +56,9 @@ class App:
             ttk.Entry(form,textvariable=self.v[k]).grid(row=i,column=1,sticky='ew')
             ttk.Button(form,text='选择',command=lambda key=k:self.pick(key)).grid(row=i,column=2,padx=(6,0))
         form.columnconfigure(1,weight=1)
+        ttk.Checkbutton(form,text='把新字幕写入视频画面',variable=self.v['burn']).grid(row=6,column=0,columnspan=3,sticky='w',pady=5)
+        from next_ui import SequencePanel
+        self.sequence_panel=SequencePanel(self,pane)
         self.target_label=ttk.Label(form,text='独立配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
@@ -71,7 +75,7 @@ class App:
         ttk.Combobox(speed_line,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=8).pack(side='left')
         ttk.Label(speed_line,text='倍  ·  所有语言默认1.1倍，保持音调').pack(side='left',padx=8)
         final=ttk.LabelFrame(pane,text='②  一键生成',padding=12);final.pack(fill='x',pady=6)
-        ttk.Label(final,text='自动定位字幕 → 优化停顿与音画同步 → 导出视频（字幕写入在更多设置中选择）',wraplength=820).pack(anchor='w',pady=(0,10))
+        ttk.Label(final,text='自动定位字幕 → 优化停顿与音画同步 → 导出视频（新字幕写入开关在SRT附近）',wraplength=820).pack(anchor='w',pady=(0,10))
         line=ttk.Frame(final);line.pack(fill='x')
         self.main_button=ttk.Button(line,text='一键生成视频',command=self.one_click_simple)
         self.main_button.pack(side='left',ipadx=24,ipady=8)
@@ -290,6 +294,14 @@ class App:
         if self.busy:return
         try:j=dict(self.current(True));folder=Path(j['analysis'])
         except Exception:messagebox.showinfo('选择任务','请选中已制作或已分析的任务，再重新导出。');return
+        if j.get('sequence'):
+            try:
+                if not self.sequence_panel.ready():
+                    messagebox.showinfo('先预览','请先生成当前完整项目范围预览并确认，再重新导出。');return
+                j.update(sequence=self.sequence_panel.value(),publish_settings=dict(self.pending_style),burn=self.v['burn'].get())
+                j.pop('_sequence_preview',None);self.run_jobs([j],export=True)
+            except Exception as e:messagebox.showerror('重新导出',str(e))
+            return
         def work():
             try:
                 if (folder/'clean_project.json').exists():
@@ -324,6 +336,7 @@ class App:
             self.v[k].set(remember(selected) if k=='output' else selected)
     def settings(self):
         j={k:v.get() for k,v in self.v.items()};j['publish_settings']=dict(self.pending_style);j['trim']=self.auto_cut.get();j.pop('preview_time',None)
+        if self.sequence_settings:j['sequence']=self.sequence_settings
         if not 1<=float(j['font_percent'])<=15:raise ValueError('字号应为1–15%')
         if not j['name']:j['name']=Path(j['video']).stem or 'video'
         return normalize(j)
@@ -349,6 +362,9 @@ class App:
         # Respect the user's subtitle checkbox in the one-click workflow.
         try:self.detect_language()
         except ValueError as e:messagebox.showerror('语言不一致',str(e));return
+        if self.sequence_settings and not self.sequence_panel.ready():
+            messagebox.showinfo('先预览再导出','将先生成当前项目的范围预览。看过后，点击“确认预览，允许导出”，再生成完整视频。')
+            self.sequence_panel.preview();return
         self.one_click()
     def detect_language(self):
         """Manual selection overrides filename hints; no false speech-recognition claims."""
@@ -445,7 +461,6 @@ class App:
         ttk.Radiobutton(box,text='使用已校对配音SRT时间轴（可选）',variable=self.v['alignment'],value='timed').pack(anchor='w')
         line=ttk.Frame(box);line.pack(fill='x',pady=8);ttk.Label(line,text='独立配音SRT（可留空）').pack(side='left');ttk.Entry(line,textvariable=self.v['target_srt']).pack(side='left',fill='x',expand=True);ttk.Button(line,text='选择',command=lambda:self.pick('target_srt')).pack(side='left')
         ttk.Button(box,text='选择输出文件夹',command=lambda:self.pick('output')).pack(anchor='w',pady=5)
-        ttk.Checkbutton(box,text='把新字幕写入视频画面（默认关闭）',variable=self.v['burn']).pack(anchor='w',pady=6)
         ttk.Button(box,text='配音匹配并导出',command=lambda:(win.destroy(),self.one_click())).pack(anchor='w',pady=5)
         ttk.Button(box,text='降噪 / 人声分离 / 试听',command=lambda:(win.destroy(),self.sound_settings())).pack(anchor='w',pady=5)
         ttk.Button(box,text='停顿 / 速度',command=lambda:(win.destroy(),self.timing_settings())).pack(anchor='w',pady=5)
@@ -481,6 +496,12 @@ class App:
                     self.busy=False;self.bar.stop();self.main_button.state(['!disabled'])
                     if not self.jobs or self.status.get().startswith('已启动'):self.status.set('操作完成。')
                 elif e[0]=='desktop_update':self.desktop_updates.handle(e[1:])
+                elif e[0]=='repair_preview_ready':
+                    self.sequence_panel.repair_previews[e[1]]=e[2];open_path(e[3])
+                elif e[0]=='sequence_preview_ready':
+                    self.sequence_panel.last_preview=e[1];open_path(e[2])
+                elif e[0]=='separation_preview_ready':
+                    self.sequence_panel.separation_preview_token=e[1];open_path(e[2])
                 elif e[0]=='style_saved':
                     self.pending_style=e[1]
                     (DATA/'style_no_denoise.json').write_text(json.dumps(e[1],ensure_ascii=False,indent=2),encoding='utf8')

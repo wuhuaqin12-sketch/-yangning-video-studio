@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-PREFS = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'YangNingStudio' / 'output_destination.json'
+PREFS = Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'YangNingStudio') / 'output_destination.json'
 
 def remember(path):
     target = Path(str(path).strip()).expanduser()
