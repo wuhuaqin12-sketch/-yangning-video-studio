@@ -26,6 +26,8 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertFalse(p.enabled.get());self.assertFalse(self.app.sequence_settings)
         for part in (p.controls,p.segments,p.intro,p.outro,p.combined,p.music,self.app.activity):self.assertFalse(part.winfo_ismapped())
         self.assertFalse(self.app.v['burn'].get())
+        self.assertEqual(self.app.v['speed'].get(),'1.0')
+        self.assertEqual(self.app.language_name.get(),'按文件名判断')
         self.assertEqual(p.layout_vars['landscape']['subtitle_font_size'].get(),'84')
         self.assertEqual(p.layout_vars['portrait']['subtitle_font_size'].get(),'')
         self.assertEqual(p.layout_vars['landscape']['repair_method'].get(),'glyph')
@@ -71,4 +73,32 @@ class BodyFirstUITests(unittest.TestCase):
         with self.assertRaises(ValueError):self.app.settings()
         p.v['disclaimer_seconds'].set('8')
         dialog.destroy()
+    def test_chinese_choices_preserve_internal_values_and_reload(self):
+        p=self.panel
+        self.assertEqual(p.cover_choices['cover_transition'].display.get(),'直接切换')
+        p.cover_choices['cover_transition'].display.set('交叉淡化')
+        p.cover_choices['cover_transition'].event_generate('<<ComboboxSelected>>')
+        self.root.update();self.assertEqual(p.v['cover_transition'].get(),'dissolve')
+        p.v['cover_fit'].set('crop');self.root.update()
+        self.assertEqual(p.cover_choices['cover_fit'].display.get(),'等比例裁切')
+        self.assertEqual(p.project()['sequence']['cover_fit'],'crop')
+        self.app.v['speed'].set('1.1')
+        from project_vnext import save_project
+        path=self.folder/'speed.json';save_project(path,p.project())
+        self.app.v['speed'].set('1.0');p.load(path);self.root.update()
+        self.assertEqual(self.app.v['speed'].get(),'1.1')
+    def test_wheel_scrolls_expanded_page_without_changing_speed(self):
+        from tkinter import ttk
+        p=self.panel;p.appearance_open.set(True);p.details_open.set(True);self.mode(1)
+        p.v['intro_enabled'].set(True);p.v['intro_mode'].set('music_voice');p.update()
+        self.app.root.geometry('1000x640');self.root.update()
+        canvas=self.app.content_canvas;canvas.yview_moveto(0);self.root.update()
+        def descendants(parent):
+            for child in parent.winfo_children():yield child;yield from descendants(child)
+        speed=next(w for w in descendants(self.root) if isinstance(w,ttk.Combobox) and str(w.cget('textvariable'))==str(self.app.v['speed']))
+        speed.event_generate('<MouseWheel>',delta=-120);self.root.update()
+        self.assertEqual(self.app.v['speed'].get(),'1.0')
+        self.assertGreater(canvas.yview()[0],0)
+        canvas.yview_moveto(1);self.root.update()
+        self.assertLessEqual(self.app.main_button.winfo_rooty()+self.app.main_button.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
 if __name__=='__main__':unittest.main()

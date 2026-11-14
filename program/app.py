@@ -19,7 +19,7 @@ class App:
         self.root=root;root.title('杨宁视频工作室 · 成片制作 · '+VERSION)
         root.geometry(f'1000x{max(640,min(780,root.winfo_screenheight()-100))}');root.minsize(880,640)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
-        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.1',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
+        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.0',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
         defaults['output']=preferred(defaults['output'])
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.sequence_settings={}
@@ -43,6 +43,7 @@ class App:
         except (OSError,ValueError):pass
         outer=ttk.Frame(root);outer.pack(fill='both',expand=True)
         canvas=tk.Canvas(outer,highlightthickness=0);scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview)
+        self.content_canvas=canvas
         canvas.configure(yscrollcommand=scroll.set);scroll.pack(side='right',fill='y');canvas.pack(side='left',fill='both',expand=True)
         pane=ttk.Frame(canvas,padding=10);pane_id=canvas.create_window((0,0),window=pane,anchor='nw')
         pane.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')))
@@ -52,7 +53,7 @@ class App:
         ttk.Button(heading,text='更多 / 批量',command=self.advanced).pack(side='right')
         form=ttk.LabelFrame(pane,text='① 正文素材',padding=8);form.pack(fill='x',pady=6)
         self.media_labels={}
-        for i,(k,label) in enumerate([('video','正文视频 MP4'),('audio','正文配音（可留空）'),('source_srt','正文SRT（外语）')]):
+        for i,(k,label) in enumerate([('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）')]):
             self.media_labels[k]=ttk.Label(form,text=label);self.media_labels[k].grid(row=i,column=0,sticky='w',padx=(0,10),pady=4)
             ttk.Entry(form,textvariable=self.v[k]).grid(row=i,column=1,sticky='ew')
             ttk.Button(form,text='选择',command=lambda key=k:self.pick(key)).grid(row=i,column=2,padx=(6,0))
@@ -65,13 +66,13 @@ class App:
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
         self.target_label.grid(row=5,column=0,sticky='w');self.target_entry.grid(row=5,column=1,sticky='ew');self.target_button.grid(row=5,column=2)
         for widget in (self.target_label,self.target_entry,self.target_button):widget.grid_remove()
-        self.language_name=tk.StringVar(value='自动识别')
+        self.language_name=tk.StringVar(value='按文件名判断')
         self.language_manual=False
         options=ttk.Frame(form);options.grid(row=4,column=0,columnspan=3,sticky='w',pady=4)
         ttk.Label(options,text='配音语言').pack(side='left')
-        language=ttk.Combobox(options,textvariable=self.language_name,values=('自动识别','日语','英语','中文','法语','印尼语','德语','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=12)
+        language=ttk.Combobox(options,textvariable=self.language_name,values=('按文件名判断','日语','英语','中文','法语','印尼语','德语','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=12)
         language.pack(side='left',padx=(6,12));language.bind('<<ComboboxSelected>>',self.language_changed)
-        ttk.Label(options,text='速度').pack(side='left')
+        ttk.Label(options,text='配音速度').pack(side='left')
         ttk.Combobox(options,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=6).pack(side='left',padx=6)
         ttk.Button(options,text='声音 / 停顿设置',command=self.sound_settings).pack(side='left',padx=10)
         final=ttk.LabelFrame(pane,text='③ 生成视频',padding=8);final.pack(fill='x',pady=6)
@@ -101,6 +102,8 @@ class App:
         from desktop_ui import DesktopUpdates
         self.desktop_updates=DesktopUpdates(self,pane,compact=True)
         self.build_menu()
+        from ui_scroll import install_wheel
+        install_wheel(canvas)
         self.refresh();root.after(100,self.poll);root.after(1000,self.heartbeat);root.protocol('WM_DELETE_WINDOW',self.close)
     def set_activity(self,visible=None):
         self.activity_open=not self.activity_open if visible is None else bool(visible)
@@ -129,10 +132,10 @@ class App:
         ttk.Checkbutton(box,text='剪短多余空白，保留自然停顿',variable=self.auto_cut).pack(anchor='w',pady=5)
         line=ttk.Frame(box);line.pack(fill='x',pady=8)
         ttk.Label(line,text='配音语言').pack(side='left')
-        choices=('英语','日语','法语','德语','西班牙语','意大利语','韩语','葡萄牙语','中文','印尼语','其他语言')
+        choices=('按文件名判断','英语','日语','法语','德语','西班牙语','意大利语','韩语','葡萄牙语','中文','印尼语','其他语言')
         language=ttk.Combobox(line,textvariable=self.language_name,values=choices,state='readonly',width=12)
         language.pack(side='left',padx=8);language.bind('<<ComboboxSelected>>',self.language_changed)
-        ttk.Label(box,text='整段去噪试听保持原速。配音成片所有语言默认1.1倍，可在主页面选择倍速，保持音调。',wraplength=570).pack(anchor='w',pady=8)
+        ttk.Label(box,text='整段去噪试听保持原速。新任务配音默认1.0倍；可在主页面手动选择倍速，保持音调。已保存项目保留原速度。',wraplength=570).pack(anchor='w',pady=8)
         ttk.Button(box,text='保存，返回制作',command=win.destroy).pack(anchor='e',pady=8)
     def finish_movie(self):
         if self.busy:return
@@ -344,7 +347,7 @@ class App:
     def language_changed(self,event=None):
         mapping={'英语':'en','日语':'ja','法语':'fr','德语':'de','西班牙语':'es','意大利语':'it','韩语':'ko','葡萄牙语':'pt','中文':'zh','印尼语':'id','其他语言':'other'}
         name=self.language_name.get()
-        self.language_manual=name!='自动识别'
+        self.language_manual=name not in ('按文件名判断','自动识别')
         if not self.language_manual:return
         lang=mapping[name]
         self.v['language'].set(lang)
@@ -400,7 +403,7 @@ class App:
         hint=(Path(self.v['audio'].get()).stem+' '+Path(self.v['source_srt'].get()).stem).lower()
         patterns=[('ja',r'日语|日本語|japanese|nihongo'),('en',r'英语|英語|english'),('fr',r'法语|法語|french|français'),('id',r'印尼|indonesian|bahasa'),('zh',r'中文|汉语|漢語|chinese'),('ko',r'韩语|韓語|korean'),('de',r'德语|德語|german'),('es',r'西班牙|spanish'),('pt',r'葡萄牙|portuguese'),('it',r'意大利|italian')]
         matches={code for code,pattern in patterns if re.search(pattern,hint)}
-        if len(matches)!=1:raise ValueError('无法可靠自动识别语言，请在主页面手动选择配音语言。')
+        if len(matches)!=1:raise ValueError('无法按文件名确定唯一语言，请在主页面手动选择配音语言；此处不会听音频识别语言。')
         self.v['language'].set(next(iter(matches)))
         self.v['alignment'].set('auto')
         self.v['target_srt'].set('')

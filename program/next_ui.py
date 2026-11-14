@@ -6,6 +6,21 @@ from tkinter import ttk,filedialog,messagebox
 from project_vnext import defaults,normalize,save_project,load_project,preview_key
 
 SEGMENT_MODES=('只做正文（默认）','另加片头 / 片尾','整片视频（已有片头片尾）')
+
+def choice_combo(parent,variable,labels,**options):
+    """Chinese labels over stable saved values, including project reloads."""
+    reverse={value:label for label,value in labels.items()}
+    display=tk.StringVar(master=parent,value=reverse.get(variable.get(),variable.get()))
+    box=ttk.Combobox(parent,textvariable=display,values=tuple(labels),state='readonly',**options)
+    box.bind('<<ComboboxSelected>>',lambda e:variable.set(labels[display.get()]))
+    token=variable.trace_add('write',lambda *_:display.set(reverse.get(variable.get(),variable.get())))
+    def detach(event):
+        try:variable.trace_remove('write',token)
+        except tk.TclError:pass
+    box.bind('<Destroy>',detach)
+    box.display=display
+    return box
+
 class SequencePanel:
     def __init__(self,app,parent):
         self.app=app;self.v={};self.layout_vars={};self.saved_timer=None;self.restoring=True
@@ -40,9 +55,11 @@ class SequencePanel:
         self.cover_l=file_row(self.controls,'cover_landscape','横版封面图16:9');self.cover_p=file_row(self.controls,'cover_portrait','竖版封面图9:16')
         self.cover_options=ttk.Frame(self.controls)
         row=ttk.Frame(self.cover_options);row.pack(fill='x',pady=4)
-        for label,key,values in [('封面秒数','cover_seconds',('2','3','5')),('转场','cover_transition',('cut','dissolve')),('封面比例不符','cover_fit',('ask','contain','crop'))]:
-            ttk.Label(row,text=label).pack(side='left',padx=4);ttk.Combobox(row,textvariable=self.v[key],values=values,state='readonly',width=10).pack(side='left')
-        ttk.Label(self.cover_options,text='cut直接切换；dissolve交叉淡化。ask提示；contain等比例留边；crop裁切。').pack(anchor='w')
+        self.cover_choices={}
+        for label,key,values in [('封面秒数','cover_seconds',{'2秒':'2','3秒':'3','5秒':'5'}),('转场','cover_transition',{'直接切换':'cut','交叉淡化':'dissolve'}),('比例不符时','cover_fit',{'先提示':'ask','等比例留边':'contain','等比例裁切':'crop'})]:
+            ttk.Label(row,text=label).pack(side='left',padx=4)
+            box=choice_combo(row,self.v[key],values,width=12);box.pack(side='left');self.cover_choices[key]=box
+        ttk.Label(self.cover_options,text='封面实际写入MP4开头；期间静音，配音和字幕从后续视频开始。').pack(anchor='w')
         ttk.Button(self.controls,text='字幕位置 / 原中文字幕处理 ▾',command=self.toggle_details).pack(anchor='w',pady=5)
         self.layout_details=ttk.Frame(self.controls)
         self.layouts=ttk.Notebook(self.layout_details);self.layouts.pack(fill='x',pady=4)
@@ -95,9 +112,11 @@ class SequencePanel:
         ttk.Button(self.music,text='音乐起点 / 音量 / 清除',command=self.background_audio_settings).pack(anchor='w')
         self.segment_anchor=ttk.Frame(self.segments);self.segment_anchor.pack(fill='x')
         self.preview_controls=ttk.Frame(self.box)
-        ttk.Button(self.preview_controls,text='生成范围预览',command=self.preview).pack(side='left')
-        ttk.Button(self.preview_controls,text='确认预览',command=self.approve_preview).pack(side='left',padx=6)
-        ttk.Button(self.preview_controls,text='预览起点 / 时长',command=self.preview_range).pack(side='left')
+        preview_buttons=ttk.Frame(self.preview_controls);preview_buttons.pack(fill='x')
+        ttk.Button(preview_buttons,text='生成范围预览',command=self.preview).pack(side='left')
+        ttk.Button(preview_buttons,text='确认预览',command=self.approve_preview).pack(side='left',padx=6)
+        ttk.Button(preview_buttons,text='预览起点 / 时长',command=self.preview_range).pack(side='left')
+        ttk.Label(self.preview_controls,text='先生成并观看预览，再点“确认预览”后导出；修改画面设置需重新预览。',wraplength=850).pack(anchor='w',pady=3)
         self.autosave=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')/'last_project_next.json'
         self.has_startup_autosave=self.autosave.exists()
         for variable in [self.enabled,self.mode,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
@@ -125,11 +144,13 @@ class SequencePanel:
             row=ttk.Frame(page);row.pack(fill='x',pady=3)
             ttk.Label(row,text='字体').pack(side='left');ttk.Combobox(row,textvariable=self.v[prefix+'_font'],values=('Yuji Boku','Noto Serif CJK JP'),width=23).pack(side='left',padx=4)
             ttk.Label(row,text='颜色 #RRGGBB').pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_color'],width=10).pack(side='left',padx=4)
-            ttk.Label(row,text='排版').pack(side='left');ttk.Combobox(row,textvariable=self.v[prefix+'_orientation'],values=('horizontal','vertical'),state='readonly',width=11).pack(side='left',padx=4)
+            ttk.Label(row,text='排版').pack(side='left');choice_combo(row,self.v[prefix+'_orientation'],{'横排':'horizontal','竖排':'vertical'},width=10).pack(side='left',padx=4)
             ttk.Checkbutton(page,text='定位时参考原字颜色、可见字高与横竖排；字体请手动选择相近款',variable=self.v[prefix+'_auto_style']).pack(anchor='w')
             ttk.Checkbutton(page,text='按最近定位的原字可见高度显示（取消后使用手动字号）',variable=self.v[prefix+'_match_size']).pack(anchor='w')
             ttk.Button(page,text='本地OCR定位并参考原字样式（需预览）',command=lambda k=prefix:self.detect_title(k)).pack(anchor='w',pady=6)
-            ttk.Label(page,text='竖排中文：日语译名放在旁边；横排中文：译名放在下方。horizontal横排，vertical竖排。\n字号/颜色取样是估计，不保证识别同款字体；移动、渐变与复杂背景须预览、手动微调。',wraplength=750).pack(anchor='w')
+            ttk.Label(page,text='竖排中文：日语译名放在旁边；横排中文：译名放在下方。\n字号/颜色取样是估计，不保证识别同款字体；移动、渐变与复杂背景须预览、手动微调。',wraplength=750).pack(anchor='w')
+            from ui_scroll import install_wheel
+            install_wheel(canvas)
         tabs.add(tail,text='片尾免责声明图片')
         ttk.Checkbutton(tail,text='启用片尾免责声明图片',variable=self.v['disclaimer_enabled']).pack(anchor='w',pady=5)
         row=ttk.Frame(tail);row.pack(fill='x',pady=8)
@@ -264,7 +285,7 @@ class SequencePanel:
         if self.enabled.get():self.preview_controls.pack(fill='x',pady=4)
         if hasattr(self.app,'media_labels'):
             complete=mode==SEGMENT_MODES[2]
-            for key,label in [('video','完整视频 MP4' if complete else '正文视频 MP4'),('audio','整片配音（可留空）' if complete else '正文配音（可留空）'),('source_srt','整片SRT（外语）' if complete else '正文SRT（外语）')]:self.app.media_labels[key].configure(text=label)
+            for key,label in [('video','完整视频 MP4' if complete else '正文视频 MP4'),('audio','整片配音（留空用原声）' if complete else '正文配音（留空用原声）'),('source_srt','整片SRT（外语）' if complete else '正文SRT（外语）')]:self.app.media_labels[key].configure(text=label)
         self.appearance_button.configure(text='收起画面设置 ▴' if self.appearance_open.get() else '画面设置（背景 / 封面 / 比例）')
         self.changed()
     def project(self):
