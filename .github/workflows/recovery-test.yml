@@ -1,7 +1,7 @@
 name: Isolated stable recovery rehearsal
 on:
   push:
-    branches: [test/intro-main-outro]
+    branches: [test/intro-main-outro, feat/mvsep-dnr3]
     paths: ['program/**','ci/**','make_release.py','.github/workflows/recovery-test.yml']
   workflow_dispatch:
 permissions:
@@ -31,7 +31,7 @@ jobs:
       - run: python ci/fetch_fonts.py
       - name: Fetch and verify pinned original stable archive
         run: python -c "import sys; sys.path.insert(0,'program'); from stable_recovery import preserve_archive; from pathlib import Path; import shutil,tempfile; t=tempfile.TemporaryDirectory(); p=preserve_archive(Path(t.name)); Path('recovery').mkdir(exist_ok=True); shutil.copyfile(p,'recovery/v0.12.11-original.zip'); t.cleanup()"
-      - run: python -m unittest sequence_vnext_test simple_ui_test pixel_aspect_test
+      - run: python -m unittest mvsep_music_test sequence_vnext_test simple_ui_test pixel_aspect_test
         working-directory: program
       - run: python ci/next_windows_smoke.py
       - uses: actions/upload-artifact@v4
@@ -40,11 +40,12 @@ jobs:
           name: next-windows-evidence
           path: |
             ${{ runner.temp }}/YangNingNextAcceptance/new_ui.png
+            ${{ runner.temp }}/YangNingNextAcceptance/mvsep_ui.png
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: windows-test-package
-          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.0.zip
+          path: ${{ runner.temp }}/YangNingNextAcceptance/packages/YangNing_VideoStudio_Windows_0.13.1.zip
           if-no-files-found: error
           retention-days: 30
   restore-windows:

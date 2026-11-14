@@ -46,6 +46,8 @@ class SequencePanel:
         row=ttk.Frame(self.intro);row.pack(fill='x')
         ttk.Radiobutton(row,text='保留片头全部原声',variable=self.v['intro_mode'],value='original',command=self.update).pack(side='left')
         ttk.Radiobutton(row,text='保留背景音乐，替换中文讲话',variable=self.v['intro_mode'],value='music_voice',command=self.update).pack(side='left',padx=12)
+        from mvsep_ui import open_music
+        ttk.Button(self.intro,text='仅保留背景音乐（MVSep云端）：先试听 / 处理完整片头',command=lambda:open_music(app,self.v['intro_video'].get(),True)).pack(anchor='w',pady=4)
         self.intro_voice=ttk.Frame(self.intro)
         file_row(self.intro_voice,'intro_audio','提前准备的片头配音')
         file_row(self.intro_voice,'intro_srt','片头原画面SRT')

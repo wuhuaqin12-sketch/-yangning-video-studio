@@ -1,0 +1,64 @@
+[
+  {
+    "render_id": 56,
+    "name": "MVSep DnR v3 (speech, music, effects)",
+    "orientation": 0,
+    "price_coefficient": 1,
+    "algorithm_fields": [
+      {
+        "id": 46,
+        "name": "add_opt1",
+        "text": "Model type",
+        "algorithm_id": 55,
+        "options": "{\n    \"0\": \"SCNet Large (SDR avg: 11.22)\",\n    \"1\": \"MelBand Roformer (SDR avg: 10.99)\",\n    \"2\": \"Mel + SCNet (SDR avg: 11.54)\"\n}",
+        "output_overrides": null,
+        "created_at": "2024-11-24 22:38:30",
+        "updated_at": "2024-11-24 22:38:30",
+        "default_key": "2",
+        "server_key": "model_type",
+        "input_type": "select",
+        "required": 1,
+        "help_link": null,
+        "registered_only_keys": null,
+        "price_rules": [],
+        "conditions": []
+      },
+      {
+        "id": 47,
+        "name": "add_opt2",
+        "text": "How to extract",
+        "algorithm_id": 55,
+        "options": "{\n    \"0\": \"Extract directly from mixture\",\n    \"1\": \"Use vocals model to help\"\n}",
+        "output_overrides": null,
+        "created_at": "2024-11-24 22:41:25",
+        "updated_at": "2024-11-24 22:42:00",
+        "default_key": "0",
+        "server_key": "extract_type",
+        "input_type": "select",
+        "required": 1,
+        "help_link": null,
+        "registered_only_keys": null,
+        "price_rules": [],
+        "conditions": []
+      },
+      {
+        "id": 48,
+        "name": "add_opt3",
+        "text": "Output files",
+        "algorithm_id": 55,
+        "options": "{\n    \"0\": \"Standard set\",\n    \"1\": \"Include results of independent models\"\n}",
+        "output_overrides": null,
+        "created_at": "2024-11-24 22:43:57",
+        "updated_at": "2024-11-24 22:43:57",
+        "default_key": "0",
+        "server_key": "detailed",
+        "input_type": "select",
+        "required": 1,
+        "help_link": null,
+        "registered_only_keys": null,
+        "price_rules": [],
+        "conditions": []
+      }
+    ]
+  }
+]

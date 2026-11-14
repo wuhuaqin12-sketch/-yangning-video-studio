@@ -59,6 +59,8 @@ class App:
         ttk.Checkbutton(form,text='把新字幕写入视频画面',variable=self.v['burn']).grid(row=3,column=0,columnspan=3,sticky='w',pady=5)
         quick=ttk.LabelFrame(pane,text='② 声音、时间轴与样式',padding=8);quick.pack(fill='x',pady=5)
         for text,command in [('降噪 / 人声分离 / 试听',self.sound_settings),('停顿 / 速度',self.timing_settings),('标题 / 字幕 / 封面',self.publish)]:ttk.Button(quick,text=text,command=command).pack(side='left',padx=5)
+        from mvsep_ui import open_music
+        ttk.Button(quick,text='仅保留背景音乐（MVSep云端）',command=lambda:open_music(self)).pack(side='left',padx=5)
         from next_ui import SequencePanel
         self.sequence_panel=SequencePanel(self,pane)
         self.target_label=ttk.Label(form,text='独立配音 SRT')
