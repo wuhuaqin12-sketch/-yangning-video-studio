@@ -24,7 +24,7 @@ def square_pixel_stream(stream):
     return result
 
 def playback_speed(job):
-    try:speed=float(job.get('speed', 1.1))
+    try:speed=float(job.get('speed', 1.0))
     except (TypeError,ValueError):raise ValueError('请选择有效的成片倍速。')
     if not math.isfinite(speed) or not 0.5<=speed<=2.0:raise ValueError('成片倍速须在0.5–2.0之间。')
     return speed

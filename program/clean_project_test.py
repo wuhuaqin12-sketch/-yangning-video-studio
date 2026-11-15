@@ -88,6 +88,6 @@ class CleanTests(unittest.TestCase):
         m=json.loads((f/'analysis.json').read_text());m['publish_settings']=dict(background=str(self.bg),title='本来の姿',cover_mode='frame',cover_time=.5)
         save_json(f/'analysis.json',m);self.assertTrue(Path(render_preview(f,2.5,self.cancel)).exists());self.assertFalse((f/'video.mp4').exists())
         render(f,self.cancel);self.assertTrue((f/'cover.png').exists())
-        r=json.loads((f/'report.json').read_text());self.assertEqual(r['resolution'],[1080,1920]);self.assertEqual(r['speech_speed'],1.1)
+        r=json.loads((f/'report.json').read_text());self.assertEqual(r['resolution'],[1080,1920]);self.assertEqual(r['speech_speed'],1.0)
 
 if __name__=='__main__':unittest.main(verbosity=2)

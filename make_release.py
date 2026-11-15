@@ -5,6 +5,11 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent/'program'))
 from desktop_update import https_url,version_tuple
 
+RETIRED_PREVIEW_FILES={
+    'program/opening_caption.py','program/opening_caption_preview.py','program/adaptive_title.py',
+    'program/intro_boundary.py','program/intro_boundary_ui.py','program/ending_reference.py',
+    'program/ending_reference_ui.py','program/ending_presets.py','program/ending_card.py'}
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--version',required=True)
@@ -25,7 +30,9 @@ def main():
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
         for f in root.rglob('*'):
             if not f.is_file() or any(part in ('.venv','__pycache__','.git') or part.startswith('.venv.failed_') for part in f.parts) or f.suffix=='.pyc':continue
-            name=f.relative_to(root).as_posix();body=f.read_bytes()
+            name=f.relative_to(root).as_posix()
+            if args.test_package and (name in RETIRED_PREVIEW_FILES or f.name.endswith('_test.py') or (f.suffix=='.md' and f.name not in ('README.md','SUBTITLE_SIZE_0_13_16_ZH.md'))):continue
+            body=f.read_bytes()
             if name=='release.json':
                 body=json.dumps(dict(app='YangNingStudio',schema=1,version=args.version,update_manifest_url='' if args.test_package else args.manifest_url,**({'channel':'test'} if args.test_package else {}))).encode()
             if name=='program/desktop_update.py':

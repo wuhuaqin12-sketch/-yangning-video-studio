@@ -31,6 +31,9 @@ class ProjectTests(unittest.TestCase):
             first=p.unique_output(d,'sutra','ja','portrait');first.write_bytes(b'keep')
             second=p.unique_output(d,'sutra','ja','portrait')
             self.assertNotEqual(first,second);self.assertEqual(first.read_bytes(),b'keep')
+            first.with_suffix('.srt').write_text('keep subtitles',encoding='utf8');first.unlink()
+            third=p.unique_output(d,'sutra','ja','portrait');self.assertNotEqual(first,third)
+            self.assertEqual(first.with_suffix('.srt').read_text(encoding='utf8'),'keep subtitles')
     def test_portable_project_resolves_paths_from_its_own_folder(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);(root/'assets').mkdir();(root/'assets/body.mp4').write_bytes(b'media')
@@ -49,7 +52,7 @@ class ProjectTests(unittest.TestCase):
         q['output_mode']='portrait';self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['portrait'])
     def test_unreviewed_separation_cannot_silently_export(self):
         q=p.defaults();q.update(intro_video=__file__,intro_audio=__file__,intro_srt=__file__,intro_mode='music_voice')
-        with self.assertRaisesRegex(ValueError,'试听'):s.opening({'language':'ja'},q,Path('.'),threading.Event(),lambda _:None)
+        with self.assertRaisesRegex(ValueError,'已去人声'):s.opening({'language':'ja'},q,Path('.'),threading.Event(),lambda _:None)
 
 class RenderTests(unittest.TestCase):
     def setUp(self):
@@ -120,15 +123,12 @@ class RenderTests(unittest.TestCase):
 
     def test_repair_needs_review_and_never_crops(self):
         q=p.defaults()['layouts']['landscape'];q['repair_roi']='20,120,280,30'
-        with self.assertRaisesRegex(ValueError,'确认'):s.repair(str(self.clip),q,self.root,self.cancel)
+        direct=s.repair(str(self.clip),q,self.root,self.cancel)
+        self.assertTrue(Path(direct).is_file())
         out=s.repair(str(self.clip),q,self.root,self.cancel,preview=True,length=.3)
         stream=next(x for x in probe(out,self.cancel)['streams'] if x['codec_type']=='video')
         self.assertEqual((stream['width'],stream['height']),(320,180))
-    def test_combined_file_requires_explicit_ending_and_rejects_duplicate(self):
-        q=p.defaults();j={'video':str(self.clip)}
-        with self.assertRaisesRegex(ValueError,'指定'):s.split_combined(j,q,self.root,self.cancel,lambda _:None)
-        q.update(combined_outro_start=.5,outro_enabled=True,outro_video=str(self.clip))
-        with self.assertRaisesRegex(ValueError,'重复'):s.split_combined(j,q,self.root,self.cancel,lambda _:None)
+
     def test_real_pipeline_dual_covers_dissolve_and_audio_cache(self):
         ref=self.root/'ref.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n金剛経。\n',encoding='utf8')
         wide=self.root/'wide.png';tall=self.root/'tall.png'
@@ -147,23 +147,29 @@ class RenderTests(unittest.TestCase):
         j={**job,'publish_settings':{'title':''},'burn':False}
         cached=s.aligned(j,self.root/'out/.yangning_cache',self.cancel,lambda _:None)
         self.assertEqual((cached/'analysis.json').stat().st_mtime_ns,before)
-    def test_complete_mp4_protects_explicit_ending(self):
-        full=self.root/'full.mp4';s.concat_clips([self.clip,self.clip,self.clip],full,self.root,self.cancel)
-        voice=self.root/'voice.wav';s.ff(['-i',full,'-t','1.6','-c:a','pcm_s16le',voice],self.cancel)
-        ref=self.root/'ref.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n第一句。\n\n2\n00:00:00,900 --> 00:00:01,500\n第二句。\n',encoding='utf8')
-        q=p.defaults();q.update(output_mode='portrait',combined=True,combined_outro_start=1.6)
-        job=dict(video=str(full),audio=str(voice),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'combined_out'),sequence=q,name='combined')
-        folder=Path(s.process(job,self.cancel));report=json.loads((folder/'report.json').read_text())
-        self.assertGreater(report['results'][0]['duration'],2.3)
-        self.assertLess(report['results'][0]['duration'],2.7)
-        # An SRT ending at 1.5 sec cannot truncate the music-only ending.
-        self.assertGreater(report['results'][0]['duration'],1.5+.7)
-        q.update(combined_intro_end=.8,combined_audio_split=.8,intro_clean_audio=True)
-        split=self.root/'split';split.mkdir()
-        body,parts=s.split_combined(job,q,split,self.cancel,lambda _:None)
-        self.assertEqual(len(parse_srt(parts['intro_srt'])),1)
-        self.assertEqual(len(parse_srt(body['source_srt'])),1)
-        self.assertAlmostEqual(s.seconds(parts['outro_video'],self.cancel),.8,delta=.1)
+    def test_ready_made_ending_uses_full_canvas_and_no_body_title(self):
+        clip=self.root/'portrait_ending.mp4'
+        s.ff(['-f','lavfi','-i','color=red:s=108x192:r=30:d=1.2','-f','lavfi','-i','sine=frequency=880:duration=1.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',clip],self.cancel)
+        before=p.file_digest(clip);q=p.defaults()
+        out=s.compose_segment(str(clip),[],{'title':'BODY TITLE','video_width':50,'video_height':40},'portrait',q,self.root,self.cancel,False,'ending')
+        frame=self.root/'ending_frame.png';s.ff(['-i',out,'-frames:v','1',frame],self.cancel)
+        with Image.open(frame) as image:
+            self.assertEqual(image.size,(1080,1920))
+            for xy in ((10,10),(540,960),(1060,1900)):
+                red,green,blue=image.convert('RGB').getpixel(xy);self.assertGreater(red,200);self.assertLess(green,40);self.assertLess(blue,40)
+        self.assertAlmostEqual(s.seconds(out,self.cancel),1.2,delta=.08);self.assertEqual(p.file_digest(clip),before)
+
+    def test_dual_exports_label_both_mp4_and_srt_and_keep_full_content(self):
+        ref=self.root/'dual.srt';s.write_srt(ref,[(1,.1,.7,'横版と竖版の字幕。')])
+        q=p.defaults();q.update(output_mode='both');q['layouts']['landscape']['remove_chinese']=False
+        job=dict(video=str(self.clip),audio=str(self.clip),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'dual_out'),sequence=q,name='金刚经')
+        folder=Path(s.process(job,self.cancel));report=json.loads((folder/'report.json').read_text(encoding='utf8'))
+        self.assertEqual(len(report['results']),2)
+        for result,label in zip(report['results'],('横版_16x9','竖版_9x16')):
+            path=Path(result['path']);self.assertIn(label,path.stem);self.assertTrue(path.with_suffix('.srt').is_file())
+            self.assertIn(label,path.with_suffix('.srt').name);self.assertEqual(len(parse_srt(path.with_suffix('.srt'))),1)
+            self.assertGreater(result['duration'],.75);self.assertLess(result['duration'],.95)
+
     def test_phone_tail_metadata_cannot_request_nonexistent_frames(self):
         from engine import prepare,render
         ref=self.root/'tail.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n正文。\n',encoding='utf8')

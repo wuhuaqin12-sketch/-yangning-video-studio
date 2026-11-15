@@ -5,6 +5,7 @@ repo=Path(__file__).resolve().parents[1]
 sandbox=Path(os.environ['RUNNER_TEMP'])/'YangNingNextAcceptance';sandbox.mkdir(exist_ok=True)
 os.environ['LOCALAPPDATA']=str(sandbox/'localappdata')
 os.environ['YANGNING_DATA_ROOT']=str(sandbox/'gui_profile')
+sys.path.insert(0,str(repo))
 sys.path.insert(0,str(repo/'program'))
 
 def p_label_present(parent,text):
@@ -22,43 +23,66 @@ def main():
     def widgets(parent):
         for child in parent.winfo_children():
             yield child;yield from widgets(child)
-    labels=[w.cget('text') for w in widgets(root) if w.winfo_class()=='TButton']
-    for label in ('降噪 / 人声分离 / 试听','停顿 / 速度','标题 / 字幕 / 封面'):assert labels.count(label)==1
-    assert app.v['burn'].get() is False
-    assert panel.v['background_audio'].get()==''
-    assert p_label_present(root, '片头背景音乐（可选）')
-    panel.enabled.set(True);panel.v['intro_enabled'].set(True);panel.v['outro_enabled'].set(True)
-    panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
+    from next_ui import SEGMENT_MODES
+    from PIL import ImageGrab
+    root.update()
+    assert app.v['burn'].get() is False and not panel.enabled.get()
+    assert not panel.controls.winfo_ismapped() and not panel.segments.winfo_ismapped() and not app.activity.winfo_ismapped()
+    assert app.main_button.winfo_rooty()+app.main_button.winfo_height()<root.winfo_rooty()+root.winfo_height()
+    ImageGrab.grab().save(sandbox/'body_default.png')
+    geometry=root.geometry();root.geometry('880x640');root.update()
+    assert app.main_button.winfo_rooty()+app.main_button.winfo_height()<root.winfo_rooty()+root.winfo_height()
+    ImageGrab.grab().save(sandbox/'body_compact_880x640.png');root.geometry(geometry);root.update()
+    panel.segment_mode.set(SEGMENT_MODES[1]);panel.change_segments();panel.v['intro_enabled'].set(True);panel.v['outro_enabled'].set(True);panel.v['intro_mode'].set('external_music');panel.update();root.update()
+    assert panel.intro.winfo_ismapped() and panel.outro.winfo_ismapped() and panel.music.winfo_ismapped()
+    ImageGrab.grab().save(sandbox/'segments_optional.png')
+    assert len(SEGMENT_MODES)==2
+    assert not panel.value()['combined']
+    assert not p_label_present(root,'金刚经视频专用设置（可选）')
+    assert not p_label_present(root,'确认预览')
+    panel.appearance_open.set(True);panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
     assert app.sequence_settings['output_mode']=='both'
-    assert panel.cover_l.winfo_ismapped() and panel.cover_p.winfo_ismapped()
-    assert not panel.cover_single.winfo_ismapped()
+    assert app.content_canvas.bbox('all')[3]>app.content_canvas.winfo_height()
+    assert panel.cover_l.winfo_ismapped() and panel.cover_p.winfo_ismapped() and not panel.cover_single.winfo_ismapped()
+    assert panel.layout_vars['landscape']['repair_method'].get()=='glyph'
+    assert panel.layout_vars['landscape']['subtitle_font_size'].get()=='64'
+    assert panel.layout_vars['portrait']['subtitle_font_size'].get()==''
+    panel.details_open.set(True);panel.update();root.update()
     panel.auto_save();assert panel.autosave.is_file()
-    try:
-        from PIL import ImageGrab
-        ImageGrab.grab().save(sandbox/'new_ui.png')
-    except Exception as e:print('Screenshot unavailable:',e)
+    ImageGrab.grab().save(sandbox/'new_ui.png')
+    app.publish();root.update()
+    from tkinter import ttk
+    dialogs=[w for w in root.winfo_children() if isinstance(w,tk.Toplevel)]
+    assert dialogs
+    tabs=next(w for w in widgets(dialogs[-1]) if isinstance(w,ttk.Notebook))
+    assert [tabs.tab(t,'text') for t in tabs.tabs()]==['标题','字幕','重点词颜色']
+    ImageGrab.grab().save(sandbox/'text_style_only.png')
+    dialogs[-1].destroy()
     root.destroy();print('NEW_UI_SMOKE_PASS',flush=True)
     # Keep a fake production install and old settings as non-modification sentinels.
     local=Path(os.environ['LOCALAPPDATA']);prod=local/'YangNingStudioDesktop';prod.mkdir(parents=True)
     (prod/'current.json').write_text('{"version":"0.12.11"}')
     settings=local/'YangNingStudio';settings.mkdir();(settings/'user_settings.json').write_text('keep')
     package_dir=sandbox/'packages'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.2','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
-    package=package_dir/'YangNing_VideoStudio_Windows_0.13.2.zip'
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.16','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
+    package=package_dir/'YangNing_VideoStudio_Windows_0.13.16.zip'
     with zipfile.ZipFile(package) as z:
         release=json.loads(z.read('release.json'));assert release['channel']=='test';assert release['update_manifest_url']==''
+        from make_release import RETIRED_PREVIEW_FILES
+        assert not (set(z.namelist()) & RETIRED_PREVIEW_FILES)
         for n in ('ffmpeg','ffprobe'):assert z.getinfo('program/tools/'+n+'.exe').file_size>1000000
         unpack=sandbox/'unpacked';z.extractall(unpack)
     subprocess.run([sys.executable,str(unpack/'program/install_desktop.py'),'--quiet'],check=True)
     preview=local/'YangNingStudioDesktopPreview'
     assert (preview/'preview_profile.json').exists();assert (preview/'runtime/Scripts/python.exe').exists()
+    subprocess.run([str(preview/'runtime/Scripts/python.exe'),'-c','import sys;sys.path.insert(0,'+repr(str(preview/'versions/0.13.16/program'))+');import cv2,sequence_vnext,roi_picker,next_ui; print("INSTALLED_PARTS_RUNTIME_PASS",cv2.__version__)'],check=True)
     assert json.loads((prod/'current.json').read_text())['version']=='0.12.11'
     assert (settings/'user_settings.json').read_text()=='keep'
     assert not (preview/'update_config.json').exists()
     print('ISOLATED_TEST_INSTALL_PASS',flush=True)
     # Exercise the actual GUI recovery backend, not only the low-level mock tests.
     recovery=sandbox/'run_installed_recovery.py'
-    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.2/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
+    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.16/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
     subprocess.run([sys.executable,str(recovery)],check=True)
     restored=json.loads((preview/'current.json').read_text())
     assert restored['version']=='0.12.11';assert restored['runtime_scope']=='stable-v12.11'
