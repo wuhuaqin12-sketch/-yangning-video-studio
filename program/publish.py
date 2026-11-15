@@ -63,7 +63,7 @@ def subtitle_lines(text,opts,size,width):
 
 def fixed_landscape_layout(opts,stream,w,h,cues,caption_row=None):
     # Subtitle length must never resize or move the picture.
-    scale=min(w/stream['width'],h/stream['height'])
+    scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
     vx=(w-vw)//2;vy=(h-vh)//2;requested=min(64,round(opts['subtitle_font_size'] or 64))
     margin=max(12,vh*.025);bottom=vy+vh-margin
@@ -81,7 +81,7 @@ def fixed_landscape_layout(opts,stream,w,h,cues,caption_row=None):
     return (vw,vh,vx,vy,width,bottom-top,vx+vw/2,(top+bottom)/2),size,requested
 
 
-def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False,landscape_overlay=False,caption_row=None):
+def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False,landscape_overlay=False,caption_row=None,title_in_top_background=False):
     opts=normalize_style(opts)
     if not cues:opts['subtitle_area']='video'
     if auto_background and not landscape_overlay and w>h and cues:
@@ -143,9 +143,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             anchor=8 if below or overlay else 2
             baseline=top+opts['subtitle_outline']+4 if below or overlay else bottom
             header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an{anchor}\\pos({sx:.1f},{baseline:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
-    actual_title=None
+    actual_title=None;title_center=None
     if opts['title'].strip():
         tx=w*opts['title_x']/100;ty=h*opts['title_y']/100
+        if title_in_top_background:
+            if vy<h*.075:raise ValueError('横版上方背景不足以放置标题。请在素材与画面中恢复老师画面最大高度，或清空横版标题；不会把标题盖到老师身上。')
+            if not h*.025<ty<vy-h*.025:ty=vy/2
         tw=min(w*opts['title_width']/100,2*min(tx-w*.025,w*.975-tx))
         if ty<vy:th=2*min(ty-h*.025,vy-h*.0125-ty)
         elif ty>vy+vh:th=2*min(ty-vy-vh-h*.0125,h*.975-ty)
@@ -159,7 +162,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             size,lines=fit_lines(text,title_size,tw+12,th,False,leading=1.2)
         except ValueError:
             size,lines=fit_lines(text,title_size,tw+12,th,True,leading=1.2)
-        actual_title=size
+        actual_title=size;title_center=[tx,ty]
         text=styled_lines(text,lines,opts,highlight=False)
         # libass normalizes this bundled font to its 1448/1000 hhea height.
         # Match the 230px FreeType brush title used in the approved V11 render.
@@ -167,7 +170,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         header+=f'Dialogue: 2,0:00:00.00,{stamp(duration,True)},Title,,0,0,0,,{{\\an5\\pos({tx:.1f},{ty:.1f})\\fs{render_size}\\q2}}{text}\n'
     Path(path).write_text(header,encoding='utf-8-sig')
     report=dict(subtitle_requested_px=requested_size,landscape_fixed_video=overlay,caption_anchor='above_original_subtitle' if overlay and caption_row else 'lower_video' if overlay else 'default',subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
-                title_requested_px=title_size,title_actual_px=actual_title,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
+                title_requested_px=title_size,title_actual_px=actual_title,title_center=title_center,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],
                 subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else 0,

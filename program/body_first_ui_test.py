@@ -171,4 +171,29 @@ class BodyFirstUITests(unittest.TestCase):
         with patch.object(self.app,'current',return_value=None),patch('app.open_path') as opened:
             self.app.open_result();opened.assert_called_once_with(self.app.v['output'].get())
 
+    def test_style_window_has_only_text_tabs_and_preview_reads_main_background(self):
+        import tkinter as tk
+        from tkinter import ttk
+        from publish_ui import show
+        from PIL import Image
+        source=self.folder/'body.mp4';source.write_bytes(b'fixture')
+        srt=self.folder/'body.srt';srt.write_text('1\n00:00:00,100 --> 00:00:00,800\n字幕\n',encoding='utf8')
+        bg=self.folder/'main.png';Image.new('RGB',(32,18),'blue').save(bg)
+        self.app.v['video'].set(str(source));self.app.v['source_srt'].set(str(srt));self.app.v['output'].set(str(self.folder/'out'))
+        self.panel.mode.set('横版＋竖版');self.panel.change_mode();self.panel.v['background'].set(str(bg))
+        self.app.pending_style={'background':'stale-not-used.png','title':'金剛経','video_height':76}
+        show(self.app,lambda _:None);self.root.update()
+        dialog=next(w for w in self.root.winfo_children() if isinstance(w,tk.Toplevel))
+        def widgets(w):
+            for child in w.winfo_children():yield child;yield from widgets(child)
+        tabs=next(w for w in widgets(dialog) if isinstance(w,ttk.Notebook))
+        self.assertEqual([tabs.tab(t,'text') for t in tabs.tabs()],['标题','字幕','重点词颜色'])
+        button=next(w for w in widgets(dialog) if isinstance(w,ttk.Button) and w.cget('text')=='预览横版排版')
+        with patch.object(self.app,'worker',side_effect=lambda work:work()),patch('style_preview.render',return_value=str(bg)) as render,patch('app.open_path'):
+            button.invoke();render.assert_called_once()
+            settings,p,ratio=render.call_args.args[:3]
+            self.assertEqual(settings['background'],str(bg));self.assertEqual(p['background'],str(bg));self.assertEqual(settings['video'],str(source));self.assertEqual(ratio,'landscape')
+            self.app.poll()
+        self.assertEqual(self.panel.v['background'].get(),str(bg));dialog.destroy()
+
 if __name__=='__main__':unittest.main()

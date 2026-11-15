@@ -552,6 +552,7 @@ class App:
                     self.sequence_panel.last_preview=e[1];self.sequence_panel.update();open_path(e[2])
                 elif e[0]=='style_saved':
                     self.pending_style=e[1]
+                    if 'background' in self.pending_style:self.pending_style['background']=self.sequence_panel.v['background'].get()
                     (DATA/'style_no_denoise.json').write_text(json.dumps(e[1],ensure_ascii=False,indent=2),encoding='utf8')
                     self.log_line('排版已保存，下次一键导出会应用。')
                 elif e[0]=='review_refresh':

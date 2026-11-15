@@ -40,7 +40,8 @@ class SequencePanel:
         self.output_mode_box.pack(side='left',padx=(8,16));self.output_mode_box.bind('<<ComboboxSelected>>',self.change_mode)
         self.appearance_button=ttk.Button(bar,text='背景 / 封面 / 字幕设置 ▾',command=self.toggle_appearance);self.appearance_button.pack(side='left')
         row=ttk.Frame(self.controls);row.pack(fill='x',pady=4)
-        ttk.Button(row,text='标题与字幕样式',command=app.publish).pack(side='left')
+        ttk.Button(row,text='标题 / 字幕 / 重点词',command=app.publish).pack(side='left')
+        ttk.Button(row,text='老师画面大小',command=self.picture_settings).pack(side='left',padx=8)
         p=defaults()
         for key,value in p.items():
             if key in ('output_mode','layouts'):continue
@@ -118,6 +119,20 @@ class SequencePanel:
         self.appearance_open.set(not self.appearance_open.get());self.update()
     def toggle_details(self):
         self.details_open.set(not self.details_open.get());self.update()
+    def picture_settings(self):
+        win=tk.Toplevel(self.app.root);win.title('老师画面大小');box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
+        values={}
+        for key,label,default in [('video_width','最大宽度 %',100),('video_height','最大高度 %（原默认76）',76)]:
+            row=ttk.Frame(box);row.pack(fill='x',pady=6);ttk.Label(row,text=label,width=26).pack(side='left')
+            values[key]=tk.StringVar(value=str(self.app.pending_style.get(key,default)));ttk.Entry(row,textvariable=values[key],width=12).pack(side='left')
+        ttk.Label(box,text='按原比例完整显示，不拉伸；字号或字幕长短不会改变老师画面。',wraplength=450).pack(pady=8)
+        def save():
+            try:
+                from publish_style import normalize_style
+                style=dict(self.app.pending_style);style.update({k:v.get() for k,v in values.items()});style=normalize_style(style)
+                self.app.pending_style=style;self.enabled.set(True);self.app.events.put(('style_saved',style));self.update();win.destroy()
+            except Exception as e:messagebox.showerror('画面大小',str(e),parent=win)
+        ttk.Button(box,text='保存',command=save).pack(anchor='e')
     def set_processing_busy(self,busy):
         for button in (self.range_preview_button,):
             try:

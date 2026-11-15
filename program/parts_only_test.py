@@ -51,7 +51,7 @@ class PartsOnlyTests(unittest.TestCase):
             root=Path(d);text='長い字幕を省略せず読みやすく改行します。'*30
             make_ass(root/'test.ass',[(1,0,20,text)],{'subtitle_font_size':64,'title':''},{'width':1920,'height':1080},20,1920,1080,landscape_overlay=True)
             report=json.loads((root/'layout_report.json').read_text());x,y,w,h=report['video_box']
-            self.assertFalse(report['auto_background']);self.assertEqual([x,y,w,h],[0,0,1920,1080])
+            self.assertFalse(report['auto_background']);self.assertEqual([x,y,w,h],[231,130,1458,820])
             self.assertLessEqual(max(report['subtitle_actual_px']),64);self.assertGreaterEqual(min(report['subtitle_actual_px']),44);self.assertGreater(report['display_cue_count'],1)
             cues=parse_srt(root/'publish_subtitles.srt');self.assertEqual(''.join(c[3].replace('\n','') for c in cues),text)
             self.assertEqual((cues[0][1],cues[-1][2]),(0,20));self.assertTrue(all(len(c[3].splitlines())<=5 for c in cues))

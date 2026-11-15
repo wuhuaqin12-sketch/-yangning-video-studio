@@ -171,7 +171,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     opts=normalize_style(chosen)
     opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=p['layouts'][mode]['subtitle_offset_y'])
     if mode=='landscape':
-        opts.update(video_width=100,video_height=100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
+        opts.update(video_width=chosen.get('video_width',100) if label=='body' else 100,video_height=chosen.get('video_height',76) if label=='body' else 100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
     else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))
     if label=='ending':opts.update(title='',video_width=100,video_height=100,subtitle_area='video')
     # Use the same existing subtitle/title styling. No title auto-single-line change.
@@ -183,10 +183,10 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
             _x,y,_w,h=map(int,layout['repair_roi'].split(','))
             if 0<=y<y+h<=stream['height']:caption_row=(y,h)
         except (ValueError,TypeError):pass
-    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,landscape_overlay=mode=='landscape',caption_row=caption_row)
+    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,landscape_overlay=mode=='landscape',caption_row=caption_row,title_in_top_background=mode=='landscape' and label=='body')
     report=json.loads((folder/'layout_report.json').read_text(encoding='utf8'))
     atomic_json(folder/(label+'_'+mode+'.layout.json'),report)
-    if report.get('landscape_fixed_video'):progress('横版画面保持原有完整大小与位置；字幕在原字幕行上方附近向下排，必要时适度缩小或分屏。')
+    if report.get('landscape_fixed_video'):progress('横版沿用素材与画面保存的高度和上下背景；长字幕不改变老师画面，标题在上方背景。')
     if report.get('split_cues'):progress('字幕已完整分屏，页时间按字数分配，不改变配音；需预览核对。')
     if report.get('short_pages'):progress('字幕排版提醒：编号'+','.join(map(str,report['short_pages']))+'部分页面不足1秒，请调整该句字幕时间或字号。')
     opening_title=False
