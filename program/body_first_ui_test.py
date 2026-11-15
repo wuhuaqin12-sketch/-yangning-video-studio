@@ -68,18 +68,22 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertEqual(p.segment_mode.get(),'另加片头 / 片尾');self.assertEqual(p.v['background_audio'].get(),str(music));self.assertTrue(p.appearance_open.get())
         job.pop('ui_state');job['sequence'].update(combined=True,intro_enabled=False,outro_enabled=False,background_audio='');save_project(saved,job);p.load(saved);self.root.update()
         self.assertEqual(p.segment_mode.get(),'整片视频（已有片头片尾）')
-    def test_optional_title_and_disclaimer_dialog_preserves_defaults(self):
+    def test_title_dialog_preserves_defaults_and_legacy_disclaimer_is_inactive(self):
         import tkinter as tk
         p=self.panel;p.decoration_settings();self.root.update()
         dialog=next(w for w in self.root.winfo_children() if isinstance(w,tk.Toplevel))
         self.assertFalse(p.v['opening_title_enabled'].get());self.assertFalse(p.v['disclaimer_enabled'].get())
+        from tkinter import ttk
+        tabs=next(w for w in dialog.winfo_children() if isinstance(w,ttk.Notebook))
+        self.assertEqual(len(tabs.tabs()),2)
+        self.assertFalse(any('免责声明' in tabs.tab(tab,'text') for tab in tabs.tabs()))
         self.assertEqual(p.v['opening_topic_color'].get(),'#101010')
         self.assertEqual(p.v['opening_topic_font'].get(),'Yuji Boku')
         p.v['opening_title_original'].set('释迦牟尼佛')
         p.v['opening_title_color'].set('#202020')
         self.assertEqual(p.project()['sequence']['opening_title_original'],'释迦牟尼佛')
         p.v['disclaimer_enabled'].set(True);self.root.update()
-        self.assertTrue(p.enabled.get());self.assertTrue(p.value()['disclaimer_enabled'])
+        self.assertTrue(p.enabled.get());self.assertFalse(p.value()['disclaimer_enabled'])
         p.v['disclaimer_mode'].set('overlay');p.v['disclaimer_seconds'].set('8')
         self.assertEqual(p.project()['sequence']['disclaimer_seconds'],8)
         self.assertEqual(p.project()['sequence']['disclaimer_mode'],'overlay')

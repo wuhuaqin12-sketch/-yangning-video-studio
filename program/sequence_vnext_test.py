@@ -140,7 +140,7 @@ class RenderTests(unittest.TestCase):
         q=p.defaults();q.update(combined=True,combined_replace_outro=True,combined_outro_start=1.6,outro_video=str(replacement))
         before=p.file_digest(full);new_before=p.file_digest(replacement)
         body,parts=s.split_combined(dict(video=str(full),source_srt=str(ref)),q,self.root,self.cancel,lambda _:None)
-        self.assertEqual(Path(parts['outro_video']),replacement);self.assertTrue(parts['outro_enabled'])
+        self.assertTrue(Path(parts['outro_video']).samefile(replacement));self.assertTrue(parts['outro_enabled'])
         self.assertAlmostEqual(s.seconds(body['video'],self.cancel),1.6,delta=.08)
         self.assertFalse((self.root/'protected_ending.mp4').exists())
         self.assertGreater(s.seconds(body['video'],self.cancel)+s.seconds(parts['outro_video'],self.cancel),s.seconds(full,self.cancel)+.3)

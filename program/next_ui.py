@@ -39,7 +39,7 @@ class SequencePanel:
         ttk.Label(row,text='输出比例').pack(side='left')
         cb=ttk.Combobox(row,textvariable=self.mode,state='readonly',values=('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),width=22);cb.pack(side='left',padx=8);cb.bind('<<ComboboxSelected>>',self.change_mode)
         ttk.Button(row,text='标题与字幕样式',command=app.publish).pack(side='left',padx=8)
-        ttk.Button(row,text='片头译名 / 片尾免责声明',command=self.decoration_settings).pack(side='left',padx=4)
+        ttk.Button(row,text='片头文字定位 / 译文',command=self.decoration_settings).pack(side='left',padx=4)
         p=defaults()
         for key,value in p.items():
             if key in ('output_mode','layouts'):continue
@@ -138,9 +138,8 @@ class SequencePanel:
     def toggle_details(self):
         self.details_open.set(not self.details_open.get());self.update()
     def decoration_settings(self):
-        win=tk.Toplevel(self.app.root);win.title('可选：原文字定位译名与片尾免责声明');win.geometry(f'820x{max(560,min(730,self.app.root.winfo_screenheight()-100))}')
+        win=tk.Toplevel(self.app.root);win.title('片头文字定位与对应语言译文');win.geometry(f'820x{max(560,min(730,self.app.root.winfo_screenheight()-100))}')
         tabs=ttk.Notebook(win);tabs.pack(fill='both',expand=True,padx=12,pady=12)
-        tail=ttk.Frame(tabs,padding=12)
         for prefix,tab_name in [('opening_title','文字译名1（如讲义标题）'),('opening_topic','文字译名2（如经题）')]:
             outer=ttk.Frame(tabs);tabs.add(outer,text=tab_name)
             canvas=tk.Canvas(outer,highlightthickness=0);scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);canvas.configure(yscrollcommand=scroll.set)
@@ -148,8 +147,12 @@ class SequencePanel:
             page=ttk.Frame(canvas,padding=12);window=canvas.create_window((0,0),window=page,anchor='nw')
             page.bind('<Configure>',lambda e,c=canvas:c.configure(scrollregion=c.bbox('all')))
             canvas.bind('<Configure>',lambda e,c=canvas,i=window:c.itemconfigure(i,width=e.width))
+            language_row=ttk.Frame(page);language_row.pack(fill='x',pady=5)
+            ttk.Label(language_row,text='输出语言（与主页面一致）',width=25).pack(side='left')
+            language_box=ttk.Combobox(language_row,textvariable=self.app.language_name,values=('日语','英语','法语','德语','粤语','印尼语','中文','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=15)
+            language_box.pack(side='left');language_box.bind('<<ComboboxSelected>>',self.app.language_changed)
             ttk.Checkbutton(page,text='启用此组译名（保留原中文）',variable=self.v[prefix+'_enabled']).pack(anchor='w',pady=5)
-            for suffix,label in [('original','查找原文字（可任意填写）'),('text','对应语言译文（可手动输入）')]:
+            for suffix,label in [('original','查找原文字（可任意填写）'),('text','对应语言译文（填写要显示的文字）')]:
                 row=ttk.Frame(page);row.pack(fill='x',pady=5);ttk.Label(row,text=label,width=25).pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_'+suffix]).pack(side='left',fill='x',expand=True)
             ttk.Label(page,text='可输入释迦牟尼佛等任意原文字定位；讲义标题、经题、释迦牟尼佛有日英预填译名，其他词请填译文。\nOCR负责定位和取样，不是通用自动翻译；保留原字，译文持续显示整个时间段。',wraplength=750).pack(anchor='w',pady=5)
             for suffix,label in [('start','显示／OCR范围开始秒'),('end','显示／OCR范围结束秒'),('x','译名中心左右（原画面百分比）'),('y','译名首行顶部（原画面百分比）'),('size','译名字号（横版1080高基准）')]:self.number(page,prefix+'_'+suffix,label)
@@ -163,21 +166,6 @@ class SequencePanel:
             ttk.Label(page,text='竖排中文：日语译名放在旁边；横排中文：译名放在下方。\n字号/颜色取样是估计，不保证识别同款字体；移动、渐变与复杂背景须预览、手动微调。',wraplength=750).pack(anchor='w')
             from ui_scroll import install_wheel
             install_wheel(canvas)
-        tabs.add(tail,text='片尾免责声明图片')
-        ttk.Checkbutton(tail,text='启用片尾免责声明图片',variable=self.v['disclaimer_enabled']).pack(anchor='w',pady=5)
-        row=ttk.Frame(tail);row.pack(fill='x',pady=8)
-        ttk.Entry(row,textvariable=self.v['disclaimer_image']).pack(side='left',fill='x',expand=True)
-        def image():
-            path=filedialog.askopenfilename(filetypes=[('免责声明图片','*.png *.jpg *.jpeg *.webp *.bmp'),('全部文件','*.*')])
-            if path:self.v['disclaimer_image'].set(path)
-        ttk.Button(row,text='选择图片',command=image).pack(side='left',padx=5)
-        row=ttk.Frame(tail);row.pack(fill='x',pady=6)
-        ttk.Label(row,text='显示秒数（2–30）').pack(side='left');ttk.Combobox(row,textvariable=self.v['disclaimer_seconds'],values=('3','5','8','10','15'),width=10).pack(side='left',padx=5)
-        choices={'追加图片（完整保留原片尾，延长时长）':'append','叠加原片尾下方（不延长，保留音乐）':'overlay'}
-        choice=tk.StringVar(value=next(k for k,v in choices.items() if v==self.v['disclaimer_mode'].get()))
-        cb=ttk.Combobox(tail,textvariable=choice,values=tuple(choices),state='readonly',width=52);cb.pack(anchor='w',pady=8)
-        cb.bind('<<ComboboxSelected>>',lambda e:self.v['disclaimer_mode'].set(choices[choice.get()]))
-        ttk.Label(tail,text='默认追加：完整播放原片尾后，再显示静音免责声明图片。\n叠加：只在最后几秒的下方显示图片卡片，原片尾画面与音乐继续播放。\n图片始终等比例显示；横竖版不会强制拉伸。请预览检查文字是否足够大、停留是否够读。',wraplength=690).pack(anchor='w',pady=8)
         ttk.Button(win,text='完成',command=win.destroy).pack(anchor='e',padx=16,pady=8)
     def detect_title(self,prefix='opening_title'):
         if self.app.busy:return
@@ -282,6 +270,8 @@ class SequencePanel:
         self.enabled.set(True);self.v['output_mode'].set(dict(zip(('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),('auto','landscape','portrait','both')))[self.mode.get()]);self.update()
     def value(self):
         p=self.raw_value();mode=self.segment_mode.get()
+        # New UI uses prepared ending videos; legacy image settings cannot append again.
+        p['disclaimer_enabled']=False
         p['combined']=mode==SEGMENT_MODES[2]
         if mode!=SEGMENT_MODES[1]:p['intro_enabled']=False;p['outro_enabled']=False
         if mode!=SEGMENT_MODES[2]:p['combined_replace_outro']=False
