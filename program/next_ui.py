@@ -41,7 +41,8 @@ class SequencePanel:
         self.appearance_button=ttk.Button(bar,text='背景 / 封面 / 字幕设置 ▾',command=self.toggle_appearance);self.appearance_button.pack(side='left')
         row=ttk.Frame(self.controls);row.pack(fill='x',pady=4)
         ttk.Button(row,text='标题 / 字幕 / 重点词',command=app.publish).pack(side='left')
-        ttk.Button(row,text='老师画面大小',command=self.picture_settings).pack(side='left',padx=8)
+        ttk.Button(row,text='竖版画面大小',command=self.picture_settings).pack(side='left',padx=8)
+        ttk.Label(self.controls,text='横版：16:9等比完整显示，不加背景和标题。竖版：保留背景、标题及视频下方字幕。',wraplength=760).pack(anchor='w',pady=3)
         p=defaults()
         for key,value in p.items():
             if key in ('output_mode','layouts'):continue
@@ -51,7 +52,7 @@ class SequencePanel:
             ttk.Label(r,text=label,width=22).pack(side='left');ttk.Entry(r,textvariable=self.v[key]).pack(side='left',fill='x',expand=True)
             ttk.Button(r,text='选择',command=lambda:self.pick(key)).pack(side='left',padx=4)
             return r
-        file_row(self.controls,'background','背景图（可选）')
+        file_row(self.controls,'background','竖版背景图（可选）')
         self.cover_anchor=ttk.Frame(self.controls);self.cover_anchor.pack(fill='x')
         self.cover_single=file_row(self.controls,'cover','封面图（可选）')
         self.cover_l=file_row(self.controls,'cover_landscape','横版封面图16:9');self.cover_p=file_row(self.controls,'cover_portrait','竖版封面图9:16')
@@ -120,12 +121,12 @@ class SequencePanel:
     def toggle_details(self):
         self.details_open.set(not self.details_open.get());self.update()
     def picture_settings(self):
-        win=tk.Toplevel(self.app.root);win.title('老师画面大小');box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
+        win=tk.Toplevel(self.app.root);win.title('竖版画面大小');box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
         values={}
         for key,label,default in [('video_width','最大宽度 %',100),('video_height','最大高度 %（原默认76）',76)]:
             row=ttk.Frame(box);row.pack(fill='x',pady=6);ttk.Label(row,text=label,width=26).pack(side='left')
             values[key]=tk.StringVar(value=str(self.app.pending_style.get(key,default)));ttk.Entry(row,textvariable=values[key],width=12).pack(side='left')
-        ttk.Label(box,text='按原比例完整显示，不拉伸；字号或字幕长短不会改变老师画面。',wraplength=450).pack(pady=8)
+        ttk.Label(box,text='仅调整竖版。横版固定16:9等比完整显示，不加背景和标题；字幕不会缩小画面。',wraplength=450).pack(pady=8)
         def save():
             try:
                 from publish_style import normalize_style

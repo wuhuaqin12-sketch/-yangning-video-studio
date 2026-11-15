@@ -64,8 +64,8 @@ def main():
     (prod/'current.json').write_text('{"version":"0.12.11"}')
     settings=local/'YangNingStudio';settings.mkdir();(settings/'user_settings.json').write_text('keep')
     package_dir=sandbox/'packages'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.13','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
-    package=package_dir/'YangNing_VideoStudio_Windows_0.13.13.zip'
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.14','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
+    package=package_dir/'YangNing_VideoStudio_Windows_0.13.14.zip'
     with zipfile.ZipFile(package) as z:
         release=json.loads(z.read('release.json'));assert release['channel']=='test';assert release['update_manifest_url']==''
         from make_release import RETIRED_PREVIEW_FILES
@@ -75,14 +75,14 @@ def main():
     subprocess.run([sys.executable,str(unpack/'program/install_desktop.py'),'--quiet'],check=True)
     preview=local/'YangNingStudioDesktopPreview'
     assert (preview/'preview_profile.json').exists();assert (preview/'runtime/Scripts/python.exe').exists()
-    subprocess.run([str(preview/'runtime/Scripts/python.exe'),'-c','import sys;sys.path.insert(0,'+repr(str(preview/'versions/0.13.13/program'))+');import cv2,sequence_vnext,roi_picker,next_ui; print("INSTALLED_PARTS_RUNTIME_PASS",cv2.__version__)'],check=True)
+    subprocess.run([str(preview/'runtime/Scripts/python.exe'),'-c','import sys;sys.path.insert(0,'+repr(str(preview/'versions/0.13.14/program'))+');import cv2,sequence_vnext,roi_picker,next_ui; print("INSTALLED_PARTS_RUNTIME_PASS",cv2.__version__)'],check=True)
     assert json.loads((prod/'current.json').read_text())['version']=='0.12.11'
     assert (settings/'user_settings.json').read_text()=='keep'
     assert not (preview/'update_config.json').exists()
     print('ISOLATED_TEST_INSTALL_PASS',flush=True)
     # Exercise the actual GUI recovery backend, not only the low-level mock tests.
     recovery=sandbox/'run_installed_recovery.py'
-    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.13/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
+    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.14/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
     subprocess.run([sys.executable,str(recovery)],check=True)
     restored=json.loads((preview/'current.json').read_text())
     assert restored['version']=='0.12.11';assert restored['runtime_scope']=='stable-v12.11'

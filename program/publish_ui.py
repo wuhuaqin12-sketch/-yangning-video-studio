@@ -42,7 +42,7 @@ def show(app, open_path):
     win=tk.Toplevel(app.root);win.title('制作发布成片 · 字体 / 颜色 / 重点词');win.geometry('920x700');win.minsize(780,620)
     box=ttk.Frame(win,padding=12);box.pack(fill='both',expand=True)
     ttk.Label(box,text='标题、字幕与重点词样式',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
-    ttk.Label(box,text=('素材、背景、封面和保存位置统一在主页面；此处只设置标题、字幕与重点词。保存后回主页面一键导出。' if managed else '保存排版后，回主页面一键导出；预览可选。'),wraplength=860).pack(anchor='w',pady=5)
+    ttk.Label(box,text=('素材、背景、封面和保存位置统一在主页面；此处设置竖版标题、两种比例的字幕与重点词。横版不显示标题。保存后回主页面一键导出。' if managed else '保存排版后，回主页面一键导出；预览可选。'),wraplength=860).pack(anchor='w',pady=5)
     variables={k:(tk.BooleanVar(value=v) if isinstance(v,bool) else tk.StringVar(value=str(v))) for k,v in values.items()}
     tabs=ttk.Notebook(box);tabs.pack(fill='both',expand=True,pady=5)
     pages={}
@@ -111,7 +111,7 @@ def show(app, open_path):
     ttk.Button(position,text='下移',command=lambda:shift_subtitle(10)).pack(side='left',padx=3)
     ttk.Button(position,text='恢复位置',command=lambda:variables['subtitle_offset_y'].set('0')).pack(side='left',padx=3)
     colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='有背景图时，新字幕默认在老师视频下方居中，最多5行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，字幕不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
+    ttk.Label(page,text='横版不叠加背景和标题，字幕在原字幕附近。竖版有背景图时，字幕在老师视频下方，最多5行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，字幕不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')

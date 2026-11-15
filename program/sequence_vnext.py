@@ -172,7 +172,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     opts=normalize_style(chosen)
     opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=p['layouts'][mode]['subtitle_offset_y'])
     if mode=='landscape':
-        opts.update(video_width=chosen.get('video_width',100) if label=='body' else 100,video_height=chosen.get('video_height',76) if label=='body' else 100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
+        opts.update(title='',video_width=100,video_height=100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
     else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))
     if label=='ending':opts.update(title='',video_width=100,video_height=100,subtitle_area='video')
     # Use the same existing subtitle/title styling. No title auto-single-line change.
@@ -184,17 +184,18 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
             _x,y,_w,h=map(int,layout['repair_roi'].split(','))
             if 0<=y<y+h<=stream['height']:caption_row=(y,h)
         except (ValueError,TypeError):pass
-    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,landscape_overlay=mode=='landscape',caption_row=caption_row,title_in_top_background=mode=='landscape' and label=='body')
+    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,landscape_overlay=mode=='landscape',caption_row=caption_row,title_in_top_background=False)
     report=json.loads((folder/'layout_report.json').read_text(encoding='utf8'))
     atomic_json(folder/(label+'_'+mode+'.layout.json'),report)
-    if report.get('landscape_fixed_video'):progress('横版沿用素材与画面保存的高度和上下背景；长字幕不改变老师画面，标题在上方背景。')
+    if report.get('landscape_fixed_video'):progress('横版16:9等比完整显示，不叠加背景和标题；字幕长短不改变画面。')
     if report.get('split_cues'):progress('字幕已完整分屏，页时间按字数分配，不改变配音；需预览核对。')
     if report.get('short_pages'):progress('字幕排版提醒：编号'+','.join(map(str,report['short_pages']))+'部分页面不足1秒，请调整该句字幕时间或字号。')
     opening_title=False
     # make_ass places empty caption tracks over video; keep the normal source fit.
     base=f'color=c=black:s={width}x{height}:r=30:d={duration}[bg]'
     inputs=['-i',source]
-    if p['background']:
+    use_background=mode=='portrait' and bool(p['background'])
+    if use_background:
         inputs+=['-loop','1','-i',valid_file(p['background'],'背景图')]
         base=f'[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30[bg]'
     vf=base+f';[0:v]scale={vw}:{vh}:flags=lanczos,setsar=1,fps=30[src];[bg][src]overlay={vx}:{vy}:shortest=1'
@@ -205,7 +206,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     out=folder/(label+'_'+mode+'.mp4')
     has_audio=any(s['codec_type']=='audio' for s in probe(source,cancel)['streams'])
     if not has_audio:inputs+=['-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={duration}']
-    audio_index=0 if has_audio else (2 if p['background'] else 1)
+    audio_index=0 if has_audio else (2 if use_background else 1)
     ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={duration},atrim=duration={duration}','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k','-t',duration,out],cancel,cwd=folder)
     return out
 

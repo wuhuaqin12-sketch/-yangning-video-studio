@@ -35,8 +35,25 @@ class BackgroundLayoutTests(unittest.TestCase):
                 image=Path(render(settings,defaults(),mode,stop))
                 with Image.open(image) as im:
                     self.assertEqual(im.size,size)
-                    r,g,b=im.convert('RGB').getpixel((10,10));self.assertGreater(b,200);self.assertLess(r,30)
+                    r,g,b=im.convert('RGB').getpixel((10,10))
+                    if mode=='portrait':self.assertGreater(b,200);self.assertLess(r,30)
+                    else:self.assertGreater(r,200);self.assertLess(b,30)
                 q=json.loads((image.parent/('body_'+mode+'.layout.json')).read_text())
-                self.assertLess(q['title_center'][1],q['video_box'][1]);self.assertEqual(q['subtitle_requested_px'],48)
+                if mode=='portrait':self.assertLess(q['title_center'][1],q['video_box'][1])
+                else:self.assertIsNone(q['title_center']);self.assertEqual(q['video_box'],[0,0,1920,1080])
+                self.assertEqual(q['subtitle_requested_px'],48)
                 scope=json.loads((image.parent/'preview_scope.json').read_text());self.assertFalse(scope['full_export']);self.assertFalse(scope['speech_alignment'])
             self.assertEqual(file_digest(source),before)
+
+    def test_landscape_ignores_stale_background_title_geometry_and_keeps_silent_non_wide_source(self):
+        from sequence_vnext import compose_segment,seconds
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);stop=threading.Event();source=root/'four_three.mp4'
+            ff(['-f','lavfi','-i','color=red:s=320x240:r=30:d=0.4','-c:v','libx264','-pix_fmt','yuv420p',source],stop)
+            p=defaults();p['background']=str(root/'missing_old_background.png')
+            p['layouts']['landscape']['style']={'title':'OLD TITLE','video_width':40,'video_height':40}
+            result=compose_segment(str(source),[],{'title':'金剛経','video_height':76},'landscape',p,root,stop,False,'body')
+            q=json.loads((root/'body_landscape.layout.json').read_text())
+            self.assertEqual(q['video_box'],[240,0,1440,1080]);self.assertIsNone(q['title_center'])
+            self.assertAlmostEqual(seconds(result,stop),.4,delta=.08)
+            self.assertEqual(sum(s['codec_type']=='audio' for s in __import__('media').probe(result,stop)['streams']),1)
