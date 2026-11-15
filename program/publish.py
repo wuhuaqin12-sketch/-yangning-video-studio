@@ -61,19 +61,45 @@ def subtitle_lines(text,opts,size,width):
     return text,line_parts(text,columns)
 
 
-def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False):
+def fixed_landscape_layout(opts,stream,w,h,cues,caption_row=None):
+    # Subtitle length must never resize or move the picture.
+    scale=min(w/stream['width'],h/stream['height'])
+    vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
+    vx=(w-vw)//2;vy=(h-vh)//2;requested=min(64,round(opts['subtitle_font_size'] or 64))
+    margin=max(12,vh*.025);bottom=vy+vh-margin
+    top=vy+vh*.76
+    if caption_row:
+        y,_height=caption_row
+        top=vy+vh*y/stream['height']-requested*1.2
+    top=max(vy+vh*.55,min(top,bottom-requested*1.4-16))
+    width=vw*.90;padding=2*opts['subtitle_outline']+16
+    size=requested
+    while size>44:
+        rows=max((len(subtitle_lines(text,opts,size,width)[1]) for _,_,_,text in cues),default=1)
+        if rows<=5 and rows*size*1.25+padding<=bottom-top:break
+        size=max(44,size-2)
+    return (vw,vh,vx,vy,width,bottom-top,vx+vw/2,(top+bottom)/2),size,requested
+
+
+def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False,landscape_overlay=False,caption_row=None):
     opts=normalize_style(opts)
     if not cues:opts['subtitle_area']='video'
-    if auto_background and w>h and cues:
+    if auto_background and not landscape_overlay and w>h and cues:
         initial_size=opts['subtitle_font_size'] or round(h*opts['font_percent']/100)
         if any(len(subtitle_lines(text,opts,initial_size,w*.84)[1])>2 for _,_,_,text in cues):
             opts['subtitle_area']='below_video';opts['_auto_below_video']=True
-    vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
-    below=opts['subtitle_area']=='below_video'
-    sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
-    if below and cues:
-        opts['_subtitle_rows']=min(5,max(len(subtitle_lines(text,opts,round(sub_size),sw)[1]) for _,a,b,text in cues))
+    overlay=bool(landscape_overlay and w>h and cues)
+    if overlay:
+        opts['subtitle_area']='video'
+        (vw,vh,vx,vy,sw,sh,sx,sy),sub_size,requested_size=fixed_landscape_layout(opts,stream,w,h,cues,caption_row)
+        below=False
+    else:
         vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
+        below=opts['subtitle_area']=='below_video'
+        sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100);requested_size=sub_size
+        if below and cues:
+            opts['_subtitle_rows']=min(5,max(len(subtitle_lines(text,opts,round(sub_size),sw)[1]) for _,a,b,text in cues))
+            vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
     left,top,right,bottom=sx-sw/2,sy-sh/2,sx+sw/2,sy+sh/2
     title_size=opts['title_font_size'] or round(h*opts['title_size']/100)
     header=f'''[Script Info]
@@ -90,10 +116,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 '''
     sizes=[];shrunk=[];split_cues=[];display_cues=[];short_pages=[]
     for ident,a,b,text in cues:
-        available=sh-2*opts['subtitle_outline']-16 if below else min(vh*.40,max(sh,sy+sh/2-vy-8))
+        available=sh-2*opts['subtitle_outline']-16 if below or overlay else min(vh*.40,max(sh,sy+sh/2-vy-8))
         size=round(sub_size)
         text,lines=subtitle_lines(text,opts,size,sw)
-        max_lines=min(5,int((available+.001)//(size*(1.2 if below else 1.4))))
+        if size<requested_size:shrunk.append(ident)
+        max_lines=min(5,int((available+.001)//(size*(1.25 if overlay else 1.2 if below else 1.4))))
         if max_lines<1:
             raise ValueError('字幕区域高度不足一行，请扩大区域高度或减小统一字号。')
         pages=[lines[i:i+max_lines] for i in range(0,len(lines),max_lines)]
@@ -112,9 +139,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             display_cues.append((start,end,plain))
             # Clip glyphs and outlines to the background rectangle as a final
             # guard, including font substitutions with different metrics.
-            clip=f'\\clip({math.ceil(left)},{math.ceil(top)},{math.floor(right)},{math.floor(bottom)})' if below else ''
-            anchor=8 if below else 2
-            baseline=top+opts['subtitle_outline']+4 if below else bottom
+            clip=f'\\clip({math.ceil(left)},{math.ceil(top)},{math.floor(right)},{math.floor(bottom)})' if below or overlay else ''
+            anchor=8 if below or overlay else 2
+            baseline=top+opts['subtitle_outline']+4 if below or overlay else bottom
             header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an{anchor}\\pos({sx:.1f},{baseline:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
     actual_title=None
     if opts['title'].strip():
@@ -139,7 +166,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         render_size=round(size*1.448,2) if opts['title_font'].casefold()=='yuji boku' else size
         header+=f'Dialogue: 2,0:00:00.00,{stamp(duration,True)},Title,,0,0,0,,{{\\an5\\pos({tx:.1f},{ty:.1f})\\fs{render_size}\\q2}}{text}\n'
     Path(path).write_text(header,encoding='utf-8-sig')
-    report=dict(subtitle_requested_px=sub_size,subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
+    report=dict(subtitle_requested_px=requested_size,landscape_fixed_video=overlay,caption_anchor='above_original_subtitle' if overlay and caption_row else 'lower_video' if overlay else 'default',subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
                 title_requested_px=title_size,title_actual_px=actual_title,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],

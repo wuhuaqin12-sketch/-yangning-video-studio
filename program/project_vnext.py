@@ -11,7 +11,7 @@ DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',i
     cover_seconds=3,cover_transition='cut',cover_fit='ask',background='',
     combined=False,combined_replace_outro=False,combined_intro_last_cue=12,combined_aligned_srt='',combined_alignment_token='',combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
     preview_start=0,preview_seconds=15,layouts={
-      'landscape':dict(repair_preview_start=0,auto_long_subtitles=True,remove_chinese=True,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='84',style={}),
+      'landscape':dict(repair_preview_start=0,auto_long_subtitles=True,remove_chinese=True,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='64',style={}),
       'portrait':dict(repair_preview_start=0,auto_long_subtitles=True,remove_chinese=False,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
 DEFAULTS.update(opening_title_enabled=False,opening_title_original='金刚经讲义',opening_title_text='',opening_title_start=0,opening_title_end=15,opening_title_x=50,opening_title_y=70,opening_title_size=64,
     disclaimer_enabled=False,disclaimer_image='',disclaimer_seconds=5,disclaimer_mode='append')

@@ -31,7 +31,7 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertFalse(self.app.v['burn'].get())
         self.assertEqual(self.app.v['speed'].get(),'1.0')
         self.assertEqual(self.app.language_name.get(),'按文件名判断')
-        self.assertEqual(p.layout_vars['landscape']['subtitle_font_size'].get(),'84')
+        self.assertEqual(p.layout_vars['landscape']['subtitle_font_size'].get(),'64')
         self.assertEqual(p.layout_vars['portrait']['subtitle_font_size'].get(),'')
         self.assertEqual(p.layout_vars['landscape']['repair_method'].get(),'glyph')
         self.assertTrue(p.layout_vars['landscape']['repair_full_width'].get())
@@ -143,7 +143,7 @@ class BodyFirstUITests(unittest.TestCase):
         values=p.value()
         self.assertFalse(values['combined']);self.assertFalse(values['opening_title_enabled'])
         self.assertEqual(values['combined_intro_end'],0)
-        self.assertEqual(values['layouts']['landscape']['subtitle_font_size'],'84')
+        self.assertEqual(values['layouts']['landscape']['subtitle_font_size'],'64')
         self.assertEqual(values['layouts']['portrait']['subtitle_font_size'],'')
         self.assertEqual(values['layouts']['landscape']['subtitle_offset_y'],0)
         self.assertEqual(values['layouts']['portrait']['title_y'],'')
@@ -160,5 +160,15 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertEqual(values['repair_approved'].get(),'')
         self.assertIn('已选择',self.panel.region_status['landscape'].get())
         self.assertEqual(self.panel.value()['layouts']['landscape']['repair_roi'],'0,100,640,40')
+
+    def test_open_output_uses_chinese_final_folder_instead_of_work_cache(self):
+        cache=self.folder/'YangNing_Next_cache';cache.mkdir()
+        out=self.folder/'成片';out.mkdir();video=out/'金刚经_日语_横版_16x9.mp4';video.write_bytes(b'video')
+        (cache/'report.json').write_text(json.dumps(dict(preview=False,results=[dict(path=str(video))])),encoding='utf8')
+        job=dict(sequence={'output_mode':'both'},analysis=str(cache),result=str(cache),output=str(out))
+        with patch.object(self.app,'current',return_value=job),patch('app.open_path') as opened:
+            self.app.open_result();opened.assert_called_once_with(str(out))
+        with patch.object(self.app,'current',return_value=None),patch('app.open_path') as opened:
+            self.app.open_result();opened.assert_called_once_with(self.app.v['output'].get())
 
 if __name__=='__main__':unittest.main()

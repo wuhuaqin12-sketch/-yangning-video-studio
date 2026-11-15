@@ -171,16 +171,22 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     opts=normalize_style(chosen)
     opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=p['layouts'][mode]['subtitle_offset_y'])
     if mode=='landscape':
-        opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',100),subtitle_font_size=opts['subtitle_font_size'] or 48)
+        opts.update(video_width=100,video_height=100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
     else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))
     if label=='ending':opts.update(title='',video_width=100,video_height=100,subtitle_area='video')
     # Use the same existing subtitle/title styling. No title auto-single-line change.
     ass=folder/(label+'_'+mode+'.ass')
     visible=cues if burn else []
-    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,auto_background=label=='body' and layout.get('auto_long_subtitles',True))
+    caption_row=None
+    if mode=='landscape' and label=='body' and layout.get('repair_roi'):
+        try:
+            _x,y,_w,h=map(int,layout['repair_roi'].split(','))
+            if 0<=y<y+h<=stream['height']:caption_row=(y,h)
+        except (ValueError,TypeError):pass
+    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,landscape_overlay=mode=='landscape',caption_row=caption_row)
     report=json.loads((folder/'layout_report.json').read_text(encoding='utf8'))
     atomic_json(folder/(label+'_'+mode+'.layout.json'),report)
-    if report.get('auto_background'):progress('横版长字幕：完整画面已等比例缩入上方，字幕放在下方背景。')
+    if report.get('landscape_fixed_video'):progress('横版画面保持原有完整大小与位置；字幕在原字幕行上方附近向下排，必要时适度缩小或分屏。')
     if report.get('split_cues'):progress('字幕已完整分屏，页时间按字数分配，不改变配音；需预览核对。')
     if report.get('short_pages'):progress('字幕排版提醒：编号'+','.join(map(str,report['short_pages']))+'部分页面不足1秒，请调整该句字幕时间或字号。')
     opening_title=False
@@ -313,14 +319,16 @@ def process(job,cancel,progress=lambda s:None,preview=False):
         if preview:
             start=p['preview_start'];length=min(p['preview_seconds'],actual-start)
             if length<=0:raise ValueError('预览开始位置超出完整视频。')
-            dest=folder/('preview_'+mode+'.mp4')
+            dest=folder/('试看_'+('横版_16x9' if mode=='landscape' else '竖版_9x16')+'.mp4')
             ff(['-i',full,'-ss',start,'-t',length,'-c:v','libx264','-preset','fast','-crf','18','-c:a','aac',dest],cancel)
         else:
             dest=unique_output(output,job.get('name') or Path(job['video']).stem,job.get('language','ja'),mode)
             try:os.replace(full,dest)
             except Exception:dest.unlink(missing_ok=True);raise
             shutil.copyfile(folder/('complete_'+mode+'.srt'),dest.with_suffix('.srt'))
-        results.append({'mode':mode,'path':str(dest),'duration':actual,'full_decode_passed':True})
+        results.append({'mode':mode,'label':('横版16:9' if mode=='landscape' else '竖版9:16')+('试看' if preview else '完整成片'),'path':str(dest),'duration':actual,'full_decode_passed':True})
+        progress(results[-1]['label']+'：'+str(dest))
+    (folder/'成片位置.txt').write_text(('这是制作缓存文件夹，完整成片在以下位置：' if not preview else '以下文件只是指定范围试看：')+'\n'+'\n'.join(r['label']+'：'+r['path'] for r in results),encoding='utf-8-sig')
     # Keep UI-compatible folder entry points without flattening editable originals.
     shutil.copyfile(results[0]['path'],folder/'video.mp4')
     atomic_json(folder/'report.json',{'status':'completed','body_analysis':str(main),'results':results,'preview':preview,'listening_review':'not_performed','limitations':['低资源字幕区域修复不等于AI背景重建，需预览确认。','人声分离效果需用户试听确认；未默认启用未通过的模型。']})

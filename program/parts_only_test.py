@@ -28,6 +28,9 @@ class PartsOnlyTests(unittest.TestCase):
             # Direct export needs neither a prior preview nor a confirmation token.
             folder=Path(seq.process(job,cancel));report=json.loads((folder/'report.json').read_text())
             self.assertFalse(report['preview']);self.assertEqual(len(report['results']),2)
+            self.assertEqual([r['label'] for r in report['results']],['横版16:9完整成片','竖版9:16完整成片'])
+            guide=(folder/'成片位置.txt').read_text(encoding='utf-8-sig')
+            for r in report['results']:self.assertIn(r['path'],guide)
             for result,ratio in zip(report['results'],('横版_16x9','竖版_9x16')):
                 path=Path(result['path']);self.assertIn(ratio,path.stem)
                 self.assertAlmostEqual(seq.seconds(path,cancel),2.8,delta=.16)
@@ -42,13 +45,13 @@ class PartsOnlyTests(unittest.TestCase):
                     samples=np.frombuffer(raw,np.float32);peak=np.argmax(abs(np.fft.rfft(samples)))*8000/len(samples)
                     self.assertAlmostEqual(peak,expected,delta=15)
             self.assertEqual(before,[file_digest(p) for p in [*clips,voice,intro_srt,intro_target,body_srt]])
-    def test_long_landscape_subtitles_preserve_all_text_outside_video(self):
+    def test_long_landscape_subtitles_preserve_text_and_original_video_box(self):
         from publish import make_ass
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);text='長い字幕を省略せず読みやすく改行します。'*30
-            make_ass(root/'test.ass',[(1,0,20,text)],{'subtitle_font_size':84,'title':''},{'width':1920,'height':1080},20,1920,1080,auto_background=True)
+            make_ass(root/'test.ass',[(1,0,20,text)],{'subtitle_font_size':64,'title':''},{'width':1920,'height':1080},20,1920,1080,landscape_overlay=True)
             report=json.loads((root/'layout_report.json').read_text());x,y,w,h=report['video_box']
-            self.assertTrue(report['auto_background']);self.assertGreater(report['subtitle_box'][1],y+h)
-            self.assertEqual(report['subtitle_actual_px'],[84]);self.assertGreater(report['display_cue_count'],1)
+            self.assertFalse(report['auto_background']);self.assertEqual([x,y,w,h],[0,0,1920,1080])
+            self.assertLessEqual(max(report['subtitle_actual_px']),64);self.assertGreaterEqual(min(report['subtitle_actual_px']),44);self.assertGreater(report['display_cue_count'],1)
             cues=parse_srt(root/'publish_subtitles.srt');self.assertEqual(''.join(c[3].replace('\n','') for c in cues),text)
             self.assertEqual((cues[0][1],cues[-1][2]),(0,20));self.assertTrue(all(len(c[3].splitlines())<=5 for c in cues))

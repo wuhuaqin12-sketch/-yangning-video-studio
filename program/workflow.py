@@ -42,7 +42,11 @@ def execute(job,cancel,emit,export=True):
                 from project_vnext import preview_key
                 emit(('sequence_preview_ready',preview_key(job),str(Path(folder)/'video.mp4')))
             state('完成·检查通过',analysis=folder,result=folder)
-            progress(('范围预览已生成（不是完整导出）：' if not export or job.get('_sequence_preview',False) else '完整视频已导出：')+str(Path(folder)/'video.mp4'))
+            if not export or job.get('_sequence_preview',False):progress('范围试看已生成，不是完整导出：'+str(folder))
+            else:
+                import json
+                report=json.loads((Path(folder)/'report.json').read_text(encoding='utf8'))
+                for item in report['results']:progress(item['label']+'已保存：'+item['path'])
             return folder
         progress('开始检查与分析；任务已启动')
         folder=prepare(job,cancel,progress)

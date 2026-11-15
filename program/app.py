@@ -522,7 +522,16 @@ class App:
         j=self.current()
         if j:messagebox.showinfo('任务详情',j.get('error') or j.get('step') or j.get('status',''))
     def open_result(self):
-        try:j=self.current(True);open_path(j.get('result') or j.get('analysis') or j['output'])
+        try:
+            j=self.current(False)
+            if not j:open_path(self.v['output'].get());return
+            folder=Path(j.get('analysis') or j.get('result') or j['output'])
+            if j.get('sequence') and (folder/'report.json').is_file():
+                report=json.loads((folder/'report.json').read_text(encoding='utf8'))
+                if not report.get('preview'):
+                    final=next((Path(r['path']) for r in report.get('results',[]) if Path(r.get('path','')).is_file()),None)
+                    if final is not None:open_path(str(final.parent));return
+            open_path(j.get('result') or j.get('analysis') or j['output'])
         except Exception as e:messagebox.showerror('打开结果',str(e))
     def poll(self):
         try:
