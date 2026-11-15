@@ -188,11 +188,15 @@ class BodyFirstUITests(unittest.TestCase):
             for child in w.winfo_children():yield child;yield from widgets(child)
         tabs=next(w for w in widgets(dialog) if isinstance(w,ttk.Notebook))
         self.assertEqual([tabs.tab(t,'text') for t in tabs.tabs()],['标题','字幕','重点词颜色'])
+        spins=[w for w in widgets(dialog) if isinstance(w,ttk.Spinbox)]
+        self.assertEqual(len(spins),2)
+        for spin,value in zip(spins,('60','20')):spin.delete(0,'end');spin.insert(0,value)
         button=next(w for w in widgets(dialog) if isinstance(w,ttk.Button) and w.cget('text')=='预览横版排版')
         with patch.object(self.app,'worker',side_effect=lambda work:work()),patch('style_preview.render',return_value=str(bg)) as render,patch('app.open_path'):
             button.invoke();render.assert_called_once()
             settings,p,ratio=render.call_args.args[:3]
             self.assertEqual(settings['background'],str(bg));self.assertEqual(p['background'],str(bg));self.assertEqual(settings['video'],str(source));self.assertEqual(ratio,'landscape')
+            self.assertEqual(settings['landscape_subtitle_offset_y'],'60');self.assertEqual(settings['portrait_subtitle_offset_y'],'20')
             self.app.poll()
         self.assertEqual(self.panel.v['background'].get(),str(bg));dialog.destroy()
 

@@ -170,7 +170,8 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
         if k=='subtitle_font_size' and k in (style or {}):continue
         if layout.get(k) not in ('',None) and label=='body':chosen[k]=float(layout[k])
     opts=normalize_style(chosen)
-    opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=p['layouts'][mode]['subtitle_offset_y'])
+    offset=chosen.get(mode+'_subtitle_offset_y',chosen.get('subtitle_offset_y',layout['subtitle_offset_y']))
+    opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=float(offset))
     if mode=='landscape':
         opts.update(title='',video_width=100,video_height=100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
     else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))

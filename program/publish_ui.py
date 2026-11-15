@@ -43,6 +43,9 @@ def show(app, open_path):
     box=ttk.Frame(win,padding=12);box.pack(fill='both',expand=True)
     ttk.Label(box,text='标题、字幕与重点词样式',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
     ttk.Label(box,text=('素材、背景、封面和保存位置统一在主页面；此处设置竖版标题、两种比例的字幕与重点词。横版不显示标题。保存后回主页面一键导出。' if managed else '保存排版后，回主页面一键导出；预览可选。'),wraplength=860).pack(anchor='w',pady=5)
+    for mode in ('landscape','portrait'):
+        key=mode+'_subtitle_offset_y'
+        if key not in saved_style:values[key]=saved_style.get('subtitle_offset_y',0)
     variables={k:(tk.BooleanVar(value=v) if isinstance(v,bool) else tk.StringVar(value=str(v))) for k,v in values.items()}
     tabs=ttk.Notebook(box);tabs.pack(fill='both',expand=True,pady=5)
     pages={}
@@ -99,19 +102,21 @@ def show(app, open_path):
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
     for row,(key,label) in enumerate([('subtitle_font_size','字号上限（横版会适度适配）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
-    ttk.Label(page,text='字幕上下微调（像素）').grid(row=4,column=0,sticky='w',pady=6)
-    position=ttk.Frame(page);position.grid(row=4,column=1,columnspan=2,sticky='w')
-    ttk.Spinbox(position,from_=-400,to=400,increment=10,textvariable=variables['subtitle_offset_y'],width=8).pack(side='left',padx=(0,8))
-    def shift_subtitle(amount):
-        try:value=float(variables['subtitle_offset_y'].get())+amount
+    def shift_subtitle(key,amount):
+        try:value=float(variables[key].get())+amount
         except ValueError:
             messagebox.showerror('字幕位置','请填写数字；0为默认位置。',parent=win);return
-        variables['subtitle_offset_y'].set(f'{max(-400,min(400,value)):g}')
-    ttk.Button(position,text='上移',command=lambda:shift_subtitle(-10)).pack(side='left',padx=3)
-    ttk.Button(position,text='下移',command=lambda:shift_subtitle(10)).pack(side='left',padx=3)
-    ttk.Button(position,text='恢复位置',command=lambda:variables['subtitle_offset_y'].set('0')).pack(side='left',padx=3)
+        variables[key].set(f'{max(-400,min(400,value)):g}')
+    positions=[('landscape_subtitle_offset_y','横版字幕上下微调'),('portrait_subtitle_offset_y','竖版字幕上下微调')] if managed else [('subtitle_offset_y','字幕上下微调（像素）')]
+    for row,(key,label) in enumerate(positions,4):
+        ttk.Label(page,text=label).grid(row=row,column=0,sticky='w',pady=6)
+        position=ttk.Frame(page);position.grid(row=row,column=1,columnspan=2,sticky='w')
+        ttk.Spinbox(position,from_=-400,to=400,increment=10,textvariable=variables[key],width=8).pack(side='left',padx=(0,8))
+        ttk.Button(position,text='上移',command=lambda k=key:shift_subtitle(k,-10)).pack(side='left',padx=3)
+        ttk.Button(position,text='下移',command=lambda k=key:shift_subtitle(k,10)).pack(side='left',padx=3)
+        ttk.Button(position,text='恢复位置',command=lambda k=key:variables[k].set('0')).pack(side='left',padx=3)
     colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='横版不叠加背景和标题，字幕在原字幕附近。竖版有背景图时，字幕在老师视频下方，最多5行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，字幕不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
+    ttk.Label(page,text='横版默认放在原中文字幕区域；竖版仍放在视频下方背景区。\n两个比例分别保存，负数上移、正数下移，单位为成片像素；到达安全边界会停止。\n0为默认位置；仍需调整时点上移或下移。预览与正式导出使用同一位置。\n新字幕不能完全遮住不同字形的中文残留，仍需去除原中文字和描边。',wraplength=780).grid(row=6,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')

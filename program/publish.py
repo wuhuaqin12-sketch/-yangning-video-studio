@@ -67,11 +67,14 @@ def fixed_landscape_layout(opts,stream,w,h,cues,caption_row=None):
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
     vx=(w-vw)//2;vy=(h-vh)//2;requested=min(64,round(opts['subtitle_font_size'] or 64))
     margin=max(12,vh*.025);bottom=vy+vh-margin
-    top=vy+vh*.76
+    top=vy+vh*.84
     if caption_row:
         y,_height=caption_row
-        top=vy+vh*y/stream['height']-requested*1.2
-    top=max(vy+vh*.55,min(top,bottom-requested*1.4-16))
+        top=vy+vh*y/stream['height']
+    min_top=vy+vh*.55;max_top=bottom-requested*1.4-16
+    base_top=max(min_top,min(top,max_top))
+    top=max(min_top,min(base_top+opts.get('subtitle_offset_y',0),max_top))
+    opts['_landscape_offset_applied']=top-base_top
     width=vw*.90;padding=2*opts['subtitle_outline']+16
     size=requested
     while size>44:
@@ -169,11 +172,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         render_size=round(size*1.448,2) if opts['title_font'].casefold()=='yuji boku' else size
         header+=f'Dialogue: 2,0:00:00.00,{stamp(duration,True)},Title,,0,0,0,,{{\\an5\\pos({tx:.1f},{ty:.1f})\\fs{render_size}\\q2}}{text}\n'
     Path(path).write_text(header,encoding='utf-8-sig')
-    report=dict(subtitle_requested_px=requested_size,landscape_fixed_video=overlay,caption_anchor='above_original_subtitle' if overlay and caption_row else 'lower_video' if overlay else 'default',subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
+    report=dict(subtitle_requested_px=requested_size,landscape_fixed_video=overlay,caption_anchor='original_subtitle_region' if overlay and caption_row else 'lower_video' if overlay else 'default',subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
                 title_requested_px=title_size,title_actual_px=actual_title,title_center=title_center,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],
-                subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else 0,
+                subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else round(opts.get('_landscape_offset_applied',0),3) if overlay else 0,
                 split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue',short_pages=sorted(set(short_pages)),auto_background=bool(opts.get('_auto_below_video')),all_text_preserved=True)
     (Path(path).parent/'layout_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     (Path(path).parent/'publish_subtitles.srt').write_text(
