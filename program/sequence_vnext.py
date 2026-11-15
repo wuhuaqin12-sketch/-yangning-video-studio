@@ -227,6 +227,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     if mode=='landscape':
         opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',100),subtitle_font_size=opts['subtitle_font_size'] or 48)
     else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))
+    if label=='ending':opts.update(title='',video_width=100,video_height=100,subtitle_area='video')
     # Use the same existing subtitle/title styling. No title auto-single-line change.
     ass=folder/(label+'_'+mode+'.ass')
     visible=cues if burn else []

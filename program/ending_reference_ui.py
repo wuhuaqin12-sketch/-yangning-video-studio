@@ -9,7 +9,7 @@ class ReferenceDialog:
     def __init__(self,panel):
         self.panel=panel;self.app=panel.app;self.root=panel.autosave.parent/'ending_reference'
         self.candidate=None;self.previewed=None
-        self.win=tk.Toplevel(self.app.root);self.win.title('固定原片尾参考与自动定位');self.win.geometry('760x470')
+        self.win=tk.Toplevel(self.app.root);self.win.title('固定原片尾参考与自动定位');self.win.geometry('760x510')
         box=ttk.Frame(self.win,padding=16);box.pack(fill='both',expand=True)
         ttk.Label(box,text='① 保存一次原片尾参考（所有语言共用）').pack(anchor='w',pady=6)
         row=ttk.Frame(box);row.pack(fill='x')
@@ -26,7 +26,7 @@ class ReferenceDialog:
         ttk.Label(row,text='候选开始秒（可微调）').pack(side='left');self.seconds=tk.StringVar(value='');ttk.Entry(row,textvariable=self.seconds,width=14).pack(side='left',padx=6)
         self.preview_button=ttk.Button(row,text='预览原片尾切入点',command=self.preview,state='disabled');self.preview_button.pack(side='left',padx=6)
         self.accept_button=ttk.Button(row,text='确认使用此位置',command=self.accept,state='disabled');self.accept_button.pack(side='left')
-        ttk.Label(box,text='匹配精度约0.13秒，不等于逐帧无误；改过画幅、裁切、变速或片尾内容时可能定位失败。',wraplength=710).pack(anchor='w',pady=8)
+        ttk.Label(box,text='这里只匹配旧视频里的原片尾，精度约0.13秒，需预览确认。原片尾参考应同画幅、同速度。带免责声明的新片尾不参与匹配，时长可更长、画幅也可不同。',wraplength=710).pack(anchor='w',pady=8)
         ttk.Button(box,text='关闭',command=self.win.destroy).pack(anchor='e')
     def refresh_reference(self):
         try:

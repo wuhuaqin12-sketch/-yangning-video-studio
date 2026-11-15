@@ -122,7 +122,7 @@ class SequencePanel:
         ttk.Button(row,text='使用当前语言片尾',command=self.use_ending_preset).pack(side='left',padx=6)
         self.ending_status=tk.StringVar(value='按语言保存；未保存的语言不会使用其他语言的片尾。')
         ttk.Label(self.replacement,textvariable=self.ending_status,wraplength=800).pack(anchor='w',pady=4)
-        ttk.Label(self.replacement,text='替换范围：原片尾开始位置至原片结束。新片尾更长时，总时长相应增加。时间位置属于当前视频，不随语言预设套用。',wraplength=800).pack(anchor='w')
+        ttk.Label(self.replacement,text='新片尾可含免责声明，时长和画幅都可与原片尾不同；完整播放，等比例适配输出，不拉伸。它不参与自动定位。替换范围是原片尾起点至原片结束，总时长随新片尾长度变化。',wraplength=800).pack(anchor='w')
         self.music=ttk.LabelFrame(self.segments,text='片头音乐（可选）',padding=5)
         file_row(self.music,'background_audio','片头背景音乐（可选）')
         ttk.Label(self.music,text='导入已去人声的音乐，仅作用于片头。').pack(anchor='w')

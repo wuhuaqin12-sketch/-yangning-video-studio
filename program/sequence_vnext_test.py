@@ -171,6 +171,18 @@ class RenderTests(unittest.TestCase):
         j={**job,'publish_settings':{'title':''},'burn':False}
         cached=s.aligned(j,self.root/'out/.yangning_cache',self.cancel,lambda _:None)
         self.assertEqual((cached/'analysis.json').stat().st_mtime_ns,before)
+    def test_ready_made_ending_uses_full_canvas_and_no_body_title(self):
+        clip=self.root/'portrait_ending.mp4'
+        s.ff(['-f','lavfi','-i','color=red:s=108x192:r=30:d=1.2','-f','lavfi','-i','sine=frequency=880:duration=1.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',clip],self.cancel)
+        before=p.file_digest(clip);q=p.defaults()
+        out=s.compose_segment(str(clip),[],{'title':'BODY TITLE','video_width':50,'video_height':40},'portrait',q,self.root,self.cancel,False,'ending')
+        frame=self.root/'ending_frame.png';s.ff(['-i',out,'-frames:v','1',frame],self.cancel)
+        with Image.open(frame) as image:
+            self.assertEqual(image.size,(1080,1920))
+            for xy in ((10,10),(540,960),(1060,1900)):
+                red,green,blue=image.convert('RGB').getpixel(xy);self.assertGreater(red,200);self.assertLess(green,40);self.assertLess(blue,40)
+        self.assertAlmostEqual(s.seconds(out,self.cancel),1.2,delta=.08);self.assertEqual(p.file_digest(clip),before)
+
     def test_complete_mp4_protects_explicit_ending(self):
         full=self.root/'full.mp4';s.concat_clips([self.clip,self.clip,self.clip],full,self.root,self.cancel)
         voice=self.root/'voice.wav';s.ff(['-i',full,'-t','1.6','-c:a','pcm_s16le',voice],self.cancel)
