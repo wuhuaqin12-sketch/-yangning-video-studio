@@ -25,6 +25,9 @@ class BodyFirstUITests(unittest.TestCase):
         p=self.panel
         self.assertFalse(p.enabled.get());self.assertFalse(self.app.sequence_settings)
         self.assertFalse(p.opening_text_button.winfo_ismapped())
+        self.assertTrue(p.segment_mode_box.winfo_ismapped());self.assertEqual(p.segment_mode_box.master,self.app.material_mode_row)
+        self.assertTrue(p.output_mode_box.winfo_ismapped())
+        self.assertEqual(p.segments.master,self.app.segment_host)
         for part in (p.controls,p.segments,p.intro,p.outro,p.combined,p.music,self.app.activity):self.assertFalse(part.winfo_ismapped())
         self.assertFalse(self.app.v['burn'].get())
         self.assertEqual(self.app.v['speed'].get(),'1.0')

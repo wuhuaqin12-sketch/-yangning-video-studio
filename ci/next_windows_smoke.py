@@ -34,7 +34,11 @@ def main():
     ImageGrab.grab().save(sandbox/'segments_optional.png')
     panel.segment_mode.set(SEGMENT_MODES[2]);panel.change_segments();root.update()
     assert panel.combined.winfo_ismapped() and not panel.intro.winfo_ismapped() and not panel.outro.winfo_ismapped()
+    assert not panel.value()['combined'] and not panel.diamond_details.winfo_ismapped()
+    ImageGrab.grab().save(sandbox/'complete_default.png')
+    panel.diamond_enabled.set(True);panel.update();root.update()
     assert panel.value()['combined'] and not panel.value()['outro_enabled']
+    ImageGrab.grab().save(sandbox/'diamond_options.png')
     panel.appearance_open.set(True);panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
     assert app.sequence_settings['output_mode']=='both'
     assert panel.cover_l.winfo_ismapped() and panel.cover_p.winfo_ismapped() and not panel.cover_single.winfo_ismapped()

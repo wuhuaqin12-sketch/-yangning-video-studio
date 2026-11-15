@@ -11,7 +11,7 @@ class DesktopUpdates:
         self.app=app;self.checking=False;self.root=install_root()
         row=ttk.Frame(parent);row.pack(fill='x',pady=(2,4))
         ttk.Label(row,text='桌面版 '+APP_VERSION).pack(side='left')
-        ttk.Button(row,text='检查更新',command=lambda:self.check(True)).pack(side='right')
+        if not compact:ttk.Button(row,text='检查更新',command=lambda:self.check(True)).pack(side='right')
         
         if not compact:ttk.Button(row,text='更新设置',command=self.settings).pack(side='right',padx=6)
         app.root.after(2500,lambda:self.check(False))
