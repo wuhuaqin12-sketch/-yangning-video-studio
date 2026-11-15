@@ -109,14 +109,20 @@ def split_combined(job,p,folder,cancel,progress):
     duration=seconds(source,cancel);tail=p['combined_outro_start'];head=p['combined_intro_end']
     if not 0<tail<duration:raise ValueError('完整视频模式必须明确指定片尾开始秒数，不能使用SRT末尾猜测。')
     if head>=tail:raise ValueError('片头结束时间必须早于片尾开始时间。')
-    if p['outro_enabled'] and p['outro_video']:raise ValueError('完整视频已有受保护片尾，不能同时再导入独立片尾；请关闭其中一个，避免重复。')
+    if not p['combined_replace_outro'] and p['outro_enabled'] and p['outro_video']:raise ValueError('完整视频已有受保护片尾，不能同时再导入独立片尾；请关闭其中一个，避免重复。')
+    replacement=None
+    if p['combined_replace_outro']:
+        replacement=valid_file(p['outro_video'],'替换片尾视频')
+        if Path(replacement).resolve()==Path(source).resolve():raise ValueError('替换片尾不能选择完整视频本身。')
+        if seconds(replacement,cancel)<=0:raise ValueError('替换片尾时长无效。')
+        if not any(x['codec_type']=='video' for x in probe(replacement,cancel)['streams']):raise ValueError('替换片尾必须包含视频画面。')
     refs=parse_srt(j['source_srt'])
     if any(a<tail<b for _,a,b,_ in refs):raise ValueError('指定片尾边界穿过一句字幕，请调整边界。')
     def cut(name,a,b,input_source=None):
         out=folder/name
         ff(['-i',input_source or source,'-ss',a,'-t',b-a,'-map','0:v:0','-map','0:a:0?','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac',out],cancel)
         return str(out)
-    p.update(outro_enabled=True,outro_video=cut('protected_ending.mp4',tail,duration))
+    p.update(outro_enabled=True,outro_video=replacement or cut('protected_ending.mp4',tail,duration))
     if head:
         split=p['combined_audio_split']
         if not 0<split<seconds(j['audio'],cancel):raise ValueError('完整视频含替换配音片头时，请指定合并配音中的片头结束秒数（可先自动定位预览）。')

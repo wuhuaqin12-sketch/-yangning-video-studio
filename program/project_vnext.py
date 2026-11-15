@@ -9,7 +9,7 @@ DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',i
     intro_separation_approved='',intro_separation_model='htdemucs_ft',intro_music_gain=1.0,
     outro_enabled=False,outro_video='',cover='',cover_landscape='',cover_portrait='',
     cover_seconds=3,cover_transition='cut',cover_fit='ask',background='',
-    combined=False,combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
+    combined=False,combined_replace_outro=False,combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
     preview_start=0,preview_seconds=15,layouts={
       'landscape':dict(remove_chinese=True,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='84',style={}),
       'portrait':dict(remove_chinese=False,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
@@ -69,7 +69,7 @@ def media_paths(job):
     p=normalize(job.get('sequence'))
     for k in ('intro_video','intro_audio','intro_srt','intro_target_srt'):
         if p['intro_enabled'] and p.get(k) and (k=='intro_video' or p['intro_mode']=='music_voice'):result[k]=p[k]
-    if p['outro_enabled'] and p['outro_video']:result['outro_video']=p['outro_video']
+    if (p['outro_enabled'] or (p['combined'] and p['combined_replace_outro'])) and p['outro_video']:result['outro_video']=p['outro_video']
     for k in ('cover','cover_landscape','cover_portrait','background','background_audio'):
         if p[k]:result[k]=p[k]
     if p['disclaimer_enabled'] and p['disclaimer_image']:result['disclaimer_image']=p['disclaimer_image']
@@ -126,7 +126,7 @@ def preview_key(job):
 def unique_output(folder,name,language,mode):
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     safe=lambda s:re.sub(r'[<>:"/\\|?*\x00-\x1f]','_',str(s)).strip(' .')[:100] or 'video'
-    label={'ja':'日语','en':'英语','fr':'法语','de':'德语','id':'印尼语','zh':'中文','ko':'韩语','es':'西班牙语','pt':'葡萄牙语','it':'意大利语'}.get(language,language)
+    label={'ja':'日语','en':'英语','fr':'法语','de':'德语','id':'印尼语','zh':'中文','yue':'粤语','ko':'韩语','es':'西班牙语','pt':'葡萄牙语','it':'意大利语'}.get(language,language)
     stem=f'{safe(name)}_{safe(label)}_'+('横版_16x9' if mode=='landscape' else '竖版_9x16')
     for i in range(10000):
         p=folder/(stem+(f'_{i}' if i else '')+'.mp4')

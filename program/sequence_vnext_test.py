@@ -132,6 +132,27 @@ class RenderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'指定'):s.split_combined(j,q,self.root,self.cancel,lambda _:None)
         q.update(combined_outro_start=.5,outro_enabled=True,outro_video=str(self.clip))
         with self.assertRaisesRegex(ValueError,'重复'):s.split_combined(j,q,self.root,self.cancel,lambda _:None)
+    def test_replacement_ending_removes_old_tail_and_retains_longer_new_tail(self):
+        full=self.root/'whole.mp4';s.concat_clips([self.clip,self.clip,self.clip],full,self.root,self.cancel)
+        replacement=self.root/'new_ending.mp4'
+        s.ff(['-f','lavfi','-i','color=red:s=320x180:r=30:d=1.2','-f','lavfi','-i','sine=frequency=880:duration=1.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',replacement],self.cancel)
+        ref=self.root/'ref.srt';s.write_srt(ref,[(1,.1,.7,'正文。')])
+        q=p.defaults();q.update(combined=True,combined_replace_outro=True,combined_outro_start=1.6,outro_video=str(replacement))
+        before=p.file_digest(full);new_before=p.file_digest(replacement)
+        body,parts=s.split_combined(dict(video=str(full),source_srt=str(ref)),q,self.root,self.cancel,lambda _:None)
+        self.assertEqual(Path(parts['outro_video']),replacement);self.assertTrue(parts['outro_enabled'])
+        self.assertAlmostEqual(s.seconds(body['video'],self.cancel),1.6,delta=.08)
+        self.assertFalse((self.root/'protected_ending.mp4').exists())
+        self.assertGreater(s.seconds(body['video'],self.cancel)+s.seconds(parts['outro_video'],self.cancel),s.seconds(full,self.cancel)+.3)
+        self.assertEqual(p.file_digest(full),before);self.assertEqual(p.file_digest(replacement),new_before)
+        from ending_presets import save_preset,load_preset
+        saved=save_preset(self.root/'language_endings','id',replacement)
+        self.assertEqual(load_preset(self.root/'language_endings','id'),saved)
+        self.assertEqual(p.file_digest(saved),new_before)
+        self.assertIn('outro_video',p.media_paths(dict(video=str(full),sequence=q)))
+        q['outro_video']=str(full)
+        with self.assertRaisesRegex(ValueError,'本身'):s.split_combined(dict(video=str(full)),q,self.root,self.cancel,lambda _:None)
+
     def test_real_pipeline_dual_covers_dissolve_and_audio_cache(self):
         ref=self.root/'ref.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n金剛経。\n',encoding='utf8')
         wide=self.root/'wide.png';tall=self.root/'tall.png'

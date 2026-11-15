@@ -70,7 +70,7 @@ class App:
         self.language_manual=False
         options=ttk.Frame(form);options.grid(row=4,column=0,columnspan=3,sticky='w',pady=4)
         ttk.Label(options,text='配音语言').pack(side='left')
-        language=ttk.Combobox(options,textvariable=self.language_name,values=('按文件名判断','日语','英语','中文','法语','印尼语','德语','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=12)
+        language=ttk.Combobox(options,textvariable=self.language_name,values=('按文件名判断','日语','英语','中文','粤语','法语','印尼语','德语','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=12)
         language.pack(side='left',padx=(6,12));language.bind('<<ComboboxSelected>>',self.language_changed)
         ttk.Label(options,text='配音速度').pack(side='left')
         ttk.Combobox(options,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=6).pack(side='left',padx=6)
@@ -132,7 +132,7 @@ class App:
         ttk.Checkbutton(box,text='剪短多余空白，保留自然停顿',variable=self.auto_cut).pack(anchor='w',pady=5)
         line=ttk.Frame(box);line.pack(fill='x',pady=8)
         ttk.Label(line,text='配音语言').pack(side='left')
-        choices=('按文件名判断','英语','日语','法语','德语','西班牙语','意大利语','韩语','葡萄牙语','中文','印尼语','其他语言')
+        choices=('按文件名判断','英语','日语','法语','德语','西班牙语','意大利语','韩语','葡萄牙语','中文','粤语','印尼语','其他语言')
         language=ttk.Combobox(line,textvariable=self.language_name,values=choices,state='readonly',width=12)
         language.pack(side='left',padx=8);language.bind('<<ComboboxSelected>>',self.language_changed)
         ttk.Label(box,text='整段去噪试听保持原速。新任务配音默认1.0倍；可在主页面手动选择倍速，保持音调。已保存项目保留原速度。',wraplength=570).pack(anchor='w',pady=8)
@@ -345,7 +345,7 @@ class App:
         try:show(self,open_path)
         except Exception as e:messagebox.showinfo('重新建工程',str(e))
     def language_changed(self,event=None):
-        mapping={'英语':'en','日语':'ja','法语':'fr','德语':'de','西班牙语':'es','意大利语':'it','韩语':'ko','葡萄牙语':'pt','中文':'zh','印尼语':'id','其他语言':'other'}
+        mapping={'英语':'en','日语':'ja','法语':'fr','德语':'de','西班牙语':'es','意大利语':'it','韩语':'ko','葡萄牙语':'pt','中文':'zh','粤语':'yue','印尼语':'id','其他语言':'other'}
         name=self.language_name.get()
         self.language_manual=name not in ('按文件名判断','自动识别')
         if not self.language_manual:return

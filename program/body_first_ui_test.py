@@ -46,6 +46,19 @@ class BodyFirstUITests(unittest.TestCase):
         self.mode(0);self.assertFalse(p.segments.winfo_ismapped());self.assertFalse(p.value()['combined']);self.assertFalse(p.value()['intro_enabled']);self.assertFalse(p.value()['outro_enabled']);self.assertEqual(p.value()['background_audio'],'')
         self.assertEqual(p.v['background_audio'].get(),'keep-this-music.wav');self.assertTrue(p.v['intro_enabled'].get())
         self.mode(1);self.assertEqual(p.value()['background_audio'],'keep-this-music.wav')
+    def test_language_ending_selection_never_keeps_previous_language(self):
+        p=self.panel;self.mode(2);p.v['combined_replace_outro'].set(True);p.update();self.root.update()
+        self.assertTrue(p.replacement.winfo_ismapped())
+        paths={code:self.folder/(code+'.mp4') for code in ('ja','en','fr','de','yue','id')}
+        with patch('ending_presets.load_preset',side_effect=lambda root,code:paths.get(code)):
+            for code in ('en','fr','de','yue','id','ja'):
+                self.app.v['language'].set(code);self.assertEqual(p.v['outro_video'].get(),str(paths[code]))
+            self.app.v['language'].set('es');self.assertEqual(p.v['outro_video'].get(),'')
+        p.v['combined_outro_start'].set('120');self.app.v['language'].set('id')
+        self.assertEqual(p.v['combined_outro_start'].get(),'120')
+        self.mode(0);self.assertFalse(p.value()['combined_replace_outro'])
+        self.mode(2);self.assertTrue(p.value()['combined_replace_outro'])
+
     def test_saved_ui_preferences_restore_and_old_projects_migrate(self):
         from project_vnext import save_project
         p=self.panel;self.mode(1);p.v['intro_enabled'].set(True);p.v['intro_mode'].set('external_music')
