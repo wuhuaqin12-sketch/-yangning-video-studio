@@ -361,6 +361,7 @@ class SequencePanel:
             self.app.language_manual=True
             labels={'ja':'日语','en':'英语','fr':'法语','de':'德语','id':'印尼语','zh':'中文','yue':'粤语','ko':'韩语','es':'西班牙语','pt':'葡萄牙语','it':'意大利语'}
             self.app.language_name.set(labels.get(job.get('language'),'其他语言'))
+            self.app.refresh_language_fields()
             self.app.pending_style=job.get('publish_settings') or {}
             self.pause_override=job.get('_pause_override')
             for key,var in self.v.items():var.set(job['sequence'][key])

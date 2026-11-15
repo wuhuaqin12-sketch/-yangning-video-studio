@@ -69,6 +69,13 @@ class BodyFirstUITests(unittest.TestCase):
         self.mode(0);self.assertFalse(p.value()['combined_replace_outro'])
         self.mode(2);self.assertTrue(p.value()['combined_replace_outro'])
 
+    def test_cantonese_exposes_required_aligned_srt_and_indonesian_stays_automatic(self):
+        self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
+        self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'timed')
+        self.assertTrue(self.app.target_entry.winfo_ismapped())
+        self.app.language_name.set('印尼语');self.app.language_changed();self.root.update()
+        self.assertEqual(self.app.v['alignment'].get(),'auto');self.assertFalse(self.app.target_entry.winfo_ismapped())
+
     def test_saved_ui_preferences_restore_and_old_projects_migrate(self):
         from project_vnext import save_project
         p=self.panel;self.mode(1);p.v['intro_enabled'].set(True);p.v['intro_mode'].set('external_music')

@@ -63,7 +63,7 @@ class App:
         ttk.Checkbutton(form,text='把新字幕写入视频画面',variable=self.v['burn']).grid(row=4,column=0,columnspan=3,sticky='w',pady=5)
         from next_ui import SequencePanel
         self.sequence_panel=SequencePanel(self,pane)
-        self.target_label=ttk.Label(form,text='独立配音 SRT')
+        self.target_label=ttk.Label(form,text='已对齐配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
         self.target_label.grid(row=6,column=0,sticky='w');self.target_entry.grid(row=6,column=1,sticky='ew');self.target_button.grid(row=6,column=2)
@@ -353,10 +353,15 @@ class App:
         if not self.language_manual:return
         lang=mapping[name]
         self.v['language'].set(lang)
-        self.v['alignment'].set('timed' if lang=='other' else 'auto')
+        from multilingual import LANGUAGES
+        self.v['alignment'].set('auto' if lang in LANGUAGES else 'timed')
         self.v['target_srt'].set('')
+        self.refresh_language_fields()
+    def refresh_language_fields(self):
+        from multilingual import LANGUAGES
+        automatic=self.v['language'].get() in LANGUAGES
         for widget in (self.target_label,self.target_entry,self.target_button):
-            if lang!='other':widget.grid_remove()
+            if automatic:widget.grid_remove()
             else:widget.grid()
     def pick(self,k):
         selected=filedialog.askdirectory() if k=='output' else filedialog.askopenfilename()
