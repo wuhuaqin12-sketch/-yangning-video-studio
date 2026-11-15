@@ -5,7 +5,9 @@ import tkinter as tk
 from tkinter import ttk,messagebox
 from PIL import Image,ImageTk
 from media import probe,run,executable,parse_srt
-from ending_reference import stamp
+def stamp(path):
+    p=Path(path).resolve();s=p.stat()
+    return dict(path=str(p),size=s.st_size,modified=s.st_mtime_ns)
 
 def normalized_stream(path,cancel):
     from engine import square_pixel_stream
@@ -50,11 +52,6 @@ class RegionDialog:
         except Exception:return []
     def initial_time(self):
         cues=self.cue_times();index=0
-        if self.panel.segment_mode.get().startswith('整片') and self.panel.diamond_enabled.get():
-            try:
-                last=int(float(self.panel.v['combined_intro_last_cue'].get()))
-                entries=parse_srt(self.app.v['source_srt'].get());index=next((i for i,c in enumerate(entries) if c[0]>last),0)
-            except (ValueError,OSError):index=0
         return cues[min(index,len(cues)-1)] if cues else float(self.panel.v['preview_start'].get())
     def cue(self,step):
         cues=self.cue_times()
@@ -93,7 +90,7 @@ class RegionDialog:
             if stamp(self.app.v['video'].get())!=self.info['source_stamp']:raise ValueError('视频已更换，请重新取样框选。')
             roi=rectangle(self.points,(self.dw,self.dh),(self.info['width'],self.info['height']),self.panel.layout_vars[self.mode]['repair_full_width'].get())
             values=self.panel.layout_vars[self.mode];values['repair_roi'].set(','.join(map(str,roi)));values['repair_approved'].set('');values['repair_preview_start'].set(str(self.info['at']))
-            self.panel.appearance_open.set(True);self.panel.details_open.set(True);self.panel.update();self.status.set('区域已填写，尚未批准修复。请回主页面生成15秒修复预览并确认。')
+            self.panel.appearance_open.set(True);self.panel.details_open.set(True);self.panel.update();self.status.set('字幕行已选择。可直接生成完整视频；也可先做15秒修复预览。')
         except Exception as e:messagebox.showerror('字幕区域',str(e),parent=self.win)
 
 def show(panel,mode):

@@ -324,8 +324,6 @@ class App:
         except Exception:messagebox.showinfo('选择任务','请选中已制作或已分析的任务，再重新导出。');return
         if j.get('sequence'):
             try:
-                if not self.sequence_panel.ready():
-                    messagebox.showinfo('先预览','请先生成当前完整项目范围预览并确认，再重新导出。');return
                 j.update(sequence=self.sequence_panel.value(),publish_settings=dict(self.pending_style),burn=self.v['burn'].get())
                 j.pop('_sequence_preview',None);self.run_jobs([j],export=True)
             except Exception as e:messagebox.showerror('重新导出',str(e))
@@ -399,9 +397,6 @@ class App:
         # Respect the user's subtitle checkbox in the one-click workflow.
         try:self.detect_language()
         except ValueError as e:messagebox.showerror('语言不一致',str(e));return
-        if self.sequence_settings and not self.sequence_panel.ready():
-            messagebox.showinfo('先预览再导出','将先生成当前项目的范围预览。看过后，点击“确认预览”，再生成完整视频。')
-            self.sequence_panel.preview();return
         self.one_click()
     def detect_language(self):
         """Manual selection overrides filename hints; no false speech-recognition claims."""
@@ -542,23 +537,10 @@ class App:
                 elif e[0]=='utility_dialog_event':
                     path=e[1].receive(e[2],e[3])
                     if path:open_path(path)
-                elif e[0]=='ending_reference_event':
-                    path=e[1].receive(e[2],e[3])
-                    if path:open_path(path)
-                elif e[0]=='opening_title_detected':self.sequence_panel.title_detected(e[2],e[1])
                 elif e[0]=='repair_roi_expanded':
                     self.sequence_panel.layout_vars[e[1]]['repair_roi'].set(e[2]);self.log_line('字幕行已横向扩满；上下范围不变，请重新生成15秒预览。')
-                elif e[0]=='title_preview_failed':
-                    self.set_activity(True);self.status.set('译文预览失败：'+e[1]);self.log_line(self.status.get())
-                    messagebox.showerror('译文预览失败',e[1],parent=(self.root.focus_get() or self.root).winfo_toplevel())
-                elif e[0]=='title_preview_cancelled':
-                    self.status.set('译文预览已停止，原始素材未修改。');self.log_line(self.status.get())
-                elif e[0]=='title_preview_ready':
-                    self.status.set('译文原声预览已完成；整片合成仍需单独预览确认。');self.log_line(self.status.get());open_path(e[1])
                 elif e[0]=='sequence_preview_ready':
                     self.sequence_panel.last_preview=e[1];self.sequence_panel.update();open_path(e[2])
-                elif e[0]=='separation_preview_ready':
-                    self.sequence_panel.separation_preview_token=e[1];open_path(e[2])
                 elif e[0]=='style_saved':
                     self.pending_style=e[1]
                     (DATA/'style_no_denoise.json').write_text(json.dumps(e[1],ensure_ascii=False,indent=2),encoding='utf8')

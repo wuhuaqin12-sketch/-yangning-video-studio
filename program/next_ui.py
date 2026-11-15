@@ -3,9 +3,9 @@ import json,os,tempfile,uuid
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox
-from project_vnext import defaults,normalize,save_project,load_project,preview_key
+from project_vnext import defaults,normalize,save_project,load_project
 
-SEGMENT_MODES=('只做正文（默认）','另加片头 / 片尾','整片视频（已有片头片尾）')
+SEGMENT_MODES=('只做正文（默认）','片头＋正文＋片尾（按需添加）')
 
 def choice_combo(parent,variable,labels,**options):
     """Chinese labels over stable saved values, including project reloads."""
@@ -24,12 +24,10 @@ def choice_combo(parent,variable,labels,**options):
 class SequencePanel:
     def __init__(self,app,parent):
         self.app=app;self.v={};self.layout_vars={};self.saved_timer=None;self.restoring=True
-        self.repair_previews={};self.last_preview='';self.approved_preview='';self.separation_preview_token='';self.layout_styles={};self.pause_override=None
+        self.repair_previews={};self.last_preview='';self.approved_preview='';self.separation_preview_token='';self.layout_styles={};self.pause_override=None;self.region_status={}
         self.enabled=tk.BooleanVar(value=False)
-        self.title_detect_buttons={};self.title_preview_buttons={}
         self.appearance_open=tk.BooleanVar(value=False);self.details_open=tk.BooleanVar(value=False)
         self.segment_mode=tk.StringVar(value=SEGMENT_MODES[0])
-        self.diamond_enabled=tk.BooleanVar(value=False)
         self.box=ttk.LabelFrame(parent,text='② 画面与字幕',padding=8);self.box.pack(fill='x',pady=5)
         bar=ttk.Frame(self.box);bar.pack(fill='x')
         ttk.Label(app.material_mode_row,text='素材方式',width=18).pack(side='left')
@@ -69,22 +67,13 @@ class SequencePanel:
         for mode,label in [('landscape','横版设置'),('portrait','竖版设置')]:
             frame=ttk.Frame(self.layouts,padding=6);self.layouts.add(frame,text=label)
             variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items() if key!='style'};self.layout_vars[mode]=variables;self.layout_styles[mode]={}
-            ttk.Checkbutton(frame,text='长字幕自动换行 / 分屏（横版必要时放到下方背景，保留完整画面）',variable=variables['auto_long_subtitles']).pack(anchor='w')
-            ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕（独立开关）',variable=variables['remove_chinese']).pack(anchor='w')
-            ttk.Checkbutton(frame,text='字幕区横向全宽（默认，上下范围保持不变）',variable=variables['repair_full_width']).pack(anchor='w')
-            ttk.Label(frame,text='方式：仅文字与描边（标准，不做整块区域修复）').pack(anchor='w')
-            row=ttk.Frame(frame);row.pack(fill='x',pady=3)
-            ttk.Label(row,text='字幕行 x,y,宽,高（全宽时忽略x和宽）').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
+            ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕',variable=variables['remove_chinese']).pack(anchor='w')
+            ttk.Label(frame,text='字幕字号与位置自动安排；长句向下换行，更多文字分屏。默认只清除中文字与描边。',wraplength=800).pack(anchor='w',pady=3)
             actions=ttk.Frame(frame);actions.pack(fill='x',pady=3)
             ttk.Button(actions,text='鼠标框选字幕行',command=lambda m=mode:self.pick_subtitle_region(m)).pack(side='left',padx=4)
-            ttk.Button(actions,text='15秒修复预览',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
-            ttk.Button(actions,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
-            row=ttk.Frame(frame);row.pack(fill='x')
-            ttk.Label(row,text='新字幕上下偏移（像素）').pack(side='left');ttk.Entry(row,textvariable=variables['subtitle_offset_y'],width=10).pack(side='left',padx=5)
-            for key,label in [('title_y','标题上下位置（百分比，可空）'),('title_font_size','标题字号（像素，可空）'),('subtitle_font_size','新字幕字号（像素，可空）')]:
-                row=ttk.Frame(frame);row.pack(fill='x');ttk.Label(row,text=label).pack(side='left');ttk.Entry(row,textvariable=variables[key],width=12).pack(side='left',padx=5)
-            ttk.Button(frame,text='为此比例保存当前标题 / 字幕完整样式',command=lambda m=mode:self.save_style(m)).pack(anchor='w',pady=3)
-            ttk.Label(frame,text='标准方式：在框选字幕行内提取白字与深色描边，只补文字遮罩；其他视频须重新框选。坐标按原视频像素填写，非导出画布。复杂画面仍可能误判、残留或模糊，先预览确认；不是OCR或AI背景重建。',wraplength=850).pack(anchor='w')
+            ttk.Button(actions,text='15秒修复预览（可选）',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
+            self.region_status[mode]=tk.StringVar(value='尚未选择原中文字幕行；需要去字幕时再框选。')
+            ttk.Label(frame,textvariable=self.region_status[mode],wraplength=800).pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x')
             ttk.Label(row,text='无字幕原片（可选）').pack(side='left');ttk.Entry(row,textvariable=variables['clean_video']).pack(side='left',fill='x',expand=True)
             ttk.Button(row,text='选择',command=lambda m=mode:self.pick_clean(m)).pack(side='left')
@@ -101,33 +90,7 @@ class SequencePanel:
         self.intro_voice=ttk.Frame(self.intro)
         file_row(self.intro_voice,'intro_audio','片头配音');file_row(self.intro_voice,'intro_srt','片头原画面SRT');file_row(self.intro_voice,'intro_target_srt','已对齐配音SRT（可空）')
         ttk.Checkbutton(self.intro_voice,text='片头视频本身已去人声 / 纯音乐',variable=self.v['intro_clean_audio']).pack(anchor='w')
-        self.separation_details=ttk.Frame(self.intro_voice)
-        self.separation_open=tk.BooleanVar(value=False)
-        self.separation_switch=ttk.Checkbutton(self.intro_voice,text='展开本地人声分离实验',variable=self.separation_open,command=self.update)
-        row=ttk.Frame(self.separation_details);row.pack(fill='x')
-        ttk.Label(row,text='本地候选模型').pack(side='left');ttk.Combobox(row,textvariable=self.v['intro_separation_model'],values=('htdemucs_ft','htdemucs'),state='readonly',width=16).pack(side='left',padx=5)
-        ttk.Button(self.separation_details,text='20秒分离试听（实验）',command=self.separation_preview).pack(anchor='w',pady=3)
-        ttk.Button(self.separation_details,text='确认试听，允许整段分离',command=self.approve_separation).pack(anchor='w')
         self.outro=ttk.LabelFrame(self.segments,text='片尾：完整保留画面和音乐，无需配音或SRT',padding=6);file_row(self.outro,'outro_video','片尾视频')
-        self.combined=ttk.Frame(self.segments,padding=(4,2))
-        ttk.Checkbutton(self.combined,text='金刚经视频专用设置（可选）',variable=self.diamond_enabled,command=self.update).pack(anchor='w')
-        self.diamond_details=ttk.Frame(self.combined,padding=(4,6))
-        self.opening_text_button=ttk.Button(self.diamond_details,text='片头文字译文（可选） ▸',command=self.decoration_settings)
-        self.opening_text_button.pack(anchor='w',pady=4)
-        ttk.Label(self.diamond_details,text='完整视频、合并配音和合并SRT放在上方素材区。可保留原片尾，或用准备好的片尾整体替换。',wraplength=850).pack(anchor='w')
-        for key,label in [('combined_intro_end','原视频片头结束秒（没有填0）'),('combined_outro_start','原视频片尾开始秒'),('combined_audio_split','合并配音中的片头结束秒')]:self.number(self.diamond_details,key,label)
-        ttk.Button(self.diamond_details,text='自动定位片头 / 合并配音分界 ▸',command=self.intro_boundary_settings).pack(anchor='w',pady=4)
-        self.ending_reference_button=ttk.Button(self.diamond_details,text='固定原片尾：保存参考 / 自动定位 ▸',command=self.ending_reference_settings)
-        self.ending_reference_button.pack(anchor='w',pady=4)
-        ttk.Checkbutton(self.diamond_details,text='替换原片尾（使用准备好的片尾视频）',variable=self.v['combined_replace_outro'],command=self.toggle_replacement).pack(anchor='w',pady=4)
-        self.replacement=ttk.LabelFrame(self.diamond_details,text='替换片尾：保留新片尾完整画面和声音',padding=5)
-        file_row(self.replacement,'outro_video','新片尾视频')
-        row=ttk.Frame(self.replacement);row.pack(fill='x')
-        ttk.Button(row,text='保存为当前语言片尾',command=self.save_ending_preset).pack(side='left')
-        ttk.Button(row,text='使用当前语言片尾',command=self.use_ending_preset).pack(side='left',padx=6)
-        self.ending_status=tk.StringVar(value='按语言保存；未保存的语言不会使用其他语言的片尾。')
-        ttk.Label(self.replacement,textvariable=self.ending_status,wraplength=800).pack(anchor='w',pady=4)
-        ttk.Label(self.replacement,text='新片尾可含免责声明，时长和画幅都可与原片尾不同；完整播放，等比例适配输出，不拉伸。它不参与自动定位。替换范围是原片尾起点至原片结束，总时长随新片尾长度变化。',wraplength=800).pack(anchor='w')
         self.music=ttk.LabelFrame(self.segments,text='片头音乐（可选）',padding=5)
         file_row(self.music,'background_audio','片头背景音乐（可选）')
         ttk.Label(self.music,text='导入已去人声的音乐，仅作用于片头。').pack(anchor='w')
@@ -136,98 +99,30 @@ class SequencePanel:
         self.preview_controls=ttk.Frame(self.box)
         preview_buttons=ttk.Frame(self.preview_controls);preview_buttons.pack(fill='x')
         self.range_preview_button=ttk.Button(preview_buttons,text='生成范围预览',command=self.preview);self.range_preview_button.pack(side='left')
-        ttk.Button(preview_buttons,text='确认预览',command=self.approve_preview).pack(side='left',padx=6)
         ttk.Button(preview_buttons,text='预览起点 / 时长',command=self.preview_range).pack(side='left')
-        ttk.Label(self.preview_controls,text='先生成并观看预览，再点“确认预览”后导出；修改画面设置需重新预览。',wraplength=850).pack(anchor='w',pady=3)
+        ttk.Label(self.preview_controls,text='预览可选；准备好素材后直接点“一键生成视频”导出完整成片。',wraplength=850).pack(anchor='w',pady=3)
         self.autosave=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')/'last_project_next.json'
         self.has_startup_autosave=self.autosave.exists()
-        self.ending_store=self.autosave.parent/'ending_presets'
-        self.ending_language=self.app.v['language'].get()
-        self.app.v['language'].trace_add('write',self.ending_language_changed)
-        for variable in [self.enabled,self.mode,self.diamond_enabled,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
+        if self.has_startup_autosave:
+            try:
+                previous=json.loads(self.autosave.read_text(encoding='utf-8-sig'))['job']
+                if previous.get('sequence',{}).get('combined') or str(previous.get('ui_state',{}).get('segment_mode','')).startswith('整片'):
+                    import shutil
+                    backup=self.autosave.with_name('完整视频旧项目备份_'+uuid.uuid4().hex[:8]+'.json');shutil.copy2(self.autosave,backup)
+                    self.has_startup_autosave=False
+                    app.root.after(1500,lambda p=str(backup):app.log_line('旧完整视频项目已备份，未自动载入。请重新选择三段素材。备份：'+p))
+            except (OSError,ValueError,KeyError,TypeError):pass
+        for variable in [self.enabled,self.mode,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
         self.update();app.root.after(1200,self.offer_recover)
     def toggle_appearance(self):
         self.appearance_open.set(not self.appearance_open.get());self.update()
     def toggle_details(self):
         self.details_open.set(not self.details_open.get());self.update()
-    def decoration_settings(self):
-        win=tk.Toplevel(self.app.root);win.title('片头文字定位与对应语言译文');win.geometry(f'820x{max(560,min(730,self.app.root.winfo_screenheight()-100))}')
-        tabs=ttk.Notebook(win);tabs.pack(fill='both',expand=True,padx=12,pady=12)
-        for prefix,tab_name in [('opening_title','文字译名1（如讲义标题）'),('opening_topic','文字译名2（如经题）')]:
-            outer=ttk.Frame(tabs);tabs.add(outer,text=tab_name)
-            canvas=tk.Canvas(outer,highlightthickness=0);scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);canvas.configure(yscrollcommand=scroll.set)
-            scroll.pack(side='right',fill='y');canvas.pack(side='left',fill='both',expand=True)
-            page=ttk.Frame(canvas,padding=12);window=canvas.create_window((0,0),window=page,anchor='nw')
-            page.bind('<Configure>',lambda e,c=canvas:c.configure(scrollregion=c.bbox('all')))
-            canvas.bind('<Configure>',lambda e,c=canvas,i=window:c.itemconfigure(i,width=e.width))
-            language_row=ttk.Frame(page);language_row.pack(fill='x',pady=5)
-            ttk.Label(language_row,text='输出语言（与主页面一致）',width=25).pack(side='left')
-            language_box=ttk.Combobox(language_row,textvariable=self.app.language_name,values=('日语','英语','法语','德语','粤语','印尼语','中文','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=15)
-            language_box.pack(side='left');language_box.bind('<<ComboboxSelected>>',self.app.language_changed)
-            ttk.Checkbutton(page,text='启用此组译名（保留原中文）',variable=self.v[prefix+'_enabled']).pack(anchor='w',pady=5)
-            for suffix,label in [('original','查找原文字（可任意填写）'),('text','对应语言译文（填写要显示的文字）')]:
-                row=ttk.Frame(page);row.pack(fill='x',pady=5);ttk.Label(row,text=label,width=25).pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_'+suffix]).pack(side='left',fill='x',expand=True)
-            ttk.Label(page,text='可输入释迦牟尼佛等任意原文字定位；讲义标题、经题、释迦牟尼佛有日英预填译名，其他词请填译文。\nOCR负责定位和取样，不是通用自动翻译；保留原字，译文持续显示整个时间段。',wraplength=750).pack(anchor='w',pady=5)
-            for suffix,label in [('preview_offset','本组预览向后跳秒（0为开头）'),('start','显示／OCR范围开始秒'),('end','显示／OCR范围结束秒'),('x','译名中心左右（原画面百分比）'),('y','译名首行顶部（原画面百分比）'),('size','译名字号（横版1080高基准）')]:self.number(page,prefix+'_'+suffix,label)
-            row=ttk.Frame(page);row.pack(fill='x',pady=3)
-            ttk.Label(row,text='字体').pack(side='left');ttk.Combobox(row,textvariable=self.v[prefix+'_font'],values=('Yuji Boku','Noto Serif CJK JP'),width=23).pack(side='left',padx=4)
-            ttk.Label(row,text='颜色 #RRGGBB').pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_color'],width=10).pack(side='left',padx=4)
-            ttk.Label(row,text='排版').pack(side='left');choice_combo(row,self.v[prefix+'_orientation'],{'横排':'horizontal','竖排':'vertical'},width=10).pack(side='left',padx=4)
-            ttk.Checkbutton(page,text='定位时参考原字颜色、可见字高与横竖排；字体请手动选择相近款',variable=self.v[prefix+'_auto_style']).pack(anchor='w')
-            ttk.Checkbutton(page,text='放不下时自动换行 / 分屏（默认，保留全部文字）',variable=self.v[prefix+'_adaptive']).pack(anchor='w')
-            ttk.Checkbutton(page,text='按最近定位的原字可见高度显示（取消后使用手动字号）',variable=self.v[prefix+'_match_size']).pack(anchor='w')
-            actions=ttk.Frame(page);actions.pack(fill='x',pady=6)
-            self.title_detect_buttons[prefix]=ttk.Button(actions,text='本地OCR定位并参考原字样式',command=lambda k=prefix:self.detect_title(k));self.title_detect_buttons[prefix].pack(side='left')
-            self.title_preview_buttons[prefix]=ttk.Button(actions,text='仅预览此组译文（原声，最多15秒）',command=lambda k=prefix:self.preview_title(k));self.title_preview_buttons[prefix].pack(side='left',padx=8)
-            ttk.Label(page,text='此处只检查这一组译文及位置，使用原视频原声；无需配音、SRT或片尾位置。整片配音、字幕及片尾效果请用主页面范围预览。',wraplength=750).pack(anchor='w')
-            ttk.Label(page,text='竖排中文：日语译名放在旁边；横排中文：译名放在下方。\n字号/颜色取样是估计，不保证识别同款字体；移动、渐变与复杂背景须预览、手动微调。',wraplength=750).pack(anchor='w')
-            from ui_scroll import install_wheel
-            install_wheel(canvas)
-        ttk.Button(win,text='完成',command=win.destroy).pack(anchor='e',padx=16,pady=8)
-        self.set_processing_busy(self.app.busy)
     def set_processing_busy(self,busy):
-        for button in (self.range_preview_button,*self.title_detect_buttons.values(),*self.title_preview_buttons.values()):
+        for button in (self.range_preview_button,):
             try:
                 if button.winfo_exists():button.state(['disabled'] if busy else ['!disabled'])
             except tk.TclError:pass
-    def preview_title(self,prefix='opening_title'):
-        if self.app.busy:
-            messagebox.showinfo('正在处理','当前任务尚未结束，请等待或先停止当前任务。',parent=self.app.root);return
-        try:
-            if not self.v[prefix+'_enabled'].get():raise ValueError('请先勾选启用这一组译名。')
-            if self.app.language_name.get() in ('按文件名判断','自动识别'):raise ValueError('请先在译名页面选择输出语言，例如日语。')
-            source=self.v['intro_video'].get() if self.segment_mode.get()==SEGMENT_MODES[1] and self.v['intro_enabled'].get() else self.app.v['video'].get()
-            settings={k:v.get() for k,v in self.v.items() if k.startswith(prefix+'_')}
-            language=self.app.v['language'].get();output=self.app.v['output'].get()
-            self.app.set_activity(True)
-            def work():
-                from opening_caption_preview import render
-                from media import Cancelled
-                try:path=render(source,settings,language,prefix,output,self.app.stop,self.app.progress)
-                except Cancelled:self.app.events.put(('title_preview_cancelled',));return
-                except Exception as e:self.app.events.put(('title_preview_failed',str(e)));return
-                self.app.events.put(('title_preview_ready',path))
-            self.app.worker(work)
-        except Exception as e:messagebox.showerror('译文预览',str(e),parent=self.app.root)
-    def detect_title(self,prefix='opening_title'):
-        if self.app.busy:return
-        try:
-            source=self.v['intro_video'].get() if self.segment_mode.get()==SEGMENT_MODES[1] and self.v['intro_enabled'].get() else self.app.v['video'].get()
-            if not source or not Path(source).is_file():raise ValueError('请先导入含原中文标题的视频。')
-            target=self.v[prefix+'_original'].get();start=float(self.v[prefix+'_start'].get());end=float(self.v[prefix+'_end'].get())
-            def work():
-                from opening_caption import detect
-                found=detect(source,target,start,end,self.app.stop,self.app.progress)
-                self.app.events.put(('opening_title_detected',prefix,found))
-            self.app.worker(work)
-        except Exception as e:messagebox.showerror('片头标题定位',str(e))
-    def title_detected(self,result,prefix='opening_title'):
-        for key,value in result.items():
-            if not self.v[prefix+'_auto_style'].get() and key in ('opening_title_color','opening_title_reference_height','opening_title_reference_advance','opening_title_orientation','opening_title_match_size'):continue
-            mapped=key.replace('opening_title_',prefix+'_')
-            if mapped in self.v:self.v[mapped].set(value)
-        self.v[prefix+'_enabled'].set(True);self.enabled.set(True);self.update()
-        messagebox.showinfo('定位结果待预览','识别到：'+result['recognized']+'\n已填写估计时间、位置及所选样式取样。请点击本页“仅预览此组译文”检查，必要时调整字体与大小。')
     def expand_subtitle_roi(self,mode):
         if self.app.busy:return
         try:
@@ -244,10 +139,12 @@ class SequencePanel:
         ttk.Button(box,text='完成',command=win.destroy).pack(anchor='e')
     def raw_value(self):
         p={k:v.get() for k,v in self.v.items()};p['layouts']={m:{**{k:v.get() for k,v in d.items()},'style':self.layout_styles[m]} for m,d in self.layout_vars.items()}
-        if self.segment_mode.get()==SEGMENT_MODES[2] and not self.diamond_enabled.get():
-            base=defaults()
-            for key in p:
-                if key.startswith(('opening_title_','opening_topic_','combined_')) or key in ('background_audio','background_audio_offset'):p[key]=base[key]
+        # Retired complete-video settings never enter new jobs or autosaves.
+        base=defaults()
+        for key in p:
+            if key=='combined' or key.startswith(('combined_','opening_title_','opening_topic_','disclaimer_')):p[key]=base[key]
+        for mode,layout in p['layouts'].items():
+            for key in ('auto_long_subtitles','repair_full_width','subtitle_offset_y','title_y','title_font_size','subtitle_font_size','style'):layout[key]=base['layouts'][mode][key]
         return normalize(p)
     def custom_appearance(self):
         p=self.raw_value();base=defaults()
@@ -272,45 +169,12 @@ class SequencePanel:
     def background_audio_settings(self):
         win=tk.Toplevel(self.app.root);win.title('片头背景音乐与音量');win.geometry('680x270')
         box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
-        ttk.Label(box,text='当前作用范围：片头。完整视频模式按“片头结束秒”确定范围。',wraplength=620).pack(anchor='w',pady=6)
+        ttk.Label(box,text='只用于单独导入的片头视频；正文和片尾不使用这条音乐。',wraplength=620).pack(anchor='w',pady=6)
         self.number(box,'background_audio_offset','从背景音乐文件第几秒开始')
         self.number(box,'intro_music_gain','背景音乐音量倍数（0–2）')
         ttk.Label(box,text='导入的是已去掉讲话的音乐，不是自动人声分离。\n只替换片头原声，可与片头日语配音混合；正文和片尾不加这条音乐。\n音乐过短会提示，不自动循环、加速或铺满整片。',wraplength=620).pack(anchor='w',pady=8)
         ttk.Button(box,text='清除背景音乐',command=lambda:self.v['background_audio'].set('')).pack(anchor='w')
 
-    def intro_boundary_settings(self):
-        from intro_boundary_ui import show
-        show(self)
-    def ending_reference_settings(self):
-        from ending_reference_ui import show
-        show(self)
-    def toggle_replacement(self):
-        if self.v['combined_replace_outro'].get():self.use_ending_preset(notify=False)
-        self.update()
-    def save_ending_preset(self):
-        from ending_presets import save_preset
-        try:
-            language=self.app.v['language'].get()
-            save_preset(self.ending_store,language,self.v['outro_video'].get())
-            self.ending_status.set('已保存 '+language+' 片尾（独立副本）；不保存当前视频的切换时间。')
-        except Exception as e:messagebox.showerror('保存语言片尾',str(e))
-    def use_ending_preset(self,notify=True):
-        from ending_presets import load_preset
-        try:
-            language=self.app.v['language'].get()
-            path=load_preset(self.ending_store,language)
-            self.v['outro_video'].set(str(path) if path else '')
-            self.ending_status.set(('已使用 '+language+' 片尾；请确认当前视频的片尾开始位置。') if path else ('尚未保存 '+language+' 片尾，请选择该语言片尾后保存。'))
-            if not path and notify:messagebox.showinfo('没有对应片尾','当前语言没有保存片尾，请先选择该语言的片尾视频。')
-        except Exception as e:
-            self.v['outro_video'].set('');self.ending_status.set(str(e))
-            if notify:messagebox.showerror('语言片尾不可用',str(e))
-    def ending_language_changed(self,*_):
-        language=self.app.v['language'].get()
-        if language==self.ending_language:return
-        self.ending_language=language
-        if self.restoring:return
-        if self.segment_mode.get()==SEGMENT_MODES[2] and self.diamond_enabled.get() and self.v['combined_replace_outro'].get():self.use_ending_preset(notify=False)
 
     def pick(self,key):
         p=filedialog.askopenfilename()
@@ -325,23 +189,15 @@ class SequencePanel:
         self.enabled.set(True);self.v['output_mode'].set(dict(zip(('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),('auto','landscape','portrait','both')))[self.mode.get()]);self.update()
     def value(self):
         p=self.raw_value();mode=self.segment_mode.get()
-        # New UI uses prepared ending videos; legacy image settings cannot append again.
-        p['disclaimer_enabled']=False
-        p['combined']=mode==SEGMENT_MODES[2] and self.diamond_enabled.get()
         if mode!=SEGMENT_MODES[1]:p['intro_enabled']=False;p['outro_enabled']=False
-        if mode!=SEGMENT_MODES[2] or not self.diamond_enabled.get():
-            p['combined_replace_outro']=False
-            p['opening_title_enabled']=False;p['opening_topic_enabled']=False
-        if mode==SEGMENT_MODES[0] or (mode==SEGMENT_MODES[1] and (not p['intro_enabled'] or p['intro_mode']=='original')):p['background_audio']=''
+        if not p['intro_enabled'] or p['intro_mode']=='original':p['background_audio']=''
         return p
-    def save_style(self,mode):
-        self.layout_styles[mode]=dict(self.app.pending_style);self.changed()
-        messagebox.showinfo('样式已分别保存','已为'+('横版' if mode=='landscape' else '竖版')+'保存当前标题和字幕样式。另一比例的样式保持不变。')
     def changed(self):
         if not self.restoring:
             try:
                 if self.segment_mode.get()!=SEGMENT_MODES[0] or self.custom_appearance():self.enabled.set(True) if not self.enabled.get() else None
             except (ValueError,tk.TclError):pass
+        for mode,status in self.region_status.items():status.set('已选择字幕行；将自动横向扩满，只处理文字与描边。' if self.layout_vars[mode]['repair_roi'].get().strip() else '尚未选择原中文字幕行；需要去字幕时再框选。')
         try:self.app.sequence_settings=self.value() if self.enabled.get() else {}
         except (ValueError,tk.TclError):return
         if any(self.v[k].get() for k in ('cover','cover_landscape','cover_portrait')):self.cover_options.pack(fill='x',after=self.cover_anchor)
@@ -360,28 +216,20 @@ class SequencePanel:
         for row in ((self.cover_l,self.cover_p) if self.v['output_mode'].get()=='both' else (self.cover_single,)):row.pack(fill='x',pady=3,before=self.cover_anchor)
         self.cover_options.pack(fill='x',after=self.cover_anchor) if any(self.v[k].get() for k in ('cover','cover_landscape','cover_portrait')) else self.cover_options.pack_forget()
         if mode!=SEGMENT_MODES[0]:self.segments.pack(fill='x',pady=5)
-        for part in (self.segment_switch,self.intro,self.outro,self.combined,self.music):part.pack_forget()
+        for part in (self.segment_switch,self.intro,self.outro,self.music):part.pack_forget()
         if mode==SEGMENT_MODES[1]:self.segment_switch.pack(fill='x',before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get():self.intro.pack(fill='x',pady=4,before=self.segment_anchor)
         self.intro_voice.pack(fill='x') if self.v['intro_mode'].get()=='music_voice' else self.intro_voice.pack_forget()
-        use_separation=not self.v['background_audio'].get() and not self.v['intro_clean_audio'].get()
-        self.separation_switch.pack(anchor='w') if use_separation else self.separation_switch.pack_forget()
-        self.separation_details.pack(fill='x') if use_separation and self.separation_open.get() else self.separation_details.pack_forget()
-        self.replacement.pack(fill='x',pady=4) if self.v['combined_replace_outro'].get() else self.replacement.pack_forget()
-        self.diamond_details.pack(fill='x') if self.diamond_enabled.get() else self.diamond_details.pack_forget()
-        if mode==SEGMENT_MODES[2]:self.combined.pack(fill='x',pady=4,before=self.segment_anchor)
-        if mode==SEGMENT_MODES[2] and self.diamond_enabled.get():self.music.pack(in_=self.diamond_details,fill='x',pady=4)
-        elif mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get() and self.v['intro_mode'].get()!='original':self.music.pack(fill='x',pady=4,before=self.segment_anchor)
+        if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get() and self.v['intro_mode'].get()!='original':self.music.pack(fill='x',pady=4,before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['outro_enabled'].get():self.outro.pack(fill='x',pady=4,before=self.segment_anchor)
         if self.enabled.get():self.preview_controls.pack(fill='x',pady=4)
         if hasattr(self.app,'media_labels'):
-            complete=mode==SEGMENT_MODES[2]
-            for key,label in [('video','完整视频 MP4' if complete else '正文视频 MP4'),('audio','整片配音（留空用原声）' if complete else '正文配音（留空用原声）'),('source_srt','整片SRT（外语）' if complete else '正文SRT（外语）')]:self.app.media_labels[key].configure(text=label)
-        self.segments.configure(text='完整视频专用选项' if mode==SEGMENT_MODES[2] else '片头 / 片尾（按需启用）')
+            for key,label in [('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）')]:self.app.media_labels[key].configure(text=label)
+        self.segments.configure(text='片头 / 片尾（按需启用）')
         self.appearance_button.configure(text='收起背景 / 封面 / 字幕设置 ▴' if self.appearance_open.get() else '背景 / 封面 / 字幕设置 ▾')
         self.changed()
     def project(self):
-        j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),ui_state={'segment_mode':self.segment_mode.get(),'appearance_open':self.appearance_open.get(),'details_open':self.details_open.get(),'diamond_enabled':self.diamond_enabled.get(),'diamond_preferences':{k:v.get() for k,v in self.v.items() if k.startswith(('opening_title_','opening_topic_','combined_')) or k in ('background_audio','background_audio_offset')},'parts_preferences':{k:self.v[k].get() for k in ('intro_enabled','outro_enabled','background_audio','combined_replace_outro')}},publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get())
+        j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),ui_state={'segment_mode':self.segment_mode.get(),'appearance_open':self.appearance_open.get(),'details_open':self.details_open.get(),'parts_preferences':{k:self.v[k].get() for k in ('intro_enabled','outro_enabled','background_audio')}},publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get())
         if self.pause_override is not None:j['_pause_override']=self.pause_override
         return j
     def auto_save(self):
@@ -400,6 +248,8 @@ class SequencePanel:
         self.restoring=True
         try:
             job,missing=load_project(p)
+            if job['sequence'].get('combined') or str(job.get('ui_state',{}).get('segment_mode','')).startswith('整片'):
+                raise ValueError('此项目使用已撤下的完整视频切分模式，未载入。请分别选择片头、正文和片尾素材；原项目和素材均未改动。')
             for key,value in job.items():
                 if key in self.app.v:self.app.v[key].set(value)
             self.app.auto_cut.set(job.get('trim',True))
@@ -414,13 +264,11 @@ class SequencePanel:
                 for key,var in d.items():var.set(job['sequence']['layouts'][mode][key])
                 self.layout_styles[mode]=dict(job['sequence']['layouts'][mode].get('style') or {})
             ui=job.get('ui_state') or {}
-            self.diamond_enabled.set(ui.get('diamond_enabled',bool(job['sequence']['combined'])))
-            for k,value in ui.get('diamond_preferences',{}).items():
-                if k in self.v and (k.startswith(('opening_title_','opening_topic_','combined_')) or k in ('background_audio','background_audio_offset')):self.v[k].set(value)
-            derived=SEGMENT_MODES[2] if job['sequence']['combined'] else (SEGMENT_MODES[1] if job['sequence']['intro_enabled'] or job['sequence']['outro_enabled'] else SEGMENT_MODES[0])
-            self.segment_mode.set(ui.get('segment_mode') if ui.get('segment_mode') in SEGMENT_MODES else derived)
+            derived=SEGMENT_MODES[1] if job['sequence']['intro_enabled'] or job['sequence']['outro_enabled'] else SEGMENT_MODES[0]
+            saved_mode=ui.get('segment_mode')
+            self.segment_mode.set(saved_mode if saved_mode in SEGMENT_MODES else derived)
             for k,value in ui.get('parts_preferences',{}).items():
-                if k in ('intro_enabled','outro_enabled','background_audio','combined_replace_outro'):self.v[k].set(value)
+                if k in ('intro_enabled','outro_enabled','background_audio'):self.v[k].set(value)
             self.appearance_open.set(ui.get('appearance_open',False));self.details_open.set(ui.get('details_open',False))
             self.enabled.set(job.get('next_enabled',True));self.mode.set(dict(zip(('auto','landscape','portrait','both'),('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版')))[self.v['output_mode'].get()]);self.update()
             if missing:messagebox.showwarning('素材需要重新选择','以下素材已移动或删除：\n'+'\n'.join(missing.values()))
@@ -435,20 +283,10 @@ class SequencePanel:
             messagebox.showinfo('正在处理','当前任务尚未结束，请查看运行记录，等待或先停止。',parent=self.app.root);return
         try:
             self.enabled.set(True);self.changed();p=self.value()
-            if p['combined'] and p['combined_outro_start']<=0:raise ValueError('整片合成预览需要先指定或自动定位原片尾开始位置。仅检查文字时，请在文字译名页点击“仅预览此组译文”，无需设置片尾。')
             self.app.detect_language();j=self.app.settings();j['_sequence_preview']=True
             self.app.set_activity(True)
             j.update(id=uuid.uuid4().hex,status='待处理');self.app.jobs.append(j);self.app.refresh();self.app.run_jobs([j],export=True)
         except Exception as e:messagebox.showerror('项目预览',str(e),parent=self.app.root)
-    def approve_preview(self):
-        try:
-            key=preview_key(self.app.settings())
-            if key!=self.last_preview:raise ValueError('请先为当前素材和当前设置生成范围预览；更改封面、字幕或布局后需要重新预览。')
-            if messagebox.askyesno('确认预览','确认已经看过当前预览，接受音乐、字幕、修复区域和转场效果后，允许导出完整视频？'):self.approved_preview=key
-        except Exception as e:messagebox.showinfo('先预览',str(e))
-    def ready(self):
-        try:return self.approved_preview==preview_key(self.app.settings())
-        except Exception:return False
     def repair_preview(self,mode):
         if self.app.busy:return
         try:
@@ -463,41 +301,6 @@ class SequencePanel:
                 self.app.events.put(('repair_preview_ready',mode,token,path))
             self.app.worker(work)
         except Exception as e:messagebox.showerror('字幕修复预览',str(e))
-    def approve_repair(self,mode):
-        from sequence_vnext import layout_repair_key
-        try:
-            token=layout_repair_key(self.app.v['video'].get(),{k:v.get() for k,v in self.layout_vars[mode].items()})
-            if self.repair_previews.get(mode)!=token:raise ValueError('请先为同一视频、同一区域生成15秒修复预览。')
-            if messagebox.askyesno('确认预览质量','你是否已经看过同一素材、同一区域的修复预览，接受可能的模糊、残影和闪烁？'):
-                self.layout_vars[mode]['repair_approved'].set(token)
-        except Exception as e:messagebox.showerror('确认修复',str(e))
-    def separation_preview(self):
-        if self.app.busy:return
-        try:
-            from background_separation import preview
-            combined=self.v['combined'].get()
-            source=self.app.v['video'].get() if combined else self.v['intro_video'].get();folder=Path(self.app.v['output'].get())/('背景声试听_'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
-            model=self.v['intro_separation_model'].get();start=float(self.v['preview_start'].get())
-            head=float(self.v['combined_intro_end'].get()) if combined else 0
-            if combined and not 0<=start<head:raise ValueError('完整视频的背景声试听范围必须在已指定的片头范围内。')
-            def work():
-                from project_vnext import file_digest
-                if combined:
-                    from background_separation import separate
-                    path=separate(source,folder,self.app.stop,self.app.progress,model,limit=min(20,head-start),start=start)
-                else:path=preview(source,folder,self.app.stop,self.app.progress,model,start)
-                self.app.events.put(('separation_preview_ready',file_digest(source)+':'+model+(':intro_end='+str(head) if combined else ''),path))
-            self.app.worker(work)
-        except Exception as e:messagebox.showerror('背景声试听',str(e))
-    def approve_separation(self):
-        try:
-            from project_vnext import file_digest
-            combined=self.v['combined'].get();source=self.app.v['video'].get() if combined else self.v['intro_video'].get()
-            token=file_digest(source)+':'+self.v['intro_separation_model'].get()+(':intro_end='+str(float(self.v['combined_intro_end'].get())) if combined else '')
-            if token!=self.separation_preview_token:raise ValueError('请先为当前片头生成20秒背景声分离试听。')
-            if messagebox.askyesno('确认分离质量','请确认已听过当前试听，接受中文残留、混响及音乐损伤程度。若不满意，请取消，不会修改原片。'):
-                self.v['intro_separation_approved'].set(token)
-        except Exception as e:messagebox.showinfo('先试听',str(e))
     def recover(self):
         if self.app.busy:return
         if not messagebox.askyesno('恢复稳定版','先备份本测试版设置，使用独立运行环境和干净配置启动原始v12.11。不会删除视频、音频、字幕、图片或导出文件。首次需要联网准备旧版依赖。继续？'):return

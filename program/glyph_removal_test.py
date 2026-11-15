@@ -53,7 +53,8 @@ class GlyphTests(unittest.TestCase):
             digest=file_digest(source);layout=defaults()['layouts']['landscape'];layout['repair_roi']='70,115,170,38'
             self.assertTrue(layout['repair_full_width'])
             self.assertEqual(full_width_subtitle_roi(source,layout['repair_roi'],cancel),'0,115,320,38')
-            with self.assertRaisesRegex(ValueError,'确认'):repair(source,layout,folder,cancel)
+            direct=repair(source,layout,folder,cancel)
+            self.assertTrue(Path(direct).is_file());self.assertEqual(file_digest(source),digest)
             out=repair(source,layout,folder,cancel,preview=True,start=.2,length=.5)
             info=probe(out,cancel);streams=info['streams'];v=next(s for s in streams if s['codec_type']=='video')
             self.assertEqual((v['width'],v['height']),(320,180));self.assertTrue(any(s['codec_type']=='audio' for s in streams))

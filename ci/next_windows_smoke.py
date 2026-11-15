@@ -35,13 +35,10 @@ def main():
     panel.segment_mode.set(SEGMENT_MODES[1]);panel.change_segments();panel.v['intro_enabled'].set(True);panel.v['outro_enabled'].set(True);panel.v['intro_mode'].set('external_music');panel.update();root.update()
     assert panel.intro.winfo_ismapped() and panel.outro.winfo_ismapped() and panel.music.winfo_ismapped()
     ImageGrab.grab().save(sandbox/'segments_optional.png')
-    panel.segment_mode.set(SEGMENT_MODES[2]);panel.change_segments();root.update()
-    assert panel.combined.winfo_ismapped() and not panel.intro.winfo_ismapped() and not panel.outro.winfo_ismapped()
-    assert not panel.value()['combined'] and not panel.diamond_details.winfo_ismapped()
-    ImageGrab.grab().save(sandbox/'complete_default.png')
-    panel.diamond_enabled.set(True);panel.update();root.update()
-    assert panel.value()['combined'] and not panel.value()['outro_enabled']
-    ImageGrab.grab().save(sandbox/'diamond_options.png')
+    assert len(SEGMENT_MODES)==2
+    assert not panel.value()['combined']
+    assert not p_label_present(root,'金刚经视频专用设置（可选）')
+    assert not p_label_present(root,'确认预览')
     panel.appearance_open.set(True);panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
     assert app.sequence_settings['output_mode']=='both'
     assert app.content_canvas.bbox('all')[3]>app.content_canvas.winfo_height()
@@ -52,37 +49,31 @@ def main():
     panel.details_open.set(True);panel.update();root.update()
     panel.auto_save();assert panel.autosave.is_file()
     ImageGrab.grab().save(sandbox/'new_ui.png')
-    panel.ending_reference_settings();root.update()
-    assert panel.ending_reference_dialog.candidate is None
-    ImageGrab.grab().save(sandbox/'fixed_ending_reference_dialog.png')
-    panel.ending_reference_dialog.win.destroy()
-    panel.intro_boundary_settings();root.update()
-    assert panel.intro_boundary_dialog.result is None
-    ImageGrab.grab().save(sandbox/'intro_boundary_dialog.png')
-    panel.intro_boundary_dialog.win.destroy()
     root.destroy();print('NEW_UI_SMOKE_PASS',flush=True)
     # Keep a fake production install and old settings as non-modification sentinels.
     local=Path(os.environ['LOCALAPPDATA']);prod=local/'YangNingStudioDesktop';prod.mkdir(parents=True)
     (prod/'current.json').write_text('{"version":"0.12.11"}')
     settings=local/'YangNingStudio';settings.mkdir();(settings/'user_settings.json').write_text('keep')
     package_dir=sandbox/'packages'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.10','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
-    package=package_dir/'YangNing_VideoStudio_Windows_0.13.10.zip'
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.11','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
+    package=package_dir/'YangNing_VideoStudio_Windows_0.13.11.zip'
     with zipfile.ZipFile(package) as z:
         release=json.loads(z.read('release.json'));assert release['channel']=='test';assert release['update_manifest_url']==''
+        from make_release import RETIRED_PREVIEW_FILES
+        assert not (set(z.namelist()) & RETIRED_PREVIEW_FILES)
         for n in ('ffmpeg','ffprobe'):assert z.getinfo('program/tools/'+n+'.exe').file_size>1000000
         unpack=sandbox/'unpacked';z.extractall(unpack)
     subprocess.run([sys.executable,str(unpack/'program/install_desktop.py'),'--quiet'],check=True)
     preview=local/'YangNingStudioDesktopPreview'
     assert (preview/'preview_profile.json').exists();assert (preview/'runtime/Scripts/python.exe').exists()
-    subprocess.run([str(preview/'runtime/Scripts/python.exe'),'-c','import cv2,rapidocr,onnxruntime; print("INSTALLED_GLYPH_OCR_DEPENDENCIES_PASS",cv2.__version__)'],check=True)
+    subprocess.run([str(preview/'runtime/Scripts/python.exe'),'-c','import sys;sys.path.insert(0,'+repr(str(preview/'versions/0.13.11/program'))+');import cv2,sequence_vnext,roi_picker,next_ui; print("INSTALLED_PARTS_RUNTIME_PASS",cv2.__version__)'],check=True)
     assert json.loads((prod/'current.json').read_text())['version']=='0.12.11'
     assert (settings/'user_settings.json').read_text()=='keep'
     assert not (preview/'update_config.json').exists()
     print('ISOLATED_TEST_INSTALL_PASS',flush=True)
     # Exercise the actual GUI recovery backend, not only the low-level mock tests.
     recovery=sandbox/'run_installed_recovery.py'
-    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.10/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
+    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.11/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
     subprocess.run([sys.executable,str(recovery)],check=True)
     restored=json.loads((preview/'current.json').read_text())
     assert restored['version']=='0.12.11';assert restored['runtime_scope']=='stable-v12.11'

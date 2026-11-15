@@ -24,11 +24,10 @@ class BodyFirstUITests(unittest.TestCase):
     def test_default_body_is_compact_and_classic_flow_stays_available(self):
         p=self.panel
         self.assertFalse(p.enabled.get());self.assertFalse(self.app.sequence_settings)
-        self.assertFalse(p.opening_text_button.winfo_ismapped())
         self.assertTrue(p.segment_mode_box.winfo_ismapped());self.assertEqual(p.segment_mode_box.master,self.app.material_mode_row)
         self.assertTrue(p.output_mode_box.winfo_ismapped())
         self.assertEqual(p.segments.master,self.app.segment_host)
-        for part in (p.controls,p.segments,p.intro,p.outro,p.combined,p.music,self.app.activity):self.assertFalse(part.winfo_ismapped())
+        for part in (p.controls,p.segments,p.intro,p.outro,p.music,self.app.activity):self.assertFalse(part.winfo_ismapped())
         self.assertFalse(self.app.v['burn'].get())
         self.assertEqual(self.app.v['speed'].get(),'1.0')
         self.assertEqual(self.app.language_name.get(),'按文件名判断')
@@ -42,77 +41,14 @@ class BodyFirstUITests(unittest.TestCase):
     def test_modes_show_only_relevant_fields_and_preserve_disabled_assets(self):
         p=self.panel;self.mode(1)
         self.assertTrue(p.segment_switch.winfo_ismapped());self.assertFalse(p.intro.winfo_ismapped());self.assertFalse(p.outro.winfo_ismapped())
-        self.assertFalse(p.opening_text_button.winfo_ismapped())
         p.v['intro_enabled'].set(True);p.v['outro_enabled'].set(True);p.v['intro_mode'].set('external_music');p.update();self.root.update()
         self.assertTrue(p.intro.winfo_ismapped());self.assertTrue(p.outro.winfo_ismapped());self.assertTrue(p.music.winfo_ismapped())
         p.v['background_audio'].set('keep-this-music.wav')
-        self.mode(2);self.assertTrue(p.combined.winfo_ismapped());self.assertFalse(p.intro.winfo_ismapped());self.assertFalse(p.outro.winfo_ismapped())
-        self.assertFalse(p.diamond_enabled.get());self.assertFalse(p.opening_text_button.winfo_ismapped())
-        self.assertFalse(p.value()['combined']);self.assertEqual(p.value()['background_audio'],'')
-        p.diamond_enabled.set(True);p.update();self.root.update()
-        self.assertTrue(p.opening_text_button.winfo_ismapped())
-        self.assertEqual(p.opening_text_button.master,p.diamond_details)
-        self.assertEqual(self.app.media_labels['video'].cget('text'),'完整视频 MP4');self.assertTrue(p.value()['combined']);self.assertFalse(p.value()['outro_enabled'])
         self.mode(0);self.assertFalse(p.segments.winfo_ismapped());self.assertFalse(p.value()['combined']);self.assertFalse(p.value()['intro_enabled']);self.assertFalse(p.value()['outro_enabled']);self.assertEqual(p.value()['background_audio'],'')
         self.assertEqual(p.v['background_audio'].get(),'keep-this-music.wav');self.assertTrue(p.v['intro_enabled'].get())
         self.mode(1);self.assertEqual(p.value()['background_audio'],'keep-this-music.wav')
-    def test_language_ending_selection_never_keeps_previous_language(self):
-        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.v['combined_replace_outro'].set(True);p.update();self.root.update()
-        self.assertTrue(p.replacement.winfo_ismapped())
-        paths={code:self.folder/(code+'.mp4') for code in ('ja','en','fr','de','yue','id')}
-        with patch('ending_presets.load_preset',side_effect=lambda root,code:paths.get(code)):
-            for code in ('en','fr','de','yue','id','ja'):
-                self.app.v['language'].set(code);self.assertEqual(p.v['outro_video'].get(),str(paths[code]))
-            self.app.v['language'].set('es');self.assertEqual(p.v['outro_video'].get(),'')
-        p.v['combined_outro_start'].set('120');self.app.v['language'].set('id')
-        self.assertEqual(p.v['combined_outro_start'].get(),'120')
-        self.mode(0);self.assertFalse(p.value()['combined_replace_outro'])
-        self.mode(2);self.assertTrue(p.value()['combined_replace_outro'])
 
-    def test_title_preview_does_not_require_outro_audio_or_srt_or_approve_full_export(self):
-        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.v['opening_title_enabled'].set(True)
-        self.app.language_name.set('日语');self.app.language_changed();self.app.v['video'].set('fixture_only.mp4')
-        self.assertEqual(p.v['combined_outro_start'].get(),'0');self.assertEqual(self.app.v['source_srt'].get(),'')
-        p.approved_preview='unchanged';p.decoration_settings();self.root.update()
-        with patch.object(self.app,'settings',side_effect=AssertionError('Must not request full export inputs')),patch.object(self.app,'worker') as worker:
-            p.preview_title('opening_title');self.assertTrue(worker.called)
-        self.assertEqual(p.approved_preview,'unchanged')
-        p.set_processing_busy(True)
-        self.assertIn('disabled',p.range_preview_button.state())
-        self.assertTrue(all('disabled' in button.state() for button in p.title_preview_buttons.values()))
-        p.set_processing_busy(False);self.assertNotIn('disabled',p.range_preview_button.state())
-    def test_full_preview_explains_missing_boundary_and_busy_without_enqueuing(self):
-        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.update()
-        before=len(self.app.jobs)
-        with patch('next_ui.messagebox.showerror') as error,patch.object(self.app,'settings') as settings:
-            p.preview();self.assertIn('仅预览此组译文',error.call_args.args[1]);settings.assert_not_called()
-        self.assertEqual(len(self.app.jobs),before)
-        self.app.busy=True
-        with patch('next_ui.messagebox.showinfo') as notice:p.preview();notice.assert_called_once()
-        self.app.busy=False;self.assertEqual(len(self.app.jobs),before)
 
-    def test_fixed_ending_requires_preview_and_confirmation_before_filling_boundary(self):
-        from ending_reference import stamp,ALGORITHM
-        from ending_presets import digest
-        p=self.panel;self.mode(2)
-        self.assertFalse(p.ending_reference_button.winfo_ismapped())
-        p.diamond_enabled.set(True);p.update();self.root.update();p.ending_reference_settings();self.root.update()
-        dialog=p.ending_reference_dialog
-        source=self.folder/'whole.mp4';source.write_bytes(b'source stamp fixture');self.app.v['video'].set(str(source))
-        dialog.root.mkdir(parents=True,exist_ok=True);ref=dialog.root/'reference.mp4';ref.write_bytes(b'reference fixture')
-        fingerprint=digest(ref)
-        (dialog.root/'reference.json').write_text(json.dumps(dict(schema=1,algorithm=ALGORITHM,file=ref.name,sha256=fingerprint,seconds=20)))
-        candidate=dict(source_stamp=stamp(source),reference_id=fingerprint,start=120,score=.99,uncertainty=.125)
-        dialog.receive('found',candidate);self.assertEqual(p.v['combined_outro_start'].get(),'0')
-        with patch('ending_reference_ui.messagebox.showerror') as error:
-            dialog.accept();self.assertTrue(error.called);self.assertEqual(p.v['combined_outro_start'].get(),'0')
-        dialog.receive('preview',dict(path='not_opened_in_unit_test.mp4',start=120,source_stamp=stamp(source),reference_id=fingerprint))
-        dialog.seconds.set('121')
-        with patch('ending_reference_ui.messagebox.showerror') as error:
-            dialog.accept();self.assertTrue(error.called);self.assertEqual(p.v['combined_outro_start'].get(),'0')
-        dialog.seconds.set('120')
-        with patch('ending_reference_ui.messagebox.askyesno',return_value=True):dialog.accept()
-        self.assertEqual(p.v['combined_outro_start'].get(),'120.000');dialog.win.destroy()
 
     def test_cantonese_exposes_required_aligned_srt_and_indonesian_stays_automatic(self):
         self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
@@ -127,34 +63,11 @@ class BodyFirstUITests(unittest.TestCase):
         music=self.folder/'music.wav';music.write_bytes(b'test-path-only');p.v['background_audio'].set(str(music));p.appearance_open.set(True);p.update()
         job=p.project();saved=self.folder/'project.json';save_project(saved,job)
         self.mode(0);p.v['background_audio'].set('');p.appearance_open.set(False);p.load(saved);self.root.update()
-        self.assertEqual(p.segment_mode.get(),'另加片头 / 片尾');self.assertEqual(p.v['background_audio'].get(),str(music));self.assertTrue(p.appearance_open.get())
-        job.pop('ui_state');job['sequence'].update(combined=True,intro_enabled=False,outro_enabled=False,background_audio='');save_project(saved,job);p.load(saved);self.root.update()
-        self.assertEqual(p.segment_mode.get(),'整片视频（已有片头片尾）')
-    def test_title_dialog_preserves_defaults_and_legacy_disclaimer_is_inactive(self):
-        import tkinter as tk
-        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.decoration_settings();self.root.update()
-        dialog=next(w for w in self.root.winfo_children() if isinstance(w,tk.Toplevel))
-        self.assertFalse(p.v['opening_title_enabled'].get());self.assertFalse(p.v['disclaimer_enabled'].get())
-        from tkinter import ttk
-        tabs=next(w for w in dialog.winfo_children() if isinstance(w,ttk.Notebook))
-        self.assertEqual(len(tabs.tabs()),2)
-        self.assertFalse(any('免责声明' in tabs.tab(tab,'text') for tab in tabs.tabs()))
-        self.assertEqual(p.v['opening_topic_color'].get(),'#101010')
-        self.assertEqual(p.v['opening_topic_font'].get(),'Yuji Boku')
-        with patch('next_ui.messagebox.showinfo') as notice:
-            p.title_detected({'recognized':'金刚经讲义'});self.assertIn('仅预览此组译文',notice.call_args.args[1])
-        p.v['opening_title_original'].set('释迦牟尼佛')
-        p.v['opening_title_color'].set('#202020')
-        self.assertEqual(p.project()['sequence']['opening_title_original'],'释迦牟尼佛')
-        p.v['disclaimer_enabled'].set(True);self.root.update()
-        self.assertTrue(p.enabled.get());self.assertFalse(p.value()['disclaimer_enabled'])
-        p.v['disclaimer_mode'].set('overlay');p.v['disclaimer_seconds'].set('8')
-        self.assertEqual(p.project()['sequence']['disclaimer_seconds'],8)
-        self.assertEqual(p.project()['sequence']['disclaimer_mode'],'overlay')
-        p.v['disclaimer_seconds'].set('')
-        with self.assertRaises(ValueError):self.app.settings()
-        p.v['disclaimer_seconds'].set('8')
-        dialog.destroy()
+        self.assertEqual(p.segment_mode.get(),'片头＋正文＋片尾（按需添加）');self.assertEqual(p.v['background_audio'].get(),str(music));self.assertTrue(p.appearance_open.get())
+        job.pop('ui_state');job['sequence'].update(combined=True,intro_enabled=False,outro_enabled=False,background_audio='');save_project(saved,job)
+        before=self.app.v['video'].get()
+        with patch('next_ui.messagebox.showerror') as error:p.load(saved);self.assertIn('已撤下',error.call_args.args[1])
+        self.assertEqual(self.app.v['video'].get(),before);self.assertEqual(p.segment_mode.get(),'片头＋正文＋片尾（按需添加）')
     def test_chinese_choices_preserve_internal_values_and_reload(self):
         p=self.panel
         self.assertEqual(p.cover_choices['cover_transition'].display.get(),'直接切换')
@@ -184,28 +97,9 @@ class BodyFirstUITests(unittest.TestCase):
         canvas.yview_moveto(1);self.root.update()
         self.assertLessEqual(self.app.main_button.winfo_rooty()+self.app.main_button.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
 
-    def test_intro_candidates_require_both_previews_and_apply_does_not_export(self):
-        from intro_boundary_ui import IntroDialog
-        from next_ui import SEGMENT_MODES
-        self.mode(2);self.panel.diamond_enabled.set(True);self.panel.update()
-        dialog=IntroDialog(self.panel);self.root.update()
-        self.assertIn('disabled',dialog.ok.state())
-        candidate=dict(video=85,audio=93,body_id=13,last_id=12,aligned_srt='aligned.srt',token='verified',warning='review',stamps={})
-        with patch('intro_boundary_ui.verify'):
-            dialog.receive('found',candidate)
-            dialog.receive('preview',dict(kind='video',token='verified',path='video.mp4'))
-            self.assertIn('disabled',dialog.ok.state())
-            dialog.receive('preview',dict(kind='audio',token='verified',path='audio.wav'))
-            self.assertNotIn('disabled',dialog.ok.state())
-            with patch('intro_boundary_ui.messagebox.askyesno',return_value=True),patch.object(self.app,'worker') as worker:
-                dialog.accept();worker.assert_not_called()
-        self.assertEqual(self.panel.v['combined_intro_end'].get(),'85')
-        self.assertEqual(self.panel.v['combined_audio_split'].get(),'93')
-        self.assertEqual(self.panel.v['combined_aligned_srt'].get(),'aligned.srt')
-        dialog.win.destroy()
     def test_roi_mouse_selection_clears_old_approval_and_sets_preview_time(self):
         from roi_picker import RegionDialog
-        from ending_reference import stamp
+        from roi_picker import stamp
         from PIL import Image
         source=self.folder/'source.mp4';source.write_bytes(b'original')
         image=self.folder/'frame.png';Image.new('RGB',(320,180),'navy').save(image)
@@ -226,5 +120,45 @@ class BodyFirstUITests(unittest.TestCase):
         roi=list(map(int,values['repair_roi'].get().split(',')))
         self.assertEqual((roi[0],roi[2]),(0,320));self.assertGreater(roi[3],20)
         self.assertEqual(source.read_bytes(),b'original');dialog.win.destroy()
+
+
+
+    def test_only_two_modes_no_retired_controls_and_layout_defaults(self):
+        from next_ui import SEGMENT_MODES
+        self.assertEqual(len(SEGMENT_MODES),2)
+        def texts(w):
+            for c in w.winfo_children():
+                try:yield str(c.cget('text'))
+                except Exception:pass
+                yield from texts(c)
+        labels='\n'.join(texts(self.root))
+        for retired in ('金刚经视频专用','自动定位','替换原片尾','确认预览','上下偏移','标题上下位置','新字幕字号（像素，可空）'):
+            self.assertNotIn(retired,labels)
+        p=self.panel
+        for mode in ('landscape','portrait'):
+            p.layout_vars[mode]['subtitle_offset_y'].set('200')
+            p.layout_vars[mode]['title_y'].set('25')
+        p.v['combined_intro_end'].set('invalid old field')
+        p.v['opening_title_enabled'].set(True)
+        values=p.value()
+        self.assertFalse(values['combined']);self.assertFalse(values['opening_title_enabled'])
+        self.assertEqual(values['combined_intro_end'],0)
+        self.assertEqual(values['layouts']['landscape']['subtitle_font_size'],'84')
+        self.assertEqual(values['layouts']['portrait']['subtitle_font_size'],'')
+        self.assertEqual(values['layouts']['landscape']['subtitle_offset_y'],0)
+        self.assertEqual(values['layouts']['portrait']['title_y'],'')
+    def test_one_click_exports_without_preview_or_confirmation(self):
+        self.mode(1);self.panel.v['intro_enabled'].set(True);self.panel.update()
+        self.app.language_manual=True
+        with patch.object(self.app,'one_click') as export,patch.object(self.panel,'preview') as preview,patch('app.messagebox.showinfo') as notice:
+            self.app.one_click_simple();export.assert_called_once();preview.assert_not_called();notice.assert_not_called()
+        self.panel.set_processing_busy(True);self.assertIn('disabled',self.panel.range_preview_button.state())
+        self.panel.set_processing_busy(False)
+    def test_repair_region_can_export_without_confirmation(self):
+        values=self.panel.layout_vars['landscape']
+        values['repair_roi'].set('0,100,640,40')
+        self.assertEqual(values['repair_approved'].get(),'')
+        self.assertIn('已选择',self.panel.region_status['landscape'].get())
+        self.assertEqual(self.panel.value()['layouts']['landscape']['repair_roi'],'0,100,640,40')
 
 if __name__=='__main__':unittest.main()
