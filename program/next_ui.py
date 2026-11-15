@@ -112,6 +112,8 @@ class SequencePanel:
         self.opening_text_button.pack(anchor='w',pady=4)
         ttk.Label(self.diamond_details,text='完整视频、合并配音和合并SRT放在上方素材区。可保留原片尾，或用准备好的片尾整体替换。',wraplength=850).pack(anchor='w')
         for key,label in [('combined_intro_end','原视频片头结束秒（没有填0）'),('combined_outro_start','原视频片尾开始秒'),('combined_audio_split','合并配音中的片头结束秒')]:self.number(self.diamond_details,key,label)
+        self.ending_reference_button=ttk.Button(self.diamond_details,text='固定原片尾：保存参考 / 自动定位 ▸',command=self.ending_reference_settings)
+        self.ending_reference_button.pack(anchor='w',pady=4)
         ttk.Checkbutton(self.diamond_details,text='替换原片尾（使用准备好的片尾视频）',variable=self.v['combined_replace_outro'],command=self.toggle_replacement).pack(anchor='w',pady=4)
         self.replacement=ttk.LabelFrame(self.diamond_details,text='替换片尾：保留新片尾完整画面和声音',padding=5)
         file_row(self.replacement,'outro_video','新片尾视频')
@@ -242,6 +244,9 @@ class SequencePanel:
         ttk.Label(box,text='导入的是已去掉讲话的音乐，不是自动人声分离。\n只替换片头原声，可与片头日语配音混合；正文和片尾不加这条音乐。\n音乐过短会提示，不自动循环、加速或铺满整片。',wraplength=620).pack(anchor='w',pady=8)
         ttk.Button(box,text='清除背景音乐',command=lambda:self.v['background_audio'].set('')).pack(anchor='w')
 
+    def ending_reference_settings(self):
+        from ending_reference_ui import show
+        show(self)
     def toggle_replacement(self):
         if self.v['combined_replace_outro'].get():self.use_ending_preset(notify=False)
         self.update()

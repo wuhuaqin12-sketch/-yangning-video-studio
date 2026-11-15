@@ -69,6 +69,29 @@ class BodyFirstUITests(unittest.TestCase):
         self.mode(0);self.assertFalse(p.value()['combined_replace_outro'])
         self.mode(2);self.assertTrue(p.value()['combined_replace_outro'])
 
+    def test_fixed_ending_requires_preview_and_confirmation_before_filling_boundary(self):
+        from ending_reference import stamp,ALGORITHM
+        from ending_presets import digest
+        p=self.panel;self.mode(2)
+        self.assertFalse(p.ending_reference_button.winfo_ismapped())
+        p.diamond_enabled.set(True);p.update();self.root.update();p.ending_reference_settings();self.root.update()
+        dialog=p.ending_reference_dialog
+        source=self.folder/'whole.mp4';source.write_bytes(b'source stamp fixture');self.app.v['video'].set(str(source))
+        dialog.root.mkdir(parents=True,exist_ok=True);ref=dialog.root/'reference.mp4';ref.write_bytes(b'reference fixture')
+        fingerprint=digest(ref)
+        (dialog.root/'reference.json').write_text(json.dumps(dict(schema=1,algorithm=ALGORITHM,file=ref.name,sha256=fingerprint,seconds=20)))
+        candidate=dict(source_stamp=stamp(source),reference_id=fingerprint,start=120,score=.99,uncertainty=.125)
+        dialog.receive('found',candidate);self.assertEqual(p.v['combined_outro_start'].get(),'0')
+        with patch('ending_reference_ui.messagebox.showerror') as error:
+            dialog.accept();self.assertTrue(error.called);self.assertEqual(p.v['combined_outro_start'].get(),'0')
+        dialog.receive('preview',dict(path='not_opened_in_unit_test.mp4',start=120,source_stamp=stamp(source),reference_id=fingerprint))
+        dialog.seconds.set('121')
+        with patch('ending_reference_ui.messagebox.showerror') as error:
+            dialog.accept();self.assertTrue(error.called);self.assertEqual(p.v['combined_outro_start'].get(),'0')
+        dialog.seconds.set('120')
+        with patch('ending_reference_ui.messagebox.askyesno',return_value=True):dialog.accept()
+        self.assertEqual(p.v['combined_outro_start'].get(),'120.000');dialog.win.destroy()
+
     def test_cantonese_exposes_required_aligned_srt_and_indonesian_stays_automatic(self):
         self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'timed')
