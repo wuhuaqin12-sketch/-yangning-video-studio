@@ -222,7 +222,7 @@ class SequencePanel:
             mapped=key.replace('opening_title_',prefix+'_')
             if mapped in self.v:self.v[mapped].set(value)
         self.v[prefix+'_enabled'].set(True);self.enabled.set(True);self.update()
-        messagebox.showinfo('定位结果待预览','识别到：'+result['recognized']+'\n已填写估计时间、位置及所选样式取样。请生成范围预览，必要时调整字体与大小。')
+        messagebox.showinfo('定位结果待预览','识别到：'+result['recognized']+'\n已填写估计时间、位置及所选样式取样。请点击本页“仅预览此组译文”检查，必要时调整字体与大小。')
     def expand_subtitle_roi(self,mode):
         if self.app.busy:return
         try:

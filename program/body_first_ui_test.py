@@ -141,6 +141,8 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertFalse(any('免责声明' in tabs.tab(tab,'text') for tab in tabs.tabs()))
         self.assertEqual(p.v['opening_topic_color'].get(),'#101010')
         self.assertEqual(p.v['opening_topic_font'].get(),'Yuji Boku')
+        with patch('next_ui.messagebox.showinfo') as notice:
+            p.title_detected({'recognized':'金刚经讲义'});self.assertIn('仅预览此组译文',notice.call_args.args[1])
         p.v['opening_title_original'].set('释迦牟尼佛')
         p.v['opening_title_color'].set('#202020')
         self.assertEqual(p.project()['sequence']['opening_title_original'],'释迦牟尼佛')
