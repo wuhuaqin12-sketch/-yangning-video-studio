@@ -26,3 +26,20 @@ class PresetTests(unittest.TestCase):
         with patch('media.probe',return_value={'streams':[{'codec_type':'audio'}]}):
             with self.assertRaisesRegex(ValueError,'画面'):save_preset(self.root/'presets','ja',source)
         self.assertEqual(load_preset(self.root/'presets','ja').read_bytes(),b'ja')
+
+class DiamondGateTests(unittest.TestCase):
+    def test_disabled_group_keeps_values_but_does_not_process_them(self):
+        from types import SimpleNamespace
+        from next_ui import SequencePanel,SEGMENT_MODES
+        from project_vnext import defaults
+        class Var:
+            def __init__(self,value):self.value=value
+            def get(self):return self.value
+        p=defaults();p.update(combined_outro_start=120,combined_replace_outro=True,opening_title_enabled=True,background_audio='ja.wav')
+        panel=SimpleNamespace(v={k:Var(v) for k,v in p.items() if k!='layouts'},layout_vars={m:{k:Var(v) for k,v in layout.items() if k!='style'} for m,layout in p['layouts'].items()},layout_styles={m:{} for m in p['layouts']},segment_mode=Var(SEGMENT_MODES[2]),diamond_enabled=Var(False))
+        panel.raw_value=lambda:SequencePanel.raw_value(panel)
+        off=SequencePanel.value(panel)
+        self.assertFalse(off['combined']);self.assertFalse(off['combined_replace_outro']);self.assertFalse(off['opening_title_enabled']);self.assertEqual(off['background_audio'],'')
+        self.assertEqual(panel.v['combined_outro_start'].get(),120)
+        panel.diamond_enabled.value=True;on=SequencePanel.value(panel)
+        self.assertTrue(on['combined']);self.assertTrue(on['combined_replace_outro']);self.assertTrue(on['opening_title_enabled']);self.assertEqual(on['combined_outro_start'],120)

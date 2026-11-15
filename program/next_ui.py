@@ -28,6 +28,7 @@ class SequencePanel:
         self.enabled=tk.BooleanVar(value=False)
         self.appearance_open=tk.BooleanVar(value=False);self.details_open=tk.BooleanVar(value=False)
         self.segment_mode=tk.StringVar(value=SEGMENT_MODES[0])
+        self.diamond_enabled=tk.BooleanVar(value=False)
         self.box=ttk.LabelFrame(parent,text='② 可选设置',padding=8);self.box.pack(fill='x',pady=5)
         bar=ttk.Frame(self.box);bar.pack(fill='x')
         self.appearance_button=ttk.Button(bar,text='画面设置（背景 / 封面 / 比例）',command=self.toggle_appearance);self.appearance_button.pack(side='left')
@@ -103,12 +104,14 @@ class SequencePanel:
         ttk.Button(self.separation_details,text='确认试听，允许整段分离',command=self.approve_separation).pack(anchor='w')
         self.outro=ttk.LabelFrame(self.segments,text='片尾：完整保留画面和音乐，无需配音或SRT',padding=6);file_row(self.outro,'outro_video','片尾视频')
         self.combined=ttk.LabelFrame(self.segments,text='完整视频设置',padding=6)
-        self.opening_text_button=ttk.Button(self.combined,text='片头文字译文（可选） ▸',command=self.decoration_settings)
+        ttk.Checkbutton(self.combined,text='金刚经视频专用设置（可选）',variable=self.diamond_enabled,command=self.update).pack(anchor='w')
+        self.diamond_details=ttk.Frame(self.combined,padding=(4,6))
+        self.opening_text_button=ttk.Button(self.diamond_details,text='片头文字译文（可选） ▸',command=self.decoration_settings)
         self.opening_text_button.pack(anchor='w',pady=4)
-        ttk.Label(self.combined,text='完整视频、合并配音和合并SRT放在上方素材区。可保留原片尾，或用准备好的片尾整体替换。',wraplength=850).pack(anchor='w')
-        for key,label in [('combined_intro_end','原视频片头结束秒（没有填0）'),('combined_outro_start','原视频片尾开始秒'),('combined_audio_split','合并配音中的片头结束秒')]:self.number(self.combined,key,label)
-        ttk.Checkbutton(self.combined,text='替换原片尾（使用准备好的片尾视频）',variable=self.v['combined_replace_outro'],command=self.toggle_replacement).pack(anchor='w',pady=4)
-        self.replacement=ttk.LabelFrame(self.combined,text='替换片尾：保留新片尾完整画面和声音',padding=5)
+        ttk.Label(self.diamond_details,text='完整视频、合并配音和合并SRT放在上方素材区。可保留原片尾，或用准备好的片尾整体替换。',wraplength=850).pack(anchor='w')
+        for key,label in [('combined_intro_end','原视频片头结束秒（没有填0）'),('combined_outro_start','原视频片尾开始秒'),('combined_audio_split','合并配音中的片头结束秒')]:self.number(self.diamond_details,key,label)
+        ttk.Checkbutton(self.diamond_details,text='替换原片尾（使用准备好的片尾视频）',variable=self.v['combined_replace_outro'],command=self.toggle_replacement).pack(anchor='w',pady=4)
+        self.replacement=ttk.LabelFrame(self.diamond_details,text='替换片尾：保留新片尾完整画面和声音',padding=5)
         file_row(self.replacement,'outro_video','新片尾视频')
         row=ttk.Frame(self.replacement);row.pack(fill='x')
         ttk.Button(row,text='保存为当前语言片尾',command=self.save_ending_preset).pack(side='left')
@@ -132,7 +135,7 @@ class SequencePanel:
         self.ending_store=self.autosave.parent/'ending_presets'
         self.ending_language=self.app.v['language'].get()
         self.app.v['language'].trace_add('write',self.ending_language_changed)
-        for variable in [self.enabled,self.mode,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
+        for variable in [self.enabled,self.mode,self.diamond_enabled,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
         self.update();app.root.after(1200,self.offer_recover)
     def toggle_appearance(self):
         self.appearance_open.set(not self.appearance_open.get());self.update()
@@ -203,6 +206,10 @@ class SequencePanel:
         ttk.Button(box,text='完成',command=win.destroy).pack(anchor='e')
     def raw_value(self):
         p={k:v.get() for k,v in self.v.items()};p['layouts']={m:{**{k:v.get() for k,v in d.items()},'style':self.layout_styles[m]} for m,d in self.layout_vars.items()}
+        if self.segment_mode.get()==SEGMENT_MODES[2] and not self.diamond_enabled.get():
+            base=defaults()
+            for key in p:
+                if key.startswith(('opening_title_','opening_topic_','combined_')) or key in ('background_audio','background_audio_offset'):p[key]=base[key]
         return normalize(p)
     def custom_appearance(self):
         p=self.raw_value();base=defaults()
@@ -259,7 +266,7 @@ class SequencePanel:
         if language==self.ending_language:return
         self.ending_language=language
         if self.restoring:return
-        if self.segment_mode.get()==SEGMENT_MODES[2] and self.v['combined_replace_outro'].get():self.use_ending_preset(notify=False)
+        if self.segment_mode.get()==SEGMENT_MODES[2] and self.diamond_enabled.get() and self.v['combined_replace_outro'].get():self.use_ending_preset(notify=False)
 
     def pick(self,key):
         p=filedialog.askopenfilename()
@@ -273,9 +280,11 @@ class SequencePanel:
         p=self.raw_value();mode=self.segment_mode.get()
         # New UI uses prepared ending videos; legacy image settings cannot append again.
         p['disclaimer_enabled']=False
-        p['combined']=mode==SEGMENT_MODES[2]
+        p['combined']=mode==SEGMENT_MODES[2] and self.diamond_enabled.get()
         if mode!=SEGMENT_MODES[1]:p['intro_enabled']=False;p['outro_enabled']=False
-        if mode!=SEGMENT_MODES[2]:p['combined_replace_outro']=False
+        if mode!=SEGMENT_MODES[2] or not self.diamond_enabled.get():
+            p['combined_replace_outro']=False
+            p['opening_title_enabled']=False;p['opening_topic_enabled']=False
         if mode==SEGMENT_MODES[0] or (mode==SEGMENT_MODES[1] and (not p['intro_enabled'] or p['intro_mode']=='original')):p['background_audio']=''
         return p
     def save_style(self,mode):
@@ -312,8 +321,10 @@ class SequencePanel:
         self.separation_switch.pack(anchor='w') if use_separation else self.separation_switch.pack_forget()
         self.separation_details.pack(fill='x') if use_separation and self.separation_open.get() else self.separation_details.pack_forget()
         self.replacement.pack(fill='x',pady=4) if self.v['combined_replace_outro'].get() else self.replacement.pack_forget()
+        self.diamond_details.pack(fill='x') if self.diamond_enabled.get() else self.diamond_details.pack_forget()
         if mode==SEGMENT_MODES[2]:self.combined.pack(fill='x',pady=4,before=self.segment_anchor)
-        if mode==SEGMENT_MODES[2] or (mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get() and self.v['intro_mode'].get()!='original'):self.music.pack(fill='x',pady=4,before=self.segment_anchor)
+        if mode==SEGMENT_MODES[2] and self.diamond_enabled.get():self.music.pack(in_=self.diamond_details,fill='x',pady=4)
+        elif mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get() and self.v['intro_mode'].get()!='original':self.music.pack(fill='x',pady=4,before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['outro_enabled'].get():self.outro.pack(fill='x',pady=4,before=self.segment_anchor)
         if self.enabled.get():self.preview_controls.pack(fill='x',pady=4)
         if hasattr(self.app,'media_labels'):
@@ -322,7 +333,7 @@ class SequencePanel:
         self.appearance_button.configure(text='收起画面设置 ▴' if self.appearance_open.get() else '画面设置（背景 / 封面 / 比例）')
         self.changed()
     def project(self):
-        j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),ui_state={'segment_mode':self.segment_mode.get(),'appearance_open':self.appearance_open.get(),'details_open':self.details_open.get(),'parts_preferences':{k:self.v[k].get() for k in ('intro_enabled','outro_enabled','background_audio','combined_replace_outro')}},publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get())
+        j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),ui_state={'segment_mode':self.segment_mode.get(),'appearance_open':self.appearance_open.get(),'details_open':self.details_open.get(),'diamond_enabled':self.diamond_enabled.get(),'diamond_preferences':{k:v.get() for k,v in self.v.items() if k.startswith(('opening_title_','opening_topic_','combined_')) or k in ('background_audio','background_audio_offset')},'parts_preferences':{k:self.v[k].get() for k in ('intro_enabled','outro_enabled','background_audio','combined_replace_outro')}},publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get())
         if self.pause_override is not None:j['_pause_override']=self.pause_override
         return j
     def auto_save(self):
@@ -354,6 +365,9 @@ class SequencePanel:
                 for key,var in d.items():var.set(job['sequence']['layouts'][mode][key])
                 self.layout_styles[mode]=dict(job['sequence']['layouts'][mode].get('style') or {})
             ui=job.get('ui_state') or {}
+            self.diamond_enabled.set(ui.get('diamond_enabled',bool(job['sequence']['combined'])))
+            for k,value in ui.get('diamond_preferences',{}).items():
+                if k in self.v and (k.startswith(('opening_title_','opening_topic_','combined_')) or k in ('background_audio','background_audio_offset')):self.v[k].set(value)
             derived=SEGMENT_MODES[2] if job['sequence']['combined'] else (SEGMENT_MODES[1] if job['sequence']['intro_enabled'] or job['sequence']['outro_enabled'] else SEGMENT_MODES[0])
             self.segment_mode.set(ui.get('segment_mode') if ui.get('segment_mode') in SEGMENT_MODES else derived)
             for k,value in ui.get('parts_preferences',{}).items():

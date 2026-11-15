@@ -44,14 +44,17 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertTrue(p.intro.winfo_ismapped());self.assertTrue(p.outro.winfo_ismapped());self.assertTrue(p.music.winfo_ismapped())
         p.v['background_audio'].set('keep-this-music.wav')
         self.mode(2);self.assertTrue(p.combined.winfo_ismapped());self.assertFalse(p.intro.winfo_ismapped());self.assertFalse(p.outro.winfo_ismapped())
+        self.assertFalse(p.diamond_enabled.get());self.assertFalse(p.opening_text_button.winfo_ismapped())
+        self.assertFalse(p.value()['combined']);self.assertEqual(p.value()['background_audio'],'')
+        p.diamond_enabled.set(True);p.update();self.root.update()
         self.assertTrue(p.opening_text_button.winfo_ismapped())
-        self.assertEqual(p.opening_text_button.master,p.combined)
+        self.assertEqual(p.opening_text_button.master,p.diamond_details)
         self.assertEqual(self.app.media_labels['video'].cget('text'),'完整视频 MP4');self.assertTrue(p.value()['combined']);self.assertFalse(p.value()['outro_enabled'])
         self.mode(0);self.assertFalse(p.segments.winfo_ismapped());self.assertFalse(p.value()['combined']);self.assertFalse(p.value()['intro_enabled']);self.assertFalse(p.value()['outro_enabled']);self.assertEqual(p.value()['background_audio'],'')
         self.assertEqual(p.v['background_audio'].get(),'keep-this-music.wav');self.assertTrue(p.v['intro_enabled'].get())
         self.mode(1);self.assertEqual(p.value()['background_audio'],'keep-this-music.wav')
     def test_language_ending_selection_never_keeps_previous_language(self):
-        p=self.panel;self.mode(2);p.v['combined_replace_outro'].set(True);p.update();self.root.update()
+        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.v['combined_replace_outro'].set(True);p.update();self.root.update()
         self.assertTrue(p.replacement.winfo_ismapped())
         paths={code:self.folder/(code+'.mp4') for code in ('ja','en','fr','de','yue','id')}
         with patch('ending_presets.load_preset',side_effect=lambda root,code:paths.get(code)):
@@ -74,7 +77,7 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertEqual(p.segment_mode.get(),'整片视频（已有片头片尾）')
     def test_title_dialog_preserves_defaults_and_legacy_disclaimer_is_inactive(self):
         import tkinter as tk
-        p=self.panel;p.decoration_settings();self.root.update()
+        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.decoration_settings();self.root.update()
         dialog=next(w for w in self.root.winfo_children() if isinstance(w,tk.Toplevel))
         self.assertFalse(p.v['opening_title_enabled'].get());self.assertFalse(p.v['disclaimer_enabled'].get())
         from tkinter import ttk
