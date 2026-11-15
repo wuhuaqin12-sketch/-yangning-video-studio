@@ -56,14 +56,18 @@ def main():
     assert panel.ending_reference_dialog.candidate is None
     ImageGrab.grab().save(sandbox/'fixed_ending_reference_dialog.png')
     panel.ending_reference_dialog.win.destroy()
+    panel.intro_boundary_settings();root.update()
+    assert panel.intro_boundary_dialog.result is None
+    ImageGrab.grab().save(sandbox/'intro_boundary_dialog.png')
+    panel.intro_boundary_dialog.win.destroy()
     root.destroy();print('NEW_UI_SMOKE_PASS',flush=True)
     # Keep a fake production install and old settings as non-modification sentinels.
     local=Path(os.environ['LOCALAPPDATA']);prod=local/'YangNingStudioDesktop';prod.mkdir(parents=True)
     (prod/'current.json').write_text('{"version":"0.12.11"}')
     settings=local/'YangNingStudio';settings.mkdir();(settings/'user_settings.json').write_text('keep')
     package_dir=sandbox/'packages'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.9','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
-    package=package_dir/'YangNing_VideoStudio_Windows_0.13.9.zip'
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--test-package','--version','0.13.10','--package-url','https://example.invalid/test.zip','--manifest-url','https://example.invalid/latest.json','--output',str(package_dir)],check=True)
+    package=package_dir/'YangNing_VideoStudio_Windows_0.13.10.zip'
     with zipfile.ZipFile(package) as z:
         release=json.loads(z.read('release.json'));assert release['channel']=='test';assert release['update_manifest_url']==''
         for n in ('ffmpeg','ffprobe'):assert z.getinfo('program/tools/'+n+'.exe').file_size>1000000
@@ -78,7 +82,7 @@ def main():
     print('ISOLATED_TEST_INSTALL_PASS',flush=True)
     # Exercise the actual GUI recovery backend, not only the low-level mock tests.
     recovery=sandbox/'run_installed_recovery.py'
-    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.9/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
+    recovery.write_text('import os,sys,threading\nfrom pathlib import Path\nos.environ["YANGNING_INSTALL_ROOT"]='+repr(str(preview))+'\nos.environ["YANGNING_DATA_ROOT"]='+repr(str(preview/'profile/YangNingStudio'))+'\nsys.path.insert(0,'+repr(str(preview/'versions/0.13.10/program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
     subprocess.run([sys.executable,str(recovery)],check=True)
     restored=json.loads((preview/'current.json').read_text())
     assert restored['version']=='0.12.11';assert restored['runtime_scope']=='stable-v12.11'

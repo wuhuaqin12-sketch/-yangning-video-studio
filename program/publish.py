@@ -23,6 +23,13 @@ def layout(opts, stream, w, h):
     scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
     vx=(w-vw)//2;vy=(h-vh)//2
+    if opts.get('_auto_below_video'):
+        size=opts['subtitle_font_size'] or round(h*opts['font_percent']/100);padding=2*opts['subtitle_outline']+16
+        top=h*.04;band=max(h*.22,2*size*1.2+padding);limit=h*.90-band-12-top
+        if limit<h*.20:raise ValueError('字幕字号过大，无法在保留完整画面的同时清晰显示；请调整统一字号。')
+        scale=min(w/stream['width'],limit/stream['height']);vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
+        vx=(w-vw)//2;vy=round(top);subtop=vy+vh+12;sh=h*.90-subtop
+        return vw,vh,vx,vy,w*.84,sh,w/2,subtop+sh/2
     if opts.get('subtitle_area','below_video')=='below_video':
         # Grow longer captions downward in the background, up to five lines.
         # Keep the bottom 10% clear and never grow into the source video.
@@ -54,9 +61,13 @@ def subtitle_lines(text,opts,size,width):
     return text,line_parts(text,columns)
 
 
-def make_ass(path,cues,opts,stream,duration,w,h):
+def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False):
     opts=normalize_style(opts)
     if not cues:opts['subtitle_area']='video'
+    if auto_background and w>h and cues:
+        initial_size=opts['subtitle_font_size'] or round(h*opts['font_percent']/100)
+        if any(len(subtitle_lines(text,opts,initial_size,w*.84)[1])>2 for _,_,_,text in cues):
+            opts['subtitle_area']='below_video';opts['_auto_below_video']=True
     vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
     below=opts['subtitle_area']=='below_video'
     sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
@@ -77,7 +88,7 @@ Style: Title,{opts['title_font']},{title_size},{ass_colour(opts['title_color'])}
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 '''
-    sizes=[];shrunk=[];split_cues=[];display_cues=[]
+    sizes=[];shrunk=[];split_cues=[];display_cues=[];short_pages=[]
     for ident,a,b,text in cues:
         available=sh-2*opts['subtitle_outline']-16 if below else min(vh*.40,max(sh,sy+sh/2-vy-8))
         size=round(sub_size)
@@ -94,6 +105,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for page,weight in zip(pages,weights):
             start=a+(b-a)*elapsed/total;elapsed+=weight
             end=b if elapsed==total else a+(b-a)*elapsed/total
+            if len(pages)>1 and end-start<1:short_pages.append(ident)
             sizes.append(size)
             styled=styled_lines(text,page,opts)
             plain='\n'.join(''.join(c for _,c in row) for row in page)
@@ -132,7 +144,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],
                 subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else 0,
-                split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue')
+                split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue',short_pages=sorted(set(short_pages)),auto_background=bool(opts.get('_auto_below_video')),all_text_preserved=True)
     (Path(path).parent/'layout_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     (Path(path).parent/'publish_subtitles.srt').write_text(
         '\n\n'.join(f'{i}\n{stamp(a)} --> {stamp(b)}\n{text}'

@@ -69,13 +69,16 @@ class SequencePanel:
         for mode,label in [('landscape','横版设置'),('portrait','竖版设置')]:
             frame=ttk.Frame(self.layouts,padding=6);self.layouts.add(frame,text=label)
             variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items() if key!='style'};self.layout_vars[mode]=variables;self.layout_styles[mode]={}
+            ttk.Checkbutton(frame,text='长字幕自动换行 / 分屏（横版必要时放到下方背景，保留完整画面）',variable=variables['auto_long_subtitles']).pack(anchor='w')
             ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕（独立开关）',variable=variables['remove_chinese']).pack(anchor='w')
             ttk.Checkbutton(frame,text='字幕区横向全宽（默认，上下范围保持不变）',variable=variables['repair_full_width']).pack(anchor='w')
             ttk.Label(frame,text='方式：仅文字与描边（标准，不做整块区域修复）').pack(anchor='w')
             row=ttk.Frame(frame);row.pack(fill='x',pady=3)
             ttk.Label(row,text='字幕行 x,y,宽,高（全宽时忽略x和宽）').pack(side='left');ttk.Entry(row,textvariable=variables['repair_roi'],width=24).pack(side='left',padx=5)
-            ttk.Button(row,text='15秒修复预览',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
-            ttk.Button(row,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
+            actions=ttk.Frame(frame);actions.pack(fill='x',pady=3)
+            ttk.Button(actions,text='鼠标框选字幕行',command=lambda m=mode:self.pick_subtitle_region(m)).pack(side='left',padx=4)
+            ttk.Button(actions,text='15秒修复预览',command=lambda m=mode:self.repair_preview(m)).pack(side='left')
+            ttk.Button(actions,text='确认此预览可用',command=lambda m=mode:self.approve_repair(m)).pack(side='left',padx=5)
             row=ttk.Frame(frame);row.pack(fill='x')
             ttk.Label(row,text='新字幕上下偏移（像素）').pack(side='left');ttk.Entry(row,textvariable=variables['subtitle_offset_y'],width=10).pack(side='left',padx=5)
             for key,label in [('title_y','标题上下位置（百分比，可空）'),('title_font_size','标题字号（像素，可空）'),('subtitle_font_size','新字幕字号（像素，可空）')]:
@@ -113,6 +116,7 @@ class SequencePanel:
         self.opening_text_button.pack(anchor='w',pady=4)
         ttk.Label(self.diamond_details,text='完整视频、合并配音和合并SRT放在上方素材区。可保留原片尾，或用准备好的片尾整体替换。',wraplength=850).pack(anchor='w')
         for key,label in [('combined_intro_end','原视频片头结束秒（没有填0）'),('combined_outro_start','原视频片尾开始秒'),('combined_audio_split','合并配音中的片头结束秒')]:self.number(self.diamond_details,key,label)
+        ttk.Button(self.diamond_details,text='自动定位片头 / 合并配音分界 ▸',command=self.intro_boundary_settings).pack(anchor='w',pady=4)
         self.ending_reference_button=ttk.Button(self.diamond_details,text='固定原片尾：保存参考 / 自动定位 ▸',command=self.ending_reference_settings)
         self.ending_reference_button.pack(anchor='w',pady=4)
         ttk.Checkbutton(self.diamond_details,text='替换原片尾（使用准备好的片尾视频）',variable=self.v['combined_replace_outro'],command=self.toggle_replacement).pack(anchor='w',pady=4)
@@ -164,12 +168,13 @@ class SequencePanel:
             for suffix,label in [('original','查找原文字（可任意填写）'),('text','对应语言译文（填写要显示的文字）')]:
                 row=ttk.Frame(page);row.pack(fill='x',pady=5);ttk.Label(row,text=label,width=25).pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_'+suffix]).pack(side='left',fill='x',expand=True)
             ttk.Label(page,text='可输入释迦牟尼佛等任意原文字定位；讲义标题、经题、释迦牟尼佛有日英预填译名，其他词请填译文。\nOCR负责定位和取样，不是通用自动翻译；保留原字，译文持续显示整个时间段。',wraplength=750).pack(anchor='w',pady=5)
-            for suffix,label in [('start','显示／OCR范围开始秒'),('end','显示／OCR范围结束秒'),('x','译名中心左右（原画面百分比）'),('y','译名首行顶部（原画面百分比）'),('size','译名字号（横版1080高基准）')]:self.number(page,prefix+'_'+suffix,label)
+            for suffix,label in [('preview_offset','本组预览向后跳秒（0为开头）'),('start','显示／OCR范围开始秒'),('end','显示／OCR范围结束秒'),('x','译名中心左右（原画面百分比）'),('y','译名首行顶部（原画面百分比）'),('size','译名字号（横版1080高基准）')]:self.number(page,prefix+'_'+suffix,label)
             row=ttk.Frame(page);row.pack(fill='x',pady=3)
             ttk.Label(row,text='字体').pack(side='left');ttk.Combobox(row,textvariable=self.v[prefix+'_font'],values=('Yuji Boku','Noto Serif CJK JP'),width=23).pack(side='left',padx=4)
             ttk.Label(row,text='颜色 #RRGGBB').pack(side='left');ttk.Entry(row,textvariable=self.v[prefix+'_color'],width=10).pack(side='left',padx=4)
             ttk.Label(row,text='排版').pack(side='left');choice_combo(row,self.v[prefix+'_orientation'],{'横排':'horizontal','竖排':'vertical'},width=10).pack(side='left',padx=4)
             ttk.Checkbutton(page,text='定位时参考原字颜色、可见字高与横竖排；字体请手动选择相近款',variable=self.v[prefix+'_auto_style']).pack(anchor='w')
+            ttk.Checkbutton(page,text='放不下时自动换行 / 分屏（默认，保留全部文字）',variable=self.v[prefix+'_adaptive']).pack(anchor='w')
             ttk.Checkbutton(page,text='按最近定位的原字可见高度显示（取消后使用手动字号）',variable=self.v[prefix+'_match_size']).pack(anchor='w')
             actions=ttk.Frame(page);actions.pack(fill='x',pady=6)
             self.title_detect_buttons[prefix]=ttk.Button(actions,text='本地OCR定位并参考原字样式',command=lambda k=prefix:self.detect_title(k));self.title_detect_buttons[prefix].pack(side='left')
@@ -273,6 +278,9 @@ class SequencePanel:
         ttk.Label(box,text='导入的是已去掉讲话的音乐，不是自动人声分离。\n只替换片头原声，可与片头日语配音混合；正文和片尾不加这条音乐。\n音乐过短会提示，不自动循环、加速或铺满整片。',wraplength=620).pack(anchor='w',pady=8)
         ttk.Button(box,text='清除背景音乐',command=lambda:self.v['background_audio'].set('')).pack(anchor='w')
 
+    def intro_boundary_settings(self):
+        from intro_boundary_ui import show
+        show(self)
     def ending_reference_settings(self):
         from ending_reference_ui import show
         show(self)
@@ -307,6 +315,9 @@ class SequencePanel:
     def pick(self,key):
         p=filedialog.askopenfilename()
         if p:self.v[key].set(p);self.enabled.set(True);self.update()
+    def pick_subtitle_region(self,mode):
+        from roi_picker import show
+        show(self,mode)
     def pick_clean(self,mode):
         p=filedialog.askopenfilename()
         if p:self.layout_vars[mode]['clean_video'].set(p)
@@ -444,7 +455,7 @@ class SequencePanel:
             from sequence_vnext import repair
             source=self.app.v['video'].get();layout={k:v.get() for k,v in self.layout_vars[mode].items()};layout['remove_chinese']=True
             folder=Path(self.app.v['output'].get())/('修复预览_'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
-            start=float(self.v['preview_start'].get())
+            start=float(self.layout_vars[mode]['repair_preview_start'].get())
             def work():
                 path=repair(source,layout,folder,self.app.stop,True,start,15,progress=self.app.progress)
                 from sequence_vnext import layout_repair_key

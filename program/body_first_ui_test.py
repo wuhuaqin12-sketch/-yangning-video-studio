@@ -183,4 +183,48 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertGreater(canvas.yview()[0],0)
         canvas.yview_moveto(1);self.root.update()
         self.assertLessEqual(self.app.main_button.winfo_rooty()+self.app.main_button.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
+
+    def test_intro_candidates_require_both_previews_and_apply_does_not_export(self):
+        from intro_boundary_ui import IntroDialog
+        from next_ui import SEGMENT_MODES
+        self.mode(2);self.panel.diamond_enabled.set(True);self.panel.update()
+        dialog=IntroDialog(self.panel);self.root.update()
+        self.assertIn('disabled',dialog.ok.state())
+        candidate=dict(video=85,audio=93,body_id=13,last_id=12,aligned_srt='aligned.srt',token='verified',warning='review',stamps={})
+        with patch('intro_boundary_ui.verify'):
+            dialog.receive('found',candidate)
+            dialog.receive('preview',dict(kind='video',token='verified',path='video.mp4'))
+            self.assertIn('disabled',dialog.ok.state())
+            dialog.receive('preview',dict(kind='audio',token='verified',path='audio.wav'))
+            self.assertNotIn('disabled',dialog.ok.state())
+            with patch('intro_boundary_ui.messagebox.askyesno',return_value=True),patch.object(self.app,'worker') as worker:
+                dialog.accept();worker.assert_not_called()
+        self.assertEqual(self.panel.v['combined_intro_end'].get(),'85')
+        self.assertEqual(self.panel.v['combined_audio_split'].get(),'93')
+        self.assertEqual(self.panel.v['combined_aligned_srt'].get(),'aligned.srt')
+        dialog.win.destroy()
+    def test_roi_mouse_selection_clears_old_approval_and_sets_preview_time(self):
+        from roi_picker import RegionDialog
+        from ending_reference import stamp
+        from PIL import Image
+        source=self.folder/'source.mp4';source.write_bytes(b'original')
+        image=self.folder/'frame.png';Image.new('RGB',(320,180),'navy').save(image)
+        self.app.v['video'].set(str(source))
+        with patch.object(self.app,'worker'):
+            dialog=RegionDialog(self.panel,'landscape')
+        self.root.update()
+        dialog.receive('frame',dict(path=str(image),width=320,height=180,total=100,at=60,source_stamp=stamp(source)))
+        class Event:pass
+        a=Event();a.x=20;a.y=dialog.dh*.6
+        b=Event();b.x=dialog.dw*.8;b.y=dialog.dh*.8
+        dialog.down(a);dialog.drag(b)
+        self.panel.layout_vars['landscape']['repair_approved'].set('old')
+        dialog.accept()
+        values=self.panel.layout_vars['landscape']
+        self.assertEqual(values['repair_approved'].get(),'')
+        self.assertEqual(values['repair_preview_start'].get(),'60')
+        roi=list(map(int,values['repair_roi'].get().split(',')))
+        self.assertEqual((roi[0],roi[2]),(0,320));self.assertGreater(roi[3],20)
+        self.assertEqual(source.read_bytes(),b'original');dialog.win.destroy()
+
 if __name__=='__main__':unittest.main()

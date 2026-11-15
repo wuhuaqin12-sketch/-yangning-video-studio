@@ -35,3 +35,20 @@ class TitlePreviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'超出'):render(self.source,{'opening_title_start':25,'opening_title_end':30},'en','opening_title',self.root,self.stop)
         cancelled=threading.Event();cancelled.set()
         with self.assertRaises(Cancelled):render(self.source,{},'en','opening_title',self.root,cancelled)
+
+    def test_long_matched_title_wraps_and_later_preview_keeps_original_page_timing(self):
+        text='TRANSLATED TEXT WITH A LARGE MATCHED FONT '*10
+        p=dict(opening_title_start=0,opening_title_end=20,opening_title_text=text,opening_title_y=80,opening_title_match_size=True,opening_title_reference_height=16,opening_title_color='#FFFFFF')
+        first=Path(render(self.source,p,'en','opening_title',self.root,self.stop))
+        report=json.loads((first.parent/'title_preview.titles.json').read_text())['opening_title']
+        self.assertGreater(report['pages'],1);self.assertTrue(report['all_text_preserved'])
+        p['opening_title_preview_offset']=16
+        later=Path(render(self.source,p,'en','opening_title',self.root,self.stop))
+        scope=json.loads((later.parent/'preview_scope.json').read_text())
+        self.assertEqual(scope['start'],15.5)
+        self.assertAlmostEqual(float(probe(later,self.stop)['format']['duration']),4.5,delta=.08)
+        # A later preview must omit already-finished pages rather than restart them.
+        a=(first.parent/'title_preview.ass').read_text(encoding='utf-8-sig')
+        b=(later.parent/'title_preview.ass').read_text(encoding='utf-8-sig')
+        self.assertGreater(a.count('Dialogue: 4'),b.count('Dialogue: 4'))
+        self.assertGreater(b.count('Dialogue: 4'),0)

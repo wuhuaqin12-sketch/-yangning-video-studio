@@ -86,9 +86,9 @@ def detect(source,target,start,end,cancel,progress=lambda _:None):
 def add_ass(path,p,language,video_box,duration,prefix='opening_title'):
     from publish_style import fit_lines,ass_colour
     from PIL import ImageFont
-    if prefix!='opening_title':p={**p,**{'opening_title_'+suffix:p[prefix+'_'+suffix] for suffix in ('text','original','start','end','x','y','size','font','color','orientation','match_size','reference_height','reference_advance')}}
+    if prefix!='opening_title':p={**p,**{'opening_title_'+suffix:p[prefix+'_'+suffix] for suffix in ('text','original','start','end','x','y','size','font','color','orientation','match_size','reference_height','reference_advance','adaptive')}}
     text=localized_title(p['opening_title_text'],language,p['opening_title_original'])
-    if len(text)>200:raise ValueError('片头译名过长，请缩短。')
+    if len(text)>2000:raise ValueError('片头译名过长，请缩短。')
     vx,vy,vw,vh=video_box;x=vx+vw*p['opening_title_x']/100;y=vy+vh*p['opening_title_y']/100
     end=min(duration,p['opening_title_end']);start=p['opening_title_start']
     if start>=end:raise ValueError('片头译名范围超出当前片头/视频时长。')
@@ -103,6 +103,33 @@ def add_ass(path,p,language,video_box,duration,prefix='opening_title'):
     side=p['opening_title_orientation']=='vertical' and not vertical
     available=vx+vw-x-12 if side else min(vw*.88,2*min(x-vx,vx+vw-x))
     room=vy+vh-y-12
+    if p.get('opening_title_adaptive',True):
+        from adaptive_title import plan,times
+        requested_size=size
+        layout=plan(text,size,x,y,video_box,vertical,side,ratio,p['opening_title_reference_advance']*vh/100 if match else 0)
+        size=layout['size'];x=layout['x'];y=layout['y'];margin=box[1]*size/(asc+desc) if match else 0
+        pages=times(layout['pages'],start,end)
+        safe=lambda s:s.replace('\\','／').replace('{','｛').replace('}','｝')
+        data=Path(path).read_text(encoding='utf-8-sig');style_name='OpeningTranslated' if prefix=='opening_title' else 'OpeningTopicTranslated'
+        style=f'Style: {style_name},{font_name},{size},{ass_colour(color)},&H00FFFFFF,{ass_colour(color)},&HFF000000,0,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1\n'
+        data=data.replace('[Events]',style+'[Events]')
+        for a,b,page in pages:
+            if b<=0:continue
+            a=max(0,a)
+            if vertical:
+                for column in page['columns']:
+                    for i,c in enumerate(column['text']):
+                        char_margin=font.getbbox(c)[1]*size/(asc+desc) if match else 0
+                        data+=f'Dialogue: 4,{stamp(a,True)},{stamp(b,True)},{style_name},,0,0,0,,{{\\an8\\pos({column["x"]:.1f},{y+i*layout["step"]-char_margin:.1f})}}{safe(c)}\n'
+            else:
+                rendered=r'\N'.join(safe(line) for line in page['lines'])
+                data+=f'Dialogue: 4,{stamp(a,True)},{stamp(b,True)},{style_name},,0,0,0,,{{\\an{7 if side else 8}\\pos({x:.1f},{y-margin:.1f})}}{rendered}\n'
+        Path(path).write_text(data,encoding='utf-8-sig')
+        import json
+        report_path=Path(path).with_suffix('.titles.json');report=json.loads(report_path.read_text()) if report_path.exists() else {}
+        report[prefix]=dict(pages=len(pages),size=size,requested=requested_size,notes=layout['notes']+(['部分分屏不足1秒，请延长显示范围或调整字号；未加速音频。'] if any(page.get('short_time') for _,_,page in pages) else []),all_text_preserved=True)
+        report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
+        return report[prefix]
     if room<size*1.2:raise ValueError('原中文标题下方没有足够空间，请把译名位置上移或减小字号。')
     if vertical:
         chars=[c for c in text if not c.isspace()];step=vh*p['opening_title_reference_advance']/100 if match and p['opening_title_reference_advance']>0 else (wanted if match else size*ratio)*1.35

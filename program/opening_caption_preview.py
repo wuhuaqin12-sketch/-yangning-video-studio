@@ -13,7 +13,9 @@ def render(source,settings,language,prefix,output,cancel,progress=lambda _:None)
     if stream is None:raise ValueError('所选素材没有视频画面。')
     total=float(info['format']['duration']);start=p[prefix+'_start'];end=min(total,p[prefix+'_end'])
     if not 0<=start<end:raise ValueError('译名显示范围超出当前视频，请检查开始和结束时间。')
-    begin=max(0,start-.5);length=min(15,total-begin,end-begin+.5)
+    offset=p[prefix+'_preview_offset']
+    if offset>=end-start:raise ValueError('预览向后跳秒数超出本组显示时段。')
+    begin=max(0,start+offset-.5);length=min(15,total-begin,end-begin+.5)
     if not math.isfinite(length) or length<=0:raise ValueError('译名预览时长无效。')
     from engine import square_pixel_stream
     stream=square_pixel_stream(stream)
@@ -26,11 +28,14 @@ def render(source,settings,language,prefix,output,cancel,progress=lambda _:None)
     if not str(output).strip():raise ValueError('请选择预览保存文件夹。')
     output=Path(output);output.mkdir(parents=True,exist_ok=True)
     folder=Path(tempfile.mkdtemp(prefix='TitlePreview_',dir=output));ass=folder/'title_preview.ass'
-    p[prefix+'_start']=start-begin;p[prefix+'_end']=min(end-begin,length)
+    p[prefix+'_start']=start-begin;p[prefix+'_end']=end-begin
     from publish import make_ass
     from opening_caption import add_ass
     make_ass(ass,[],{'title':'','video_width':100,'video_height':100,'subtitle_area':'video'},{'width':w,'height':h},length,w,h)
-    add_ass(ass,p,language,(0,0,w,h),length,prefix)
+    layout=add_ass(ass,p,language,(0,0,w,h),max(length,end-begin),prefix)
+    if layout:
+        if layout['pages']>1:progress(f'本组译文自动分为{layout["pages"]}屏，文字完整保留。')
+        for note in layout['notes']:progress('译文排版提醒：'+note)
     fonts=Path(__file__).parent/'fonts'
     if fonts.is_dir():shutil.copytree(fonts,folder/'fonts')
     dest=folder/'title_preview.mp4'

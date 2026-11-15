@@ -92,7 +92,7 @@ def opening(job,p,folder,cancel,progress):
         a,b=boundaries[n:n+2];start=max(ref[1]-(cue[1]-a),previous+.08 if n else 0)
         end=start+b-a
         if end>duration+.02:raise ValueError(f'片头第{ref[0]}句无法完整放入片头，请提供更长片头或调整停顿；未截断配音。')
-        segments.append((a,b,start));placed.append((ref[0],start+cue[1]-a,start+cue[2]-a,ref[3]));previous=end
+        segments.append((a,b,start));placed.append((ref[0],start+cue[1]-a,start+cue[2]-a,cue[3]));previous=end
     from opening_audio import mix
     mixed=mix(audio,background or source,segments,duration,p['intro_music_gain'],folder,cancel,progress)
     dest=folder/'intro_mixed.mp4'
@@ -124,19 +124,38 @@ def split_combined(job,p,folder,cancel,progress):
         return str(out)
     p.update(outro_enabled=True,outro_video=replacement or cut('protected_ending.mp4',tail,duration))
     if head:
-        split=p['combined_audio_split']
-        if not 0<split<seconds(j['audio'],cancel):raise ValueError('完整视频含替换配音片头时，请指定合并配音中的片头结束秒数（可先自动定位预览）。')
+        original_audio=not j.get('audio') or Path(j['audio']).resolve()==Path(source).resolve()
+        split=head if original_audio else p['combined_audio_split']
+        if not original_audio and not 0<split<seconds(j['audio'],cancel):raise ValueError('请先自动定位并试听确认合并配音的片头分界，不能截断配音。')
         if any(a<head<b for _,a,b,_ in refs):raise ValueError('片头边界穿过字幕。')
         first=[c for c in refs if c[2]<=head];body=[c for c in refs if head<=c[1]<tail]
         if not first or not body:raise ValueError('片头或正文字幕为空，请检查边界。')
-        write_srt(folder/'combined_intro.srt',[(i+1,a,b,t) for i,(_,a,b,t) in enumerate(first)])
-        write_srt(folder/'combined_body.srt',[(i+1,a-head,b-head,t) for i,(_,a,b,t) in enumerate(body)])
-        for name,a,b in [('combined_intro.wav',0,split),('combined_body.wav',split,seconds(j['audio'],cancel))]:
-            ff(['-i',j['audio'],'-ss',a,'-t',b-a,'-c:a','pcm_s16le',folder/name],cancel)
-        p.update(intro_enabled=True,intro_video=cut('combined_opening.mp4',0,head),intro_audio=str(folder/'combined_intro.wav'),intro_srt=str(folder/'combined_intro.srt'),intro_target_srt='',intro_mode='music_voice')
-        approved=file_digest(source)+':'+p['intro_separation_model']+':intro_end='+str(head)
-        if p['intro_separation_approved']==approved:p['intro_separation_approved']=file_digest(p['intro_video'])+':'+p['intro_separation_model']
-        j.update(video=cut('combined_body.mp4',head,tail),audio=str(folder/'combined_body.wav'),source_srt=str(folder/'combined_body.srt'),target_srt='',alignment='auto')
+        write_srt(folder/'combined_intro.srt',first)
+        write_srt(folder/'combined_body.srt',[(i,a-head,b-head,t) for i,a,b,t in body])
+        opening_video=cut('combined_opening.mp4',0,head);body_video=cut('combined_body.mp4',head,tail)
+        if original_audio:
+            p.update(intro_enabled=True,intro_video=opening_video,intro_mode='external_music' if p.get('background_audio') else 'original')
+            j.update(video=body_video,audio=body_video,source_srt=str(folder/'combined_body.srt'),target_srt=str(folder/'combined_body.srt'),alignment='timed')
+        else:
+            targets=None
+            if p.get('combined_aligned_srt'):
+                from intro_boundary import alignment_token
+                aligned_file=valid_file(p['combined_aligned_srt'],'自动定位的完整配音SRT')
+                if not p['combined_alignment_token'] or alignment_token(source,j['audio'],j['source_srt'],aligned_file)!=p['combined_alignment_token']:raise ValueError('自动配音分界对应的素材已改变，请重新定位。')
+                targets=parse_srt(aligned_file)
+                if [c[0] for c in targets]!=[c[0] for c in refs] or any(a<split<b for _,a,b,_ in targets):raise ValueError('配音分界与字幕不匹配或穿过讲话，请重新定位并试听。')
+            for name,a,b in [('combined_intro.wav',0,split),('combined_body.wav',split,seconds(j['audio'],cancel))]:
+                ff(['-i',j['audio'],'-ss',a,'-t',b-a,'-c:a','pcm_s16le',folder/name],cancel)
+            p.update(intro_enabled=True,intro_video=opening_video,intro_audio=str(folder/'combined_intro.wav'),intro_srt=str(folder/'combined_intro.srt'),intro_target_srt='',intro_mode='music_voice')
+            j.update(video=body_video,audio=str(folder/'combined_body.wav'),source_srt=str(folder/'combined_body.srt'),target_srt='',alignment='auto')
+            if targets:
+                ids={c[0] for c in first};body_ids={c[0] for c in body}
+                intro_targets=[c for c in targets if c[0] in ids];body_targets=[(i,a-split,b-split,text) for i,a,b,text in targets if i in body_ids]
+                if intro_targets[-1][2]>split+.01 or any(a<0 for _,a,_,_ in body_targets):raise ValueError('配音分界会截断讲话，未继续。')
+                write_srt(folder/'intro_target.srt',intro_targets);write_srt(folder/'body_target.srt',body_targets)
+                p['intro_target_srt']=str(folder/'intro_target.srt');j.update(target_srt=str(folder/'body_target.srt'),alignment='timed')
+            approved=file_digest(source)+':'+p['intro_separation_model']+':intro_end='+str(head)
+            if p['intro_separation_approved']==approved:p['intro_separation_approved']=file_digest(opening_video)+':'+p['intro_separation_model']
     else:
         body=[c for c in refs if c[1]<tail]
         write_srt(folder/'combined_body.srt',body)
@@ -205,7 +224,7 @@ def repair(source,layout,folder,cancel,preview=False,start=0,length=15,progress=
     if duration<=0:raise ValueError('预览起点超出视频时长。')
     return process(source,out,stream,(x,y,w,h),cancel,start if preview else 0,duration,progress)
 
-def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chinese=False):
+def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chinese=False,progress=lambda _:None):
     from publish import make_ass
     from publish_style import normalize_style
     width,height=(1920,1080) if mode=='landscape' else (1080,1920)
@@ -231,13 +250,21 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     # Use the same existing subtitle/title styling. No title auto-single-line change.
     ass=folder/(label+'_'+mode+'.ass')
     visible=cues if burn else []
-    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height)
+    vw,vh,vx,vy=make_ass(ass,visible,opts,stream,duration,width,height,auto_background=label=='body' and layout.get('auto_long_subtitles',True))
+    report=json.loads((folder/'layout_report.json').read_text(encoding='utf8'))
+    atomic_json(folder/(label+'_'+mode+'.layout.json'),report)
+    if report.get('auto_background'):progress('横版长字幕：完整画面已等比例缩入上方，字幕放在下方背景。')
+    if report.get('split_cues'):progress('字幕已完整分屏，页时间按字数分配，不改变配音；需预览核对。')
+    if report.get('short_pages'):progress('字幕排版提醒：编号'+','.join(map(str,report['short_pages']))+'部分页面不足1秒，请调整该句字幕时间或字号。')
     title_scope=label=='opening' or (label=='body' and not p['intro_enabled'])
     opening_title=title_scope and (p['opening_title_enabled'] or p['opening_topic_enabled'])
     if opening_title:
         from opening_caption import add_ass
         for prefix in ('opening_title','opening_topic'):
-            if p[prefix+'_enabled']:add_ass(ass,p,p.get('_language','ja'),(vx,vy,vw,vh),duration,prefix)
+            if p[prefix+'_enabled']:
+                report=add_ass(ass,p,p.get('_language','ja'),(vx,vy,vw,vh),duration,prefix)
+                if report:
+                    for note in report['notes']:progress('译名排版提醒：'+note)
     # make_ass places empty caption tracks over video; keep the normal source fit.
     base=f'color=c=black:s={width}x{height}:r=30:d={duration}[bg]'
     inputs=['-i',source]
@@ -278,10 +305,33 @@ def concat_clips(clips,out,folder,cancel):
     listing.write_text(''.join("file '"+str(Path(p).resolve()).replace("'","'\\''")+"'\n" for p in clips),encoding='utf8')
     ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c:v','copy','-af','aresample=48000:async=1:first_pts=0','-c:a','aac','-b:a','192k','-movflags','+faststart',out],cancel)
 
+def preflight_repair(job,p,cancel):
+    source=valid_file(job['video'],'原视频')
+    from roi_picker import normalized_stream
+    stream=normalized_stream(source,cancel);duration=seconds(source,cancel);estimate=duration
+    if job.get('audio') and Path(job['audio']).is_file():estimate=max(estimate,seconds(job['audio'],cancel))
+    if p.get('intro_enabled'):estimate+=seconds(valid_file(p['intro_video'],'片头视频'),cancel)
+    if p.get('outro_enabled'):estimate+=seconds(valid_file(p['outro_video'],'片尾视频'),cancel)
+    if p.get('combined') and p.get('combined_replace_outro') and p['combined_outro_start']>0:estimate+=seconds(valid_file(p['outro_video'],'替换片尾'),cancel)-(duration-p['combined_outro_start'])
+    if any(p.get(k) for k in ('cover','cover_landscape','cover_portrait')):estimate+=p['cover_seconds']
+    for mode in choose_modes(p,estimate,stream):
+        layout=p['layouts'][mode]
+        if not layout['remove_chinese']:continue
+        if layout.get('clean_video'):
+            clean=valid_file(layout['clean_video'],'无字幕原片')
+            if abs(seconds(clean,cancel)-duration)>.1:raise ValueError('无字幕原片时长与原视频不同，请先正确匹配。')
+            continue
+        try:x,y,w,h=map(int,layout['repair_roi'].split(','))
+        except Exception:raise ValueError(('横版' if mode=='landscape' else '竖版')+'去字幕尚未设置区域。请先点击“鼠标框选字幕行”，再生成15秒修复预览并确认；尚未开始处理音频。')
+        if layout['repair_full_width']:x=0;w=stream['width']
+        if min(x,y)<0 or min(w,h)<2 or x+w>stream['width'] or y+h>stream['height']:raise ValueError('字幕区域超出原视频，请重新鼠标框选。')
+        if layout['repair_approved']!=layout_repair_key(source,layout):raise ValueError('请先生成并确认15秒修复预览；尚未开始处理音频。')
+
 def process(job,cancel,progress=lambda s:None,preview=False):
     p=normalize(job.get('sequence'))
     if p.get('background_audio') and not (p['intro_enabled'] or (p['combined'] and p['combined_intro_end']>0)):
         raise ValueError('外部背景音乐当前用于片头。请启用独立片头，或在完整视频模式中填写片头结束秒。')
+    preflight_repair(job,p,cancel)
     output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
     folder=Path(tempfile.mkdtemp(prefix='YangNing_Next_',dir=output))
     cache_root=output/'.yangning_cache';cache_root.mkdir(exist_ok=True)
@@ -316,7 +366,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             parts.append(cover_clip(valid_file(cover,'封面图'),mode,p,folder,cancel));offset=p['cover_seconds']
         for label,source,subs,style in [('opening',intro,intro_cues,{}),('body',str(mode_body),body_cues,job.get('publish_settings') or {}),('ending',ending,[],{})]:
             if not source:continue
-            part=compose_segment(source,subs,style,mode,p,folder,cancel,job.get('burn',False),label,repair_chinese=label=='body' and not layout.get('clean_video'))
+            part=compose_segment(source,subs,style,mode,p,folder,cancel,job.get('burn',False),label,repair_chinese=label=='body' and not layout.get('clean_video'),progress=progress)
             parts.append(part)
             base=len(cues);cues.extend((base+i+1,a+offset,b+offset,t) for i,(_,a,b,t) in enumerate(subs));offset+=seconds(part,cancel)
         if p['disclaimer_enabled'] and p['disclaimer_mode']=='append':

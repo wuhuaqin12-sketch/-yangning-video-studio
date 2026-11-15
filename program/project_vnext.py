@@ -9,15 +9,15 @@ DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',i
     intro_separation_approved='',intro_separation_model='htdemucs_ft',intro_music_gain=1.0,
     outro_enabled=False,outro_video='',cover='',cover_landscape='',cover_portrait='',
     cover_seconds=3,cover_transition='cut',cover_fit='ask',background='',
-    combined=False,combined_replace_outro=False,combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
+    combined=False,combined_replace_outro=False,combined_intro_last_cue=12,combined_aligned_srt='',combined_alignment_token='',combined_intro_end=0,combined_outro_start=0,combined_audio_split=0,
     preview_start=0,preview_seconds=15,layouts={
-      'landscape':dict(remove_chinese=True,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='84',style={}),
-      'portrait':dict(remove_chinese=False,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
+      'landscape':dict(repair_preview_start=0,auto_long_subtitles=True,remove_chinese=True,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='84',style={}),
+      'portrait':dict(repair_preview_start=0,auto_long_subtitles=True,remove_chinese=False,repair_method='glyph',repair_full_width=True,repair_roi='',repair_approved='',repair_temporal=False,subtitle_offset_y=0,clean_video='',title_y='',title_font_size='',subtitle_font_size='',style={})})
 DEFAULTS.update(opening_title_enabled=False,opening_title_original='金刚经讲义',opening_title_text='',opening_title_start=0,opening_title_end=15,opening_title_x=50,opening_title_y=70,opening_title_size=64,
     disclaimer_enabled=False,disclaimer_image='',disclaimer_seconds=5,disclaimer_mode='append')
 DEFAULTS.update(opening_topic_enabled=False,opening_topic_original='经题',opening_topic_text='',opening_topic_start=75,opening_topic_end=87,opening_topic_x=50,opening_topic_y=70,opening_topic_size=64)
 for prefix in ('opening_title','opening_topic'):
-    DEFAULTS.update({prefix+'_font':'Yuji Boku',prefix+'_color':'#FFFFFF' if prefix=='opening_title' else '#101010',prefix+'_orientation':'horizontal',prefix+'_auto_style':True,prefix+'_match_size':False,prefix+'_reference_height':0,prefix+'_reference_advance':0})
+    DEFAULTS.update({prefix+'_adaptive':True,prefix+'_preview_offset':0,prefix+'_font':'Yuji Boku',prefix+'_color':'#FFFFFF' if prefix=='opening_title' else '#101010',prefix+'_orientation':'horizontal',prefix+'_auto_style':True,prefix+'_match_size':False,prefix+'_reference_height':0,prefix+'_reference_advance':0})
 
 def defaults():return json.loads(json.dumps(DEFAULTS))
 
@@ -31,10 +31,17 @@ def normalize(value):
         if saved and 'repair_full_width' not in saved:result['layouts'][mode]['repair_approved']=''
         from publish_style import boolean
         result['layouts'][mode]['repair_full_width']=boolean(result['layouts'][mode]['repair_full_width'])
+        result['layouts'][mode]['auto_long_subtitles']=boolean(result['layouts'][mode]['auto_long_subtitles'])
+        point=float(result['layouts'][mode]['repair_preview_start'])
+        if not math.isfinite(point) or point<0:raise ValueError('字幕修复预览时间无效。')
+        result['layouts'][mode]['repair_preview_start']=point
         result['layouts'][mode]['repair_method']='glyph'
         result['layouts'][mode]['repair_temporal']=False
     if result['output_mode'] not in ('auto','landscape','portrait','both'):raise ValueError('输出比例选项无效。')
     if result['intro_mode'] not in ('original','music_voice','external_music'):raise ValueError('片头声音选项无效。')
+    last=float(result['combined_intro_last_cue'])
+    if not math.isfinite(last) or last<1 or last!=int(last):raise ValueError('片头最后字幕编号必须为正整数。')
+    result['combined_intro_last_cue']=int(last)
     result['cover_seconds']=int(result['cover_seconds'])
     if result['cover_seconds'] not in (2,3,5):raise ValueError('封面时长请选择2、3或5秒。')
     if result['cover_transition'] not in ('cut','dissolve'):raise ValueError('封面转场无效。')
@@ -46,7 +53,7 @@ def normalize(value):
         if not math.isfinite(number) or number<0:raise ValueError('时间必须是非负秒数：'+key)
         result[key]=number
     if not 1<=result['preview_seconds']<=60:raise ValueError('预览长度须在1–60秒之间。')
-    for key in (*[prefix+'_'+suffix for prefix in ('opening_title','opening_topic') for suffix in ('start','end','x','y','size','reference_height','reference_advance')],'disclaimer_seconds'):
+    for key in (*[prefix+'_'+suffix for prefix in ('opening_title','opening_topic') for suffix in ('start','end','x','y','size','reference_height','reference_advance','preview_offset')],'disclaimer_seconds'):
         result[key]=float(result[key])
         if not math.isfinite(result[key]):raise ValueError('数值无效：'+key)
     for prefix in ('opening_title','opening_topic'):
@@ -59,7 +66,8 @@ def normalize(value):
         if result[prefix+'_orientation'] not in ('horizontal','vertical'):raise ValueError('译名横竖排选项无效。')
         if not 0<=result[prefix+'_reference_height']<=50:raise ValueError('原字参考高度无效，请重新定位。')
         if not 0<=result[prefix+'_reference_advance']<=100:raise ValueError('原字参考间距无效，请重新定位。')
-        for suffix in ('auto_style','match_size'):result[prefix+'_'+suffix]=boolean(result[prefix+'_'+suffix])
+        if result[prefix+'_preview_offset']<0:raise ValueError('译名预览偏移不能为负数。')
+        for suffix in ('auto_style','match_size','adaptive'):result[prefix+'_'+suffix]=boolean(result[prefix+'_'+suffix])
     if not 2<=result['disclaimer_seconds']<=30:raise ValueError('免责声明显示秒数须在2–30之间。')
     if result['disclaimer_mode'] not in ('append','overlay'):raise ValueError('免责声明方式无效。')
     return result
@@ -70,6 +78,7 @@ def media_paths(job):
     for k in ('intro_video','intro_audio','intro_srt','intro_target_srt'):
         if p['intro_enabled'] and p.get(k) and (k=='intro_video' or p['intro_mode']=='music_voice'):result[k]=p[k]
     if (p['outro_enabled'] or (p['combined'] and p['combined_replace_outro'])) and p['outro_video']:result['outro_video']=p['outro_video']
+    if p['combined'] and p['combined_aligned_srt']:result['combined_aligned_srt']=p['combined_aligned_srt']
     for k in ('cover','cover_landscape','cover_portrait','background','background_audio'):
         if p[k]:result[k]=p[k]
     if p['disclaimer_enabled'] and p['disclaimer_image']:result['disclaimer_image']=p['disclaimer_image']
@@ -91,7 +100,7 @@ def load_project(path):
         return str((base/value).resolve())
     for key in ('video','audio','source_srt','target_srt','audio_reference_srt','output'):
         if job.get(key):job[key]=absolute(job[key])
-    for key in ('intro_video','intro_audio','intro_srt','intro_target_srt','outro_video','cover','cover_landscape','cover_portrait','background','background_audio','disclaimer_image'):
+    for key in ('intro_video','intro_audio','intro_srt','intro_target_srt','outro_video','cover','cover_landscape','cover_portrait','background','background_audio','disclaimer_image','combined_aligned_srt'):
         if job['sequence'].get(key):job['sequence'][key]=absolute(job['sequence'][key])
     for layout in job['sequence']['layouts'].values():
         if layout.get('clean_video'):layout['clean_video']=absolute(layout['clean_video'])

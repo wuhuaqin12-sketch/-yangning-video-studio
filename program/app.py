@@ -539,6 +539,9 @@ class App:
                 elif e[0]=='desktop_update':self.desktop_updates.handle(e[1:])
                 elif e[0]=='repair_preview_ready':
                     self.sequence_panel.repair_previews[e[1]]=e[2];open_path(e[3])
+                elif e[0]=='utility_dialog_event':
+                    path=e[1].receive(e[2],e[3])
+                    if path:open_path(path)
                 elif e[0]=='ending_reference_event':
                     path=e[1].receive(e[2],e[3])
                     if path:open_path(path)
