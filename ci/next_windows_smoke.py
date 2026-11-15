@@ -5,6 +5,7 @@ repo=Path(__file__).resolve().parents[1]
 sandbox=Path(os.environ['RUNNER_TEMP'])/'YangNingNextAcceptance';sandbox.mkdir(exist_ok=True)
 os.environ['LOCALAPPDATA']=str(sandbox/'localappdata')
 os.environ['YANGNING_DATA_ROOT']=str(sandbox/'gui_profile')
+sys.path.insert(0,str(repo))
 sys.path.insert(0,str(repo/'program'))
 
 def p_label_present(parent,text):
