@@ -27,7 +27,7 @@ class GlyphTests(unittest.TestCase):
         result,mask=remove_frame(frame,(20,120,280,30))
         self.assertFalse(np.any(mask));self.assertTrue(np.array_equal(result,frame))
     def test_defaults_migration_and_method_invalidate_approval(self):
-        p=defaults();self.assertEqual(p['layouts']['landscape']['subtitle_font_size'],'84')
+        p=defaults();self.assertEqual(p['layouts']['landscape']['subtitle_font_size'],'64')
         self.assertEqual(p['layouts']['portrait']['subtitle_font_size'],'')
         old=normalize({'layouts':{'landscape':{'repair_roi':'20,120,280,30','subtitle_font_size':'55'}}})
         self.assertEqual(old['layouts']['landscape']['repair_method'],'glyph')
