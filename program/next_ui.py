@@ -39,7 +39,6 @@ class SequencePanel:
         ttk.Label(row,text='输出比例').pack(side='left')
         cb=ttk.Combobox(row,textvariable=self.mode,state='readonly',values=('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),width=22);cb.pack(side='left',padx=8);cb.bind('<<ComboboxSelected>>',self.change_mode)
         ttk.Button(row,text='标题与字幕样式',command=app.publish).pack(side='left',padx=8)
-        ttk.Button(row,text='片头文字定位 / 译文',command=self.decoration_settings).pack(side='left',padx=4)
         p=defaults()
         for key,value in p.items():
             if key in ('output_mode','layouts'):continue
@@ -103,7 +102,9 @@ class SequencePanel:
         ttk.Button(self.separation_details,text='20秒分离试听（实验）',command=self.separation_preview).pack(anchor='w',pady=3)
         ttk.Button(self.separation_details,text='确认试听，允许整段分离',command=self.approve_separation).pack(anchor='w')
         self.outro=ttk.LabelFrame(self.segments,text='片尾：完整保留画面和音乐，无需配音或SRT',padding=6);file_row(self.outro,'outro_video','片尾视频')
-        self.combined=ttk.LabelFrame(self.segments,text='完整视频范围',padding=6)
+        self.combined=ttk.LabelFrame(self.segments,text='完整视频设置',padding=6)
+        self.opening_text_button=ttk.Button(self.combined,text='片头文字译文（可选） ▸',command=self.decoration_settings)
+        self.opening_text_button.pack(anchor='w',pady=4)
         ttk.Label(self.combined,text='完整视频、合并配音和合并SRT放在上方素材区。可保留原片尾，或用准备好的片尾整体替换。',wraplength=850).pack(anchor='w')
         for key,label in [('combined_intro_end','原视频片头结束秒（没有填0）'),('combined_outro_start','原视频片尾开始秒'),('combined_audio_split','合并配音中的片头结束秒')]:self.number(self.combined,key,label)
         ttk.Checkbutton(self.combined,text='替换原片尾（使用准备好的片尾视频）',variable=self.v['combined_replace_outro'],command=self.toggle_replacement).pack(anchor='w',pady=4)

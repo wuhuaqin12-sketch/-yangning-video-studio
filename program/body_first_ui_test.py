@@ -24,6 +24,7 @@ class BodyFirstUITests(unittest.TestCase):
     def test_default_body_is_compact_and_classic_flow_stays_available(self):
         p=self.panel
         self.assertFalse(p.enabled.get());self.assertFalse(self.app.sequence_settings)
+        self.assertFalse(p.opening_text_button.winfo_ismapped())
         for part in (p.controls,p.segments,p.intro,p.outro,p.combined,p.music,self.app.activity):self.assertFalse(part.winfo_ismapped())
         self.assertFalse(self.app.v['burn'].get())
         self.assertEqual(self.app.v['speed'].get(),'1.0')
@@ -38,10 +39,13 @@ class BodyFirstUITests(unittest.TestCase):
     def test_modes_show_only_relevant_fields_and_preserve_disabled_assets(self):
         p=self.panel;self.mode(1)
         self.assertTrue(p.segment_switch.winfo_ismapped());self.assertFalse(p.intro.winfo_ismapped());self.assertFalse(p.outro.winfo_ismapped())
+        self.assertFalse(p.opening_text_button.winfo_ismapped())
         p.v['intro_enabled'].set(True);p.v['outro_enabled'].set(True);p.v['intro_mode'].set('external_music');p.update();self.root.update()
         self.assertTrue(p.intro.winfo_ismapped());self.assertTrue(p.outro.winfo_ismapped());self.assertTrue(p.music.winfo_ismapped())
         p.v['background_audio'].set('keep-this-music.wav')
         self.mode(2);self.assertTrue(p.combined.winfo_ismapped());self.assertFalse(p.intro.winfo_ismapped());self.assertFalse(p.outro.winfo_ismapped())
+        self.assertTrue(p.opening_text_button.winfo_ismapped())
+        self.assertEqual(p.opening_text_button.master,p.combined)
         self.assertEqual(self.app.media_labels['video'].cget('text'),'完整视频 MP4');self.assertTrue(p.value()['combined']);self.assertFalse(p.value()['outro_enabled'])
         self.mode(0);self.assertFalse(p.segments.winfo_ismapped());self.assertFalse(p.value()['combined']);self.assertFalse(p.value()['intro_enabled']);self.assertFalse(p.value()['outro_enabled']);self.assertEqual(p.value()['background_audio'],'')
         self.assertEqual(p.v['background_audio'].get(),'keep-this-music.wav');self.assertTrue(p.v['intro_enabled'].get())
