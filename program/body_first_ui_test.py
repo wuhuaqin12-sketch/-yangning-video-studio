@@ -196,7 +196,7 @@ class BodyFirstUITests(unittest.TestCase):
             button.invoke();render.assert_called_once()
             settings,p,ratio=render.call_args.args[:3]
             self.assertEqual(settings['background'],str(bg));self.assertEqual(p['background'],str(bg));self.assertEqual(settings['video'],str(source));self.assertEqual(ratio,'landscape')
-            self.assertEqual(settings['landscape_subtitle_offset_y'],'60');self.assertEqual(settings['portrait_subtitle_offset_y'],'20')
+            self.assertEqual(settings['landscape_subtitle_offset_y'],60);self.assertEqual(settings['portrait_subtitle_offset_y'],20)
             self.app.poll()
         self.assertEqual(self.panel.v['background'].get(),str(bg));dialog.destroy()
 
