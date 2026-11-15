@@ -167,6 +167,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     layout=p['layouts'][mode]
     chosen={**(style or {}),**layout.get('style',{})} if label=='body' else dict(style or {})
     for k in ('title_y','title_font_size','subtitle_font_size'):
+        if k=='subtitle_font_size' and k in (style or {}):continue
         if layout.get(k) not in ('',None) and label=='body':chosen[k]=float(layout[k])
     opts=normalize_style(chosen)
     opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=p['layouts'][mode]['subtitle_offset_y'])

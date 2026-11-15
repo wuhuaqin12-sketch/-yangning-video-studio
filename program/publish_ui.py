@@ -98,7 +98,7 @@ def show(app, open_path):
     ttk.Label(page,text='日语标题默认 Yuji Boku（佑字 朴）毛笔体。可选本机字体，也可直接输入字体名。',wraplength=780).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
-    for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认70）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
+    for row,(key,label) in enumerate([('subtitle_font_size','字号上限（横版会适度适配）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
     ttk.Label(page,text='字幕上下微调（像素）').grid(row=4,column=0,sticky='w',pady=6)
     position=ttk.Frame(page);position.grid(row=4,column=1,columnspan=2,sticky='w')
     ttk.Spinbox(position,from_=-400,to=400,increment=10,textvariable=variables['subtitle_offset_y'],width=8).pack(side='left',padx=(0,8))
