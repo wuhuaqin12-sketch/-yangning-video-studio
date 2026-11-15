@@ -322,7 +322,9 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             dest=folder/('试看_'+('横版_16x9' if mode=='landscape' else '竖版_9x16')+'.mp4')
             ff(['-i',full,'-ss',start,'-t',length,'-c:v','libx264','-preset','fast','-crf','18','-c:a','aac',dest],cancel)
         else:
-            dest=unique_output(output,job.get('name') or Path(job['video']).stem,job.get('language','ja'),mode)
+            name=job.get('name') or Path(job['video']).stem
+            if '完整成片' not in name:name+='_完整成片'
+            dest=unique_output(output,name,job.get('language','ja'),mode)
             try:os.replace(full,dest)
             except Exception:dest.unlink(missing_ok=True);raise
             shutil.copyfile(folder/('complete_'+mode+'.srt'),dest.with_suffix('.srt'))

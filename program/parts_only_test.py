@@ -32,7 +32,7 @@ class PartsOnlyTests(unittest.TestCase):
             guide=(folder/'成片位置.txt').read_text(encoding='utf-8-sig')
             for r in report['results']:self.assertIn(r['path'],guide)
             for result,ratio in zip(report['results'],('横版_16x9','竖版_9x16')):
-                path=Path(result['path']);self.assertIn(ratio,path.stem)
+                path=Path(result['path']);self.assertIn(ratio,path.stem);self.assertIn('完整成片',path.stem)
                 self.assertAlmostEqual(seq.seconds(path,cancel),2.8,delta=.16)
                 self.assertGreater(seq.seconds(path,cancel),2)
                 cues=parse_srt(path.with_suffix('.srt'))
