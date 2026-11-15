@@ -105,7 +105,7 @@ class SequencePanel:
         ttk.Button(self.separation_details,text='20秒分离试听（实验）',command=self.separation_preview).pack(anchor='w',pady=3)
         ttk.Button(self.separation_details,text='确认试听，允许整段分离',command=self.approve_separation).pack(anchor='w')
         self.outro=ttk.LabelFrame(self.segments,text='片尾：完整保留画面和音乐，无需配音或SRT',padding=6);file_row(self.outro,'outro_video','片尾视频')
-        self.combined=ttk.LabelFrame(self.segments,text='完整视频设置',padding=6)
+        self.combined=ttk.Frame(self.segments,padding=(4,2))
         ttk.Checkbutton(self.combined,text='金刚经视频专用设置（可选）',variable=self.diamond_enabled,command=self.update).pack(anchor='w')
         self.diamond_details=ttk.Frame(self.combined,padding=(4,6))
         self.opening_text_button=ttk.Button(self.diamond_details,text='片头文字译文（可选） ▸',command=self.decoration_settings)
