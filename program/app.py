@@ -47,7 +47,7 @@ class App:
         canvas.configure(yscrollcommand=scroll.set);scroll.pack(side='right',fill='y');canvas.pack(side='left',fill='both',expand=True)
         pane=ttk.Frame(canvas,padding=10);pane_id=canvas.create_window((0,0),window=pane,anchor='nw')
         pane.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.bind('<Configure>',lambda e:canvas.itemconfigure(pane_id,width=e.width,height=max(pane.winfo_reqheight(),e.height)))
+        canvas.bind('<Configure>',lambda e:canvas.itemconfigure(pane_id,width=e.width))
         heading=ttk.Frame(pane);heading.pack(fill='x',pady=(0,4))
         ttk.Label(heading,text='杨宁视频工作室',font=('Microsoft YaHei UI',20,'bold')).pack(side='left')
         form=ttk.LabelFrame(pane,text='① 导入素材',padding=8);form.pack(fill='x',pady=6)

@@ -29,6 +29,9 @@ def main():
     assert not panel.controls.winfo_ismapped() and not panel.segments.winfo_ismapped() and not app.activity.winfo_ismapped()
     assert app.main_button.winfo_rooty()+app.main_button.winfo_height()<root.winfo_rooty()+root.winfo_height()
     ImageGrab.grab().save(sandbox/'body_default.png')
+    geometry=root.geometry();root.geometry('880x640');root.update()
+    assert app.main_button.winfo_rooty()+app.main_button.winfo_height()<root.winfo_rooty()+root.winfo_height()
+    ImageGrab.grab().save(sandbox/'body_compact_880x640.png');root.geometry(geometry);root.update()
     panel.segment_mode.set(SEGMENT_MODES[1]);panel.change_segments();panel.v['intro_enabled'].set(True);panel.v['outro_enabled'].set(True);panel.v['intro_mode'].set('external_music');panel.update();root.update()
     assert panel.intro.winfo_ismapped() and panel.outro.winfo_ismapped() and panel.music.winfo_ismapped()
     ImageGrab.grab().save(sandbox/'segments_optional.png')
@@ -41,6 +44,7 @@ def main():
     ImageGrab.grab().save(sandbox/'diamond_options.png')
     panel.appearance_open.set(True);panel.mode.set('横版＋竖版');panel.change_mode();panel.update();root.update()
     assert app.sequence_settings['output_mode']=='both'
+    assert app.content_canvas.bbox('all')[3]>app.content_canvas.winfo_height()
     assert panel.cover_l.winfo_ismapped() and panel.cover_p.winfo_ismapped() and not panel.cover_single.winfo_ismapped()
     assert panel.layout_vars['landscape']['repair_method'].get()=='glyph'
     assert panel.layout_vars['landscape']['subtitle_font_size'].get()=='84'
