@@ -26,6 +26,7 @@ class SequencePanel:
         self.app=app;self.v={};self.layout_vars={};self.saved_timer=None;self.restoring=True
         self.repair_previews={};self.last_preview='';self.approved_preview='';self.separation_preview_token='';self.layout_styles={};self.pause_override=None
         self.enabled=tk.BooleanVar(value=False)
+        self.title_detect_buttons={};self.title_preview_buttons={}
         self.appearance_open=tk.BooleanVar(value=False);self.details_open=tk.BooleanVar(value=False)
         self.segment_mode=tk.StringVar(value=SEGMENT_MODES[0])
         self.diamond_enabled=tk.BooleanVar(value=False)
@@ -130,7 +131,7 @@ class SequencePanel:
         self.segment_anchor=ttk.Frame(self.segments);self.segment_anchor.pack(fill='x')
         self.preview_controls=ttk.Frame(self.box)
         preview_buttons=ttk.Frame(self.preview_controls);preview_buttons.pack(fill='x')
-        ttk.Button(preview_buttons,text='生成范围预览',command=self.preview).pack(side='left')
+        self.range_preview_button=ttk.Button(preview_buttons,text='生成范围预览',command=self.preview);self.range_preview_button.pack(side='left')
         ttk.Button(preview_buttons,text='确认预览',command=self.approve_preview).pack(side='left',padx=6)
         ttk.Button(preview_buttons,text='预览起点 / 时长',command=self.preview_range).pack(side='left')
         ttk.Label(self.preview_controls,text='先生成并观看预览，再点“确认预览”后导出；修改画面设置需重新预览。',wraplength=850).pack(anchor='w',pady=3)
@@ -170,11 +171,39 @@ class SequencePanel:
             ttk.Label(row,text='排版').pack(side='left');choice_combo(row,self.v[prefix+'_orientation'],{'横排':'horizontal','竖排':'vertical'},width=10).pack(side='left',padx=4)
             ttk.Checkbutton(page,text='定位时参考原字颜色、可见字高与横竖排；字体请手动选择相近款',variable=self.v[prefix+'_auto_style']).pack(anchor='w')
             ttk.Checkbutton(page,text='按最近定位的原字可见高度显示（取消后使用手动字号）',variable=self.v[prefix+'_match_size']).pack(anchor='w')
-            ttk.Button(page,text='本地OCR定位并参考原字样式（需预览）',command=lambda k=prefix:self.detect_title(k)).pack(anchor='w',pady=6)
+            actions=ttk.Frame(page);actions.pack(fill='x',pady=6)
+            self.title_detect_buttons[prefix]=ttk.Button(actions,text='本地OCR定位并参考原字样式',command=lambda k=prefix:self.detect_title(k));self.title_detect_buttons[prefix].pack(side='left')
+            self.title_preview_buttons[prefix]=ttk.Button(actions,text='仅预览此组译文（原声，最多15秒）',command=lambda k=prefix:self.preview_title(k));self.title_preview_buttons[prefix].pack(side='left',padx=8)
+            ttk.Label(page,text='此处只检查这一组译文及位置，使用原视频原声；无需配音、SRT或片尾位置。整片配音、字幕及片尾效果请用主页面范围预览。',wraplength=750).pack(anchor='w')
             ttk.Label(page,text='竖排中文：日语译名放在旁边；横排中文：译名放在下方。\n字号/颜色取样是估计，不保证识别同款字体；移动、渐变与复杂背景须预览、手动微调。',wraplength=750).pack(anchor='w')
             from ui_scroll import install_wheel
             install_wheel(canvas)
         ttk.Button(win,text='完成',command=win.destroy).pack(anchor='e',padx=16,pady=8)
+        self.set_processing_busy(self.app.busy)
+    def set_processing_busy(self,busy):
+        for button in (self.range_preview_button,*self.title_detect_buttons.values(),*self.title_preview_buttons.values()):
+            try:
+                if button.winfo_exists():button.state(['disabled'] if busy else ['!disabled'])
+            except tk.TclError:pass
+    def preview_title(self,prefix='opening_title'):
+        if self.app.busy:
+            messagebox.showinfo('正在处理','当前任务尚未结束，请等待或先停止当前任务。',parent=self.app.root);return
+        try:
+            if not self.v[prefix+'_enabled'].get():raise ValueError('请先勾选启用这一组译名。')
+            if self.app.language_name.get() in ('按文件名判断','自动识别'):raise ValueError('请先在译名页面选择输出语言，例如日语。')
+            source=self.v['intro_video'].get() if self.segment_mode.get()==SEGMENT_MODES[1] and self.v['intro_enabled'].get() else self.app.v['video'].get()
+            settings={k:v.get() for k,v in self.v.items() if k.startswith(prefix+'_')}
+            language=self.app.v['language'].get();output=self.app.v['output'].get()
+            self.app.set_activity(True)
+            def work():
+                from opening_caption_preview import render
+                from media import Cancelled
+                try:path=render(source,settings,language,prefix,output,self.app.stop,self.app.progress)
+                except Cancelled:self.app.events.put(('title_preview_cancelled',));return
+                except Exception as e:self.app.events.put(('title_preview_failed',str(e)));return
+                self.app.events.put(('title_preview_ready',path))
+            self.app.worker(work)
+        except Exception as e:messagebox.showerror('译文预览',str(e),parent=self.app.root)
     def detect_title(self,prefix='opening_title'):
         if self.app.busy:return
         try:
@@ -391,11 +420,15 @@ class SequencePanel:
             if self.has_startup_autosave and self.autosave.exists() and messagebox.askyesno('恢复项目','发现上次自动保存的项目，是否恢复素材路径和设置？'):self.load(self.autosave)
         finally:self.restoring=False
     def preview(self):
-        if self.app.busy:return
+        if self.app.busy:
+            messagebox.showinfo('正在处理','当前任务尚未结束，请查看运行记录，等待或先停止。',parent=self.app.root);return
         try:
-            self.enabled.set(True);self.changed();self.app.detect_language();j=self.app.settings();j['_sequence_preview']=True
+            self.enabled.set(True);self.changed();p=self.value()
+            if p['combined'] and p['combined_outro_start']<=0:raise ValueError('整片合成预览需要先指定或自动定位原片尾开始位置。仅检查文字时，请在文字译名页点击“仅预览此组译文”，无需设置片尾。')
+            self.app.detect_language();j=self.app.settings();j['_sequence_preview']=True
+            self.app.set_activity(True)
             j.update(id=uuid.uuid4().hex,status='待处理');self.app.jobs.append(j);self.app.refresh();self.app.run_jobs([j],export=True)
-        except Exception as e:messagebox.showerror('项目预览',str(e))
+        except Exception as e:messagebox.showerror('项目预览',str(e),parent=self.app.root)
     def approve_preview(self):
         try:
             key=preview_key(self.app.settings())

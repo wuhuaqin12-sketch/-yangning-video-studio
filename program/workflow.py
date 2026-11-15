@@ -36,7 +36,7 @@ def execute(job,cancel,emit,export=True):
         if cancel.is_set():raise Cancelled()
         if job.get('sequence'):
             from sequence_vnext import process
-            state('正在导出')
+            state('正在生成整片合成预览' if (not export or job.get('_sequence_preview',False)) else '正在导出')
             folder=process(job,cancel,progress,preview=not export or job.get('_sequence_preview',False))
             if not export or job.get('_sequence_preview',False):
                 from project_vnext import preview_key

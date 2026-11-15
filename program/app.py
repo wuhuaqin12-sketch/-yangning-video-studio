@@ -427,7 +427,7 @@ class App:
         self.worker(go)
     def worker(self,fn):
         if self.busy:return
-        self.busy=True;self.started=time.monotonic();self.stop.clear();self.bar.start(15);self.main_button.state(['disabled'])
+        self.busy=True;self.started=time.monotonic();self.stop.clear();self.bar.start(15);self.main_button.state(['disabled']);self.sequence_panel.set_processing_busy(True)
         self.status.set('已启动，正在检查素材…')
         def work():
             try:fn()
@@ -534,7 +534,7 @@ class App:
             while True:
                 e=self.events.get_nowait()
                 if e[0]=='idle':
-                    self.busy=False;self.bar.stop();self.main_button.state(['!disabled'])
+                    self.busy=False;self.bar.stop();self.main_button.state(['!disabled']);self.sequence_panel.set_processing_busy(False)
                     if not self.jobs or self.status.get().startswith('已启动'):self.status.set('操作完成。')
                 elif e[0]=='desktop_update':self.desktop_updates.handle(e[1:])
                 elif e[0]=='repair_preview_ready':
@@ -545,6 +545,13 @@ class App:
                 elif e[0]=='opening_title_detected':self.sequence_panel.title_detected(e[2],e[1])
                 elif e[0]=='repair_roi_expanded':
                     self.sequence_panel.layout_vars[e[1]]['repair_roi'].set(e[2]);self.log_line('字幕行已横向扩满；上下范围不变，请重新生成15秒预览。')
+                elif e[0]=='title_preview_failed':
+                    self.set_activity(True);self.status.set('译文预览失败：'+e[1]);self.log_line(self.status.get())
+                    messagebox.showerror('译文预览失败',e[1],parent=(self.root.focus_get() or self.root).winfo_toplevel())
+                elif e[0]=='title_preview_cancelled':
+                    self.status.set('译文预览已停止，原始素材未修改。');self.log_line(self.status.get())
+                elif e[0]=='title_preview_ready':
+                    self.status.set('译文原声预览已完成；整片合成仍需单独预览确认。');self.log_line(self.status.get());open_path(e[1])
                 elif e[0]=='sequence_preview_ready':
                     self.sequence_panel.last_preview=e[1];self.sequence_panel.update();open_path(e[2])
                 elif e[0]=='separation_preview_ready':
@@ -568,7 +575,9 @@ class App:
                 elif e[0]=='sound_ready':
                     self.root.after(200,self.clean_review if e[1] else self.full_sound_review)
                 elif e[0]=='state':
-                    if e[2]=='失败':self.set_activity(True)
+                    if e[2]=='失败':
+                        self.set_activity(True)
+                        if any(j['id']==e[1] and j.get('_sequence_preview') for j in self.jobs):messagebox.showerror('范围预览失败',e[3].get('error','请查看运行记录。'),parent=(self.root.focus_get() or self.root).winfo_toplevel())
                     for j in self.jobs:
                         if j['id']==e[1]:
                             j['status']=e[2];j.update(e[3]);self.status.set(e[2]+('：'+j['error'] if j.get('error') else ''))

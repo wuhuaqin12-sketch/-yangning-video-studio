@@ -69,6 +69,28 @@ class BodyFirstUITests(unittest.TestCase):
         self.mode(0);self.assertFalse(p.value()['combined_replace_outro'])
         self.mode(2);self.assertTrue(p.value()['combined_replace_outro'])
 
+    def test_title_preview_does_not_require_outro_audio_or_srt_or_approve_full_export(self):
+        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.v['opening_title_enabled'].set(True)
+        self.app.language_name.set('日语');self.app.language_changed();self.app.v['video'].set('fixture_only.mp4')
+        self.assertEqual(p.v['combined_outro_start'].get(),'0');self.assertEqual(self.app.v['source_srt'].get(),'')
+        p.approved_preview='unchanged';p.decoration_settings();self.root.update()
+        with patch.object(self.app,'settings',side_effect=AssertionError('Must not request full export inputs')),patch.object(self.app,'worker') as worker:
+            p.preview_title('opening_title');self.assertTrue(worker.called)
+        self.assertEqual(p.approved_preview,'unchanged')
+        p.set_processing_busy(True)
+        self.assertIn('disabled',p.range_preview_button.state())
+        self.assertTrue(all('disabled' in button.state() for button in p.title_preview_buttons.values()))
+        p.set_processing_busy(False);self.assertNotIn('disabled',p.range_preview_button.state())
+    def test_full_preview_explains_missing_boundary_and_busy_without_enqueuing(self):
+        p=self.panel;self.mode(2);p.diamond_enabled.set(True);p.update()
+        before=len(self.app.jobs)
+        with patch('next_ui.messagebox.showerror') as error,patch.object(self.app,'settings') as settings:
+            p.preview();self.assertIn('仅预览此组译文',error.call_args.args[1]);settings.assert_not_called()
+        self.assertEqual(len(self.app.jobs),before)
+        self.app.busy=True
+        with patch('next_ui.messagebox.showinfo') as notice:p.preview();notice.assert_called_once()
+        self.app.busy=False;self.assertEqual(len(self.app.jobs),before)
+
     def test_fixed_ending_requires_preview_and_confirmation_before_filling_boundary(self):
         from ending_reference import stamp,ALGORITHM
         from ending_presets import digest
