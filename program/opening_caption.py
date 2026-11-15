@@ -19,7 +19,11 @@ def normalized(text):
 
 @functools.lru_cache(maxsize=1)
 def engine():
-    try:from rapidocr import RapidOCR
+    # OCR is local; explicitly opt out before creating any ONNX sessions.
+    try:
+        import onnxruntime
+        onnxruntime.disable_telemetry_events()
+        from rapidocr import RapidOCR
     except ImportError as e:raise RuntimeError('自动定位缺少本地OCR，请运行测试安装器补齐依赖；仍可手动填写位置和时间。') from e
     return RapidOCR(params={'EngineConfig.onnxruntime.intra_op_num_threads':1,'EngineConfig.onnxruntime.inter_op_num_threads':1,'EngineConfig.onnxruntime.use_cuda':False})
 

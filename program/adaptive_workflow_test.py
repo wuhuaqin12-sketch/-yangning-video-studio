@@ -38,6 +38,15 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual(''.join(c[3].replace('\n','') for c in cues),text)
             self.assertTrue(all(len(c[3].splitlines())<=5 for c in cues))
             self.assertEqual((cues[0][1],cues[-1][2]),(1,21))
+    def test_local_ocr_disables_runtime_telemetry_before_session_creation(self):
+        import opening_caption,types
+        from unittest.mock import Mock
+        runtime=Mock();factory=Mock(side_effect=lambda **kw: (runtime.disable_telemetry_events.assert_called_once() or 'local-ocr'))
+        opening_caption.engine.cache_clear()
+        try:
+            with patch.dict('sys.modules',{'onnxruntime':runtime,'rapidocr':types.SimpleNamespace(RapidOCR=factory)}):
+                self.assertEqual(opening_caption.engine(),'local-ocr')
+        finally:opening_caption.engine.cache_clear()
     def test_mouse_coordinates_full_width_and_reverse_drag(self):
         from roi_picker import rectangle
         self.assertEqual(rectangle(((300,150),(100,120)),(480,270),(1920,1080),True),(0,480,1920,120))
