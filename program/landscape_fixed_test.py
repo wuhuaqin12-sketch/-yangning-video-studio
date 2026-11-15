@@ -39,6 +39,6 @@ class LandscapeFixedTests(unittest.TestCase):
             q=json.loads((root/'body_landscape.layout.json').read_text());self.assertEqual(q['video_box'],[0,0,1920,1080])
             image=root/'frame.png';seq.ff(['-ss',.3,'-i',dest,'-frames:v',1,image],cancel)
             with Image.open(image) as im:
-                for xy in ((240,140),(1680,140),(240,940),(1680,940),(960,300)):
+                for xy in ((10,10),(1908,10),(10,1068),(1908,1068),(960,300)):
                     r,g,b=im.convert('RGB').getpixel(xy);self.assertGreater(r,210);self.assertLess(g,30);self.assertLess(b,30)
             self.assertEqual(before,file_digest(source))

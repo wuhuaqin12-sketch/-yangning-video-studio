@@ -188,6 +188,9 @@ class BodyFirstUITests(unittest.TestCase):
             for child in w.winfo_children():yield child;yield from widgets(child)
         tabs=next(w for w in widgets(dialog) if isinstance(w,ttk.Notebook))
         self.assertEqual([tabs.tab(t,'text') for t in tabs.tabs()],['标题','字幕','重点词颜色'])
+        for name,value in [('横版字号（像素）','120'),('竖版字号（像素）','70')]:
+            label=next(w for w in widgets(dialog) if isinstance(w,ttk.Label) and w.cget('text')==name)
+            field=label.master.grid_slaves(row=label.grid_info()['row'],column=1)[0];field.delete(0,'end');field.insert(0,value)
         spins=[w for w in widgets(dialog) if isinstance(w,ttk.Spinbox)]
         self.assertEqual(len(spins),2)
         for spin,value in zip(spins,('60','20')):spin.delete(0,'end');spin.insert(0,value)
@@ -197,6 +200,7 @@ class BodyFirstUITests(unittest.TestCase):
             settings,p,ratio=render.call_args.args[:3]
             self.assertEqual(settings['background'],str(bg));self.assertEqual(p['background'],str(bg));self.assertEqual(settings['video'],str(source));self.assertEqual(ratio,'landscape')
             self.assertEqual(settings['landscape_subtitle_offset_y'],60);self.assertEqual(settings['portrait_subtitle_offset_y'],20)
+            self.assertEqual(settings['landscape_subtitle_font_size'],120);self.assertEqual(settings['portrait_subtitle_font_size'],70)
             self.app.poll()
         self.assertEqual(self.panel.v['background'].get(),str(bg));dialog.destroy()
 

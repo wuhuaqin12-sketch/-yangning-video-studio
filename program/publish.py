@@ -65,23 +65,21 @@ def fixed_landscape_layout(opts,stream,w,h,cues,caption_row=None):
     # Subtitle length must never resize or move the picture.
     scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
-    vx=(w-vw)//2;vy=(h-vh)//2;requested=min(64,round(opts['subtitle_font_size'] or 64))
+    vx=(w-vw)//2;vy=(h-vh)//2;requested=round(opts['subtitle_font_size'] or 80)
     margin=max(12,vh*.025);bottom=vy+vh-margin
     top=vy+vh*.84
     if caption_row:
         y,_height=caption_row
         top=vy+vh*y/stream['height']
-    min_top=vy+vh*.55;max_top=bottom-requested*1.4-16
+    width=vw*.90;padding=2*opts['subtitle_outline']+16
+    min_top=vy+vh*.55;max_top=bottom-requested*1.25-padding
+    if max_top<min_top:
+        raise ValueError('横版字号过大，安全区域连一行也放不下；请减小横版字号或描边。不会自动缩小已设置的字号。')
     base_top=max(min_top,min(top,max_top))
+    opts['_landscape_anchor_adjustment']=base_top-top
     top=max(min_top,min(base_top+opts.get('subtitle_offset_y',0),max_top))
     opts['_landscape_offset_applied']=top-base_top
-    width=vw*.90;padding=2*opts['subtitle_outline']+16
-    size=requested
-    while size>44:
-        rows=max((len(subtitle_lines(text,opts,size,width)[1]) for _,_,_,text in cues),default=1)
-        if rows<=5 and rows*size*1.25+padding<=bottom-top:break
-        size=max(44,size-2)
-    return (vw,vh,vx,vy,width,bottom-top,vx+vw/2,(top+bottom)/2),size,requested
+    return (vw,vh,vx,vy,width,bottom-top,vx+vw/2,(top+bottom)/2),requested,requested
 
 
 def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False,landscape_overlay=False,caption_row=None,title_in_top_background=False):
@@ -175,6 +173,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     report=dict(subtitle_requested_px=requested_size,landscape_fixed_video=overlay,caption_anchor='original_subtitle_region' if overlay and caption_row else 'lower_video' if overlay else 'default',subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
                 title_requested_px=title_size,title_actual_px=actual_title,title_center=title_center,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
+                subtitle_anchor_adjustment_px=round(opts.get('_landscape_anchor_adjustment',0),3),
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],
                 subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else round(opts.get('_landscape_offset_applied',0),3) if overlay else 0,
                 split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue',short_pages=sorted(set(short_pages)),auto_background=bool(opts.get('_auto_below_video')),all_text_preserved=True)

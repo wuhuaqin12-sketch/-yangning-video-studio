@@ -95,3 +95,36 @@ class BackgroundLayoutTests(unittest.TestCase):
             out2=root/'portrait';out2.mkdir();compose_segment(str(source),[(1,0,.4,'字幕')],settings,'portrait',p,out2,stop,True,'body')
             vertical=json.loads((out2/'body_portrait.layout.json').read_text());self.assertEqual(vertical['subtitle_offset_requested_px'],20)
             self.assertGreater(vertical['subtitle_box'][1],sum(vertical['video_box'][1::2]))
+    def test_manual_landscape_sizes_are_not_capped_or_shrunk_and_text_survives(self):
+        from media import parse_srt
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);text='長い字幕を省略せず表示します。'*20
+            for size in (50,80,100,200):
+                make_ass(root/'a.ass',[(1,1,31,text)],dict(title='',video_height=100,subtitle_font_size=size),dict(width=1920,height=1080),32,1920,1080,landscape_overlay=True,caption_row=(880,60))
+                q=json.loads((root/'layout_report.json').read_text());self.assertEqual(q['subtitle_requested_px'],size);self.assertEqual(q['subtitle_actual_px'],[size]);self.assertEqual(q['video_box'],[0,0,1920,1080])
+                self.assertFalse(q['shrunk_cues']);self.assertGreaterEqual(q['subtitle_box'][1],1080*.55)
+                cues=parse_srt(root/'publish_subtitles.srt');self.assertEqual(''.join(c[3].replace('\n','') for c in cues),text);self.assertEqual((cues[0][1],cues[-1][2]),(1,31))
+            with self.assertRaisesRegex(ValueError,'不会自动缩小'):
+                make_ass(root/'too_big.ass',[(1,0,5,'字幕')],dict(title='',video_height=100,subtitle_font_size=480),dict(width=1920,height=1080),5,1920,1080,landscape_overlay=True)
+    def test_real_rendered_glyph_height_increases_with_landscape_setting(self):
+        from sequence_vnext import compose_segment
+        import numpy as np
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);stop=threading.Event();source=root/'source.mp4'
+            ff(['-f','lavfi','-i','color=red:s=320x180:r=30:d=0.4','-c:v','libx264','-pix_fmt','yuv420p',source],stop)
+            heights=[]
+            for size in (50,80,100,200):
+                out=root/str(size);out.mkdir()
+                v=compose_segment(str(source),[(1,0,.4,'字幕')],dict(title='',subtitle_font_size=64,landscape_subtitle_font_size=size,portrait_subtitle_font_size=70),'landscape',defaults(),out,stop,True,'body')
+                q=json.loads((out/'body_landscape.layout.json').read_text());self.assertEqual(q['subtitle_actual_px'],[size]);self.assertEqual(q['subtitle_requested_px'],size)
+                image=out/'frame.png';ff(['-i',v,'-frames:v',1,image],stop)
+                a=np.array(Image.open(image).convert('RGB'));ys,xs=np.where(np.all(a>200,axis=2));self.assertGreater(len(ys),20);heights.append(int(ys.max()-ys.min()+1))
+            self.assertTrue(all(a<b for a,b in zip(heights,heights[1:])));self.assertGreater(heights[-1],heights[2]*1.7)
+    def test_ratio_font_sizes_save_independently_and_migrate_old_shared_value(self):
+        from publish_style import normalize_style,save_preset,load_preset
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'style.json';save_preset(path,dict(landscape_subtitle_font_size=120,portrait_subtitle_font_size=70));q=load_preset(path)
+            self.assertEqual((q['landscape_subtitle_font_size'],q['portrait_subtitle_font_size']),(120,70))
+            q=normalize_style(dict(subtitle_font_size=100));self.assertEqual((q['landscape_subtitle_font_size'],q['portrait_subtitle_font_size']),(100,100))
+            for val in ('bad',float('nan'),500):
+                with self.assertRaises(ValueError):normalize_style(dict(landscape_subtitle_font_size=val))

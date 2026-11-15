@@ -173,8 +173,11 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     offset=chosen.get(mode+'_subtitle_offset_y',chosen.get('subtitle_offset_y',layout['subtitle_offset_y']))
     opts.update(subtitle_area='video' if mode=='landscape' else 'below_video',subtitle_offset_y=float(offset))
     if mode=='landscape':
-        opts.update(title='',video_width=100,video_height=100,subtitle_font_size=min(64,opts['subtitle_font_size'] or 64))
+        opts.update(title='',video_width=100,video_height=100,subtitle_font_size=80)
     else:opts.update(video_width=chosen.get('video_width',100),video_height=chosen.get('video_height',76))
+    font_key=mode+'_subtitle_font_size'
+    explicit_font=chosen.get(font_key,(style or {}).get('subtitle_font_size'))
+    if explicit_font not in ('',None):opts['subtitle_font_size']=float(explicit_font)
     if label=='ending':opts.update(title='',video_width=100,video_height=100,subtitle_area='video')
     # Use the same existing subtitle/title styling. No title auto-single-line change.
     ass=folder/(label+'_'+mode+'.ass')
@@ -189,6 +192,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     report=json.loads((folder/'layout_report.json').read_text(encoding='utf8'))
     atomic_json(folder/(label+'_'+mode+'.layout.json'),report)
     if report.get('landscape_fixed_video'):progress('横版16:9等比完整显示，不叠加背景和标题；字幕长短不改变画面。')
+    if report.get('subtitle_anchor_adjustment_px',0)<0:progress('横版字号较大，已在安全区域内上移起点以完整显示；字号保持设置值。')
     if report.get('split_cues'):progress('字幕已完整分屏，页时间按字数分配，不改变配音；需预览核对。')
     if report.get('short_pages'):progress('字幕排版提醒：编号'+','.join(map(str,report['short_pages']))+'部分页面不足1秒，请调整该句字幕时间或字号。')
     opening_title=False
