@@ -68,9 +68,9 @@ class BodyFirstUITests(unittest.TestCase):
         p.intro_choice.set('original');p.change_intro_sound();self.root.update()
         self.assertFalse(p.intro_voice.winfo_ismapped());self.assertFalse(p.music.winfo_ismapped());self.assertFalse(p.intro_more.winfo_ismapped())
 
-    def test_cantonese_exposes_required_aligned_srt_and_indonesian_stays_automatic(self):
+    def test_cantonese_and_indonesian_use_automatic_alignment(self):
         self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
-        self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'timed')
+        self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'auto')
         self.assertTrue(self.app.target_entry.winfo_ismapped())
         self.app.language_name.set('印尼语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['alignment'].get(),'auto');self.assertFalse(self.app.target_entry.winfo_ismapped())
