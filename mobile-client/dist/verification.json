@@ -1,0 +1,43 @@
+{
+  "actual_browser_exports": [
+    {
+      "mode": "landscape",
+      "resolution": [
+        960,
+        540
+      ],
+      "duration": 27,
+      "frames": 648,
+      "full_decode": true,
+      "cover_first_frame_full": true,
+      "cover_silent": true,
+      "intro_mix_only_550_and_220Hz": true,
+      "original_intro_330Hz_removed": true,
+      "body_dub_660Hz": true,
+      "original_body_440Hz_removed": true,
+      "outro_full_880Hz": true,
+      "captions_burned": true
+    },
+    {
+      "mode": "portrait",
+      "resolution": [
+        540,
+        960
+      ],
+      "duration": 27,
+      "frames": 648,
+      "full_decode": true,
+      "cover_first_frame_full": true,
+      "cover_silent": true,
+      "intro_mix_only_550_and_220Hz": true,
+      "original_intro_330Hz_removed": true,
+      "body_dub_660Hz": true,
+      "original_body_440Hz_removed": true,
+      "outro_full_880Hz": true,
+      "captions_burned": true
+    }
+  ],
+  "separate_intro_body_srt_offsets": true,
+  "physical_iphone_verified": false,
+  "physical_android_verified": false
+}
