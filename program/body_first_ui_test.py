@@ -71,7 +71,7 @@ class BodyFirstUITests(unittest.TestCase):
     def test_cantonese_and_indonesian_use_automatic_alignment(self):
         self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'auto')
-        self.assertTrue(self.app.target_entry.winfo_ismapped())
+        self.assertFalse(self.app.target_entry.winfo_ismapped())
         self.app.language_name.set('印尼语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['alignment'].get(),'auto');self.assertFalse(self.app.target_entry.winfo_ismapped())
 
