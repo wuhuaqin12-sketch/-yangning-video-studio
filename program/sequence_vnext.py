@@ -344,7 +344,12 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             first=parts[1];transition=folder/('cover_transition_'+mode+'.mp4')
             ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]',*encode_args(),transition],cancel)
             parts=[transition,*parts[2:]]
-        concat_clips(parts,full,folder,cancel)
+        # A single normalized segment needs no concat filter or second H.264 encode.
+        # Keep the full decode, timestamp, duration and mobile checks below.
+        if len(parts)==1:
+            shutil.copyfile(parts[0],full)
+        else:
+            concat_clips(parts,full,folder,cancel)
         packet_data=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(full)],cancel))['packets']
         previous=None
         for packet in packet_data:
