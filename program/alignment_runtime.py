@@ -6,7 +6,8 @@ CPU_PACKAGES=['torch==2.6.0','torchaudio==2.6.0']
 PROBE="import torch,torchaudio,stable_whisper; assert torch.__version__.split('+')[0]=='2.6.0'; assert torch.version.cuda is None; print(torch.zeros(1)+1)"
 
 def runtime_path():
-    return Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))/'YangNingStudio'/'alignment_cpu_260_v1'
+    base=Path(os.environ['YANGNING_DATA_ROOT']) if os.environ.get('YANGNING_DATA_ROOT') else Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))/'YangNingStudio'
+    return base/'alignment_cpu_260_v1'
 
 def python_path(root):
     return root/('Scripts/python.exe' if os.name=='nt' else 'bin/python')

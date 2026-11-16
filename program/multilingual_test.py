@@ -44,7 +44,7 @@ class MultiTests(unittest.TestCase):
             (folder/'multilingual_result.json').write_text(json.dumps({'segments':[{'words':[dict(word=data['text'],start=.5,end=3.)]}]}),encoding='utf8')
         job=workflow.normalize(dict(language='id',alignment='auto',source_srt=str(self.f),video=str(self.f),audio=str(self.f),output=str(self.p)))
         self.assertEqual(job['alignment'],'multi');self.assertEqual(job['target_srt'],str(self.f))
-        self.assertEqual(playback_speed(job),1.1)
+        self.assertEqual(playback_speed(job),1.0)
         with patch.object(m,'_worker_run',side_effect=worker):
             result=m.align([(1,60,70,'Pikiran pertama pada dasarnya tenang.')],self.f,self.p,threading.Event(),lambda s:None,'id',4.)
         self.assertEqual(result[0][1:3],(.5,3.))

@@ -47,8 +47,10 @@ class PauseTests(unittest.TestCase):
     def test_default_speed_pitch_and_cache(self):
         from engine import preview_audio,save_json,playback_speed
         for language in ('en','fr','zh','de','ko','other'):
-            self.assertEqual(playback_speed(dict(language=language)),1.1)
-        self.assertEqual(playback_speed(dict(language='ja')),1.1)
+            self.assertEqual(playback_speed(dict(language=language)),1.0)
+        self.assertEqual(playback_speed(dict(language='ja')),1.0)
+        self.assertEqual(playback_speed(dict(speed='1.1')),1.1)
+        self.assertEqual(playback_speed(dict(speed='.9')),.9)
         with tempfile.TemporaryDirectory() as d:
             p=Path(d);r=16000;c=threading.Event();ff=executable('ffmpeg')
             x=(.12*np.sin(2*np.pi*440*np.arange(4*r)/r)).astype('float32');x.tofile(p/'original.f32')
@@ -56,15 +58,15 @@ class PauseTests(unittest.TestCase):
             from audio_edit import export_plan
             export_plan([],p/'pause_plan.csv')
             m=dict(version=__import__('engine').VERSION,rate=r,channels=1,audio_duration=4,target=[(1,0,4,'日本語。')],silences=[],job=dict(language='ja',audio=str(p/'voice.wav'),mute=False))
-            save_json(p/'analysis.json',m);total,_=preview_audio(p,c);self.assertAlmostEqual(total,4/1.1)
+            save_json(p/'analysis.json',m);total,_=preview_audio(p,c);self.assertAlmostEqual(total,4)
             first=json.loads((p/'audio_versions.json').read_text(encoding='utf8'))['B']
             preview_audio(p,c);self.assertEqual(first,json.loads((p/'audio_versions.json').read_text(encoding='utf8'))['B'])
             run([ff,'-v','error','-y','-i',str(p/first),'-f','f32le','-ar',str(r),'-ac','1',str(p/'check.f32')],c)
             y=np.fromfile(p/'check.f32',np.float32)[r:2*r];spectrum=np.abs(np.fft.rfft(y*np.hanning(len(y))))
             peak=np.fft.rfftfreq(len(y),1/r)[np.argmax(spectrum)]
             self.assertAlmostEqual(peak,440,delta=2)
-            m['job']['language']='fr';m['job']['speed']='1.0';save_json(p/'analysis.json',m)
-            total,_=preview_audio(p,c);self.assertAlmostEqual(total,4)
+            m['job']['language']='fr';m['job']['speed']='1.1';save_json(p/'analysis.json',m)
+            total,_=preview_audio(p,c);self.assertAlmostEqual(total,4/1.1)
             self.assertNotEqual(first,json.loads((p/'audio_versions.json').read_text(encoding='utf8'))['B'])
 
     def test_trailing_silence_without_end_marker(self):
@@ -94,8 +96,8 @@ class PauseTests(unittest.TestCase):
             render(folder,c,logs.append)
             report=json.loads((folder/'report.json').read_text(encoding='utf8'))
             self.assertGreater(report['removed_seconds'],45)
-            self.assertAlmostEqual(report['output_seconds'],(262-report['removed_seconds'])/1.1,delta=.1)
-            self.assertEqual(report['speech_speed'],1.1)
+            self.assertAlmostEqual(report['output_seconds'],(262-report['removed_seconds'])/1.0,delta=.1)
+            self.assertEqual(report['speech_speed'],1.0)
             self.assertEqual(report['resolution'],[96,64]);self.assertTrue(report['full_decode_passed'])
             self.assertLessEqual(parse_srt(folder/'subtitles.srt')[-1][2],report['output_seconds']+.05)
             self.assertTrue(any('共删除' in line for line in logs))

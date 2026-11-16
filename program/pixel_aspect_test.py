@@ -11,7 +11,7 @@ class PixelAspectTests(unittest.TestCase):
                 run([ff,'-v','error','-y','-f','lavfi','-i','testsrc2=size=120x160:rate=10:duration=2','-vf','setsar='+sar,'-c:v','libx264',str(p/'input.mp4')],c)
                 run([ff,'-v','error','-y','-f','lavfi','-i','sine=frequency=440:sample_rate=16000:duration=2',str(p/'audio.wav')],c)
                 (p/'text.srt').write_text('1\n00:00:00,000 --> 00:00:01,900\nPixel ratio test\n')
-                job=dict(video=str(p/'input.mp4'),audio=str(p/'audio.wav'),source_srt=str(p/'text.srt'),target_srt=str(p/'text.srt'),output=str(p/'out'),language='en',alignment='timed',trim=False,burn=True)
+                job=dict(video=str(p/'input.mp4'),audio=str(p/'audio.wav'),source_srt=str(p/'text.srt'),target_srt=str(p/'text.srt'),output=str(p/'out'),language='en',alignment='timed',trim=False,burn=True,speed=1.0)
                 before=(p/'input.mp4').read_bytes();folder=Path(prepare(job,c))
                 with Image.open(render_preview(folder,.5,c)) as image:self.assertEqual(image.size,(width,160))
                 render(folder,c);info=probe(folder/'video.mp4',c);v=next(s for s in info['streams'] if s['codec_type']=='video')

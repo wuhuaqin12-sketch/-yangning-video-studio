@@ -1,21 +1,22 @@
-name: Test and publish desktop app
+name: Verify and publish formal desktop app
 on:
   push:
-    branches: [main]
+    branches: [main, integrate/simple-0.14.0]
   workflow_dispatch:
     inputs:
       confirm_release:
-        description: '输入 RELEASE 确认正式发布'
+        description: '输入 RELEASE 正式发布已验证的安装包'
         required: true
         type: string
 permissions:
   contents: read
 concurrency:
-  group: desktop-release
-  cancel-in-progress: false
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
-  test:
+  core-regression:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,10 +28,11 @@ jobs:
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - run: python -m unittest alignment_runtime_test multilingual_test english_regression_test desktop_update_test long_caption_test publish_style_test clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test bootstrap_test
+      - run: python -m unittest alignment_runtime_test multilingual_test english_regression_test desktop_update_test long_caption_test publish_style_test.StyleTests clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test bootstrap_test stable_recovery_test integration_release_test
         working-directory: program
-  windows-install:
+  windows-acceptance:
     runs-on: windows-latest
+    timeout-minutes: 35
     env:
       PYTHONUTF8: '1'
     steps:
@@ -40,64 +42,46 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Set isolated installation directory
-        shell: pwsh
-        run: '"YANGNING_INSTALL_ROOT=$env:RUNNER_TEMP\YangNingStudio安装测试" >> $env:GITHUB_ENV'
       - run: choco install ffmpeg --no-progress -y
-      - name: Collect bundled Windows FFmpeg and FFprobe
+      - name: Bundle real Windows media executables
         shell: pwsh
         run: |
-          $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force program/tools | Out-Null
-          foreach ($name in @('ffmpeg','ffprobe')) {
-            $source="C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/$name.exe"
-            if (!(Test-Path -LiteralPath $source)) { throw "Real $name executable missing: $source" }
-            Copy-Item -LiteralPath $source -Destination "program/tools/$name.exe" -Force
-            & "./program/tools/$name.exe" -version
-            if ($LASTEXITCODE -ne 0) { throw "Bundled $name failed" }
-          }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bundled-windows-ffmpeg
-          path: |
-            program/tools/ffmpeg.exe
-            program/tools/ffprobe.exe
-          if-no-files-found: error
-          retention-days: 7
+          foreach ($n in @('ffmpeg','ffprobe')) { Copy-Item "C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin/$n.exe" "program/tools/$n.exe" }
+      - run: python -m pip install -r program/requirements.txt
+      - run: python -m pip install playwright
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - name: Seed an incomplete runtime from a failed installation
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts') | Out-Null
-          Set-Content -Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -Value 'failed old runtime'
-      - run: cmd /c "INSTALL.bat --quiet"
-      - name: Verify installed runtime, version and desktop shortcut
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $data=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'current.json') | ConvertFrom-Json
-          $expected=(Get-Content release.json | ConvertFrom-Json).version
-          if (!(Test-Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/pyvenv.cfg'))) { throw 'Missing repaired venv config' }
-          if (!(Get-ChildItem $env:YANGNING_INSTALL_ROOT -Directory -Filter 'runtime.failed_*')) { throw 'Old broken runtime was not preserved' }
-          if ($data.version -ne $expected) { throw 'Wrong installed version' }
-          if (!(Test-Path (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/pythonw.exe'))) { throw 'Missing runtime' }
-          if (!(Test-Path (Join-Path ([Environment]::GetFolderPath('Desktop')) '杨宁视频工作室.lnk'))) { throw 'Missing shortcut' }
-          $config=Get-Content (Join-Path $env:YANGNING_INSTALL_ROOT 'update_config.json') | ConvertFrom-Json
-          if ($config.manifest_url -ne 'https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json') { throw 'Missing built-in update URL' }
-          & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') -c "import tkinter,numpy,scipy,PIL; print('Windows installation verified')"
-      - name: Verify isolated CPU multilingual alignment runtime on Windows
-        shell: pwsh
-        run: |
-          & (Join-Path $env:YANGNING_INSTALL_ROOT 'runtime/Scripts/python.exe') program/alignment_runtime.py
-          if ($LASTEXITCODE -ne 0) { throw 'CPU alignment runtime failed' }
-      - name: Verify real CPU voice separation and denoise on Windows
-        shell: pwsh
-        run: '& (Join-Path $env:YANGNING_INSTALL_ROOT "runtime/Scripts/python.exe") ci/separation_smoke.py'
-  release:
-    needs: [test, windows-install]
+      - name: Protect the original stable installer
+        run: python -c "import sys,tempfile,shutil;from pathlib import Path;sys.path.insert(0,'program');from stable_recovery import preserve_archive;t=tempfile.TemporaryDirectory();p=preserve_archive(Path(t.name));Path('recovery').mkdir(exist_ok=True);shutil.copyfile(p,'recovery/v0.12.11-original.zip')"
+      - name: Windows full function and UI regression
+        run: python -m unittest background_layout_test landscape_fixed_test parts_only_test sequence_vnext_test simple_ui_test pixel_aspect_test caption_top_test glyph_removal_test body_first_ui_test publish_style_test.StyleTests encoding_regression_test pause_regression_test multilingual_test clean_project_test desktop_update_test stable_recovery_test bootstrap_test integration_release_test
+        working-directory: program
+      - name: Five-minute compatible MP4 and actual browser seek
+        run: python ci/mobile_playback_windows.py
+      - name: Real formal check-update install and stable restore
+        run: python ci/formal_candidate_windows.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: formal-acceptance-evidence
+          path: |
+            ${{ runner.temp }}/YangNingFormalAcceptance/*.png
+            ${{ runner.temp }}/YangNingFormalAcceptance/*.json
+            ${{ runner.temp }}/YangNingFormalAcceptance/phone-playback-sample.mp4
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formal-candidate-package
+          path: ${{ runner.temp }}/YangNingFormalAcceptance/package/*
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: [core-regression, windows-acceptance]
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: ') && contains(github.event.head_commit.message, '[publish-approved]'))
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.confirm_release == 'RELEASE') ||
+      (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: ') && contains(github.event.head_commit.message, '[publish-approved]')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,17 +94,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python ci/fetch_fonts.py
-      - run: python ci/fetch_noise_model.py
       - uses: actions/download-artifact@v4
         with:
-          name: bundled-windows-ffmpeg
-          path: program/tools
-      - name: Verify bundled Windows binaries before release
-        run: |
-          test -s program/tools/ffmpeg.exe
-          test -s program/tools/ffprobe.exe
-          file program/tools/ffmpeg.exe program/tools/ffprobe.exe
-          python -c "from pathlib import Path; assert all((Path('program/tools')/n).stat().st_size > 100000 for n in ('ffmpeg.exe','ffprobe.exe'))"
+          name: formal-candidate-package
+          path: ${{ runner.temp }}/YangNingFormalAcceptance/package
       - run: python ci/publish_release.py
-

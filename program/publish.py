@@ -23,6 +23,13 @@ def layout(opts, stream, w, h):
     scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
     vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
     vx=(w-vw)//2;vy=(h-vh)//2
+    if opts.get('_auto_below_video'):
+        size=opts['subtitle_font_size'] or round(h*opts['font_percent']/100);padding=2*opts['subtitle_outline']+16
+        top=h*.04;band=max(h*.22,2*size*1.2+padding);limit=h*.90-band-12-top
+        if limit<h*.20:raise ValueError('字幕字号过大，无法在保留完整画面的同时清晰显示；请调整统一字号。')
+        scale=min(w/stream['width'],limit/stream['height']);vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
+        vx=(w-vw)//2;vy=round(top);subtop=vy+vh+12;sh=h*.90-subtop
+        return vw,vh,vx,vy,w*.84,sh,w/2,subtop+sh/2
     if opts.get('subtitle_area','below_video')=='below_video':
         # Grow longer captions downward in the background, up to five lines.
         # Keep the bottom 10% clear and never grow into the source video.
@@ -35,10 +42,10 @@ def layout(opts, stream, w, h):
         if room<2*size*1.2+padding:
             raise ValueError('老师画面下方不足以放下字幕。请减小老师画面最大高度，留出下方背景；字幕不会移入老师画面。')
         sh=min(sh,room);max_top=h*.90-sh
-        top=max(min_top,min(vy+vh+h*.02+opts.get('subtitle_offset_y',0),max_top))
+        top=max(min_top,min(min_top+opts.get('subtitle_offset_y',0),max_top))
         return vw,vh,vx,vy,sw,sh,sx,top+sh/2
     sw=vw*opts['subtitle_width']/100;sh=vh*opts['subtitle_height']/100
-    sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100
+    sx=vx+vw*opts['subtitle_x']/100;sy=vy+vh*opts['subtitle_y']/100+opts.get('subtitle_offset_y',0)
     if sy-sh/2<vy-.01 or sy+sh/2>vy+vh+.01 or sx-sw/2<vx-.01 or sx+sw/2>vx+vw+.01:
         raise ValueError('字幕区域超出老师画面。请移动字幕中心，或减小区域宽度/高度。')
     return vw,vh,vx,vy,sw,sh,sx,sy
@@ -54,15 +61,46 @@ def subtitle_lines(text,opts,size,width):
     return text,line_parts(text,columns)
 
 
-def make_ass(path,cues,opts,stream,duration,w,h):
+def fixed_landscape_layout(opts,stream,w,h,cues,caption_row=None):
+    # Subtitle length must never resize or move the picture.
+    scale=min(w*opts['video_width']/100/stream['width'],h*opts['video_height']/100/stream['height'])
+    vw=max(2,int(stream['width']*scale)//2*2);vh=max(2,int(stream['height']*scale)//2*2)
+    vx=(w-vw)//2;vy=(h-vh)//2;requested=round(opts['subtitle_font_size'] or 80)
+    margin=max(12,vh*.025);bottom=vy+vh-margin
+    top=vy+vh*.84
+    if caption_row:
+        y,_height=caption_row
+        top=vy+vh*y/stream['height']
+    width=vw*.90;padding=2*opts['subtitle_outline']+16
+    min_top=vy+vh*.55;max_top=bottom-requested*1.25-padding
+    if max_top<min_top:
+        raise ValueError('横版字号过大，安全区域连一行也放不下；请减小横版字号或描边。不会自动缩小已设置的字号。')
+    base_top=max(min_top,min(top,max_top))
+    opts['_landscape_anchor_adjustment']=base_top-top
+    top=max(min_top,min(base_top+opts.get('subtitle_offset_y',0),max_top))
+    opts['_landscape_offset_applied']=top-base_top
+    return (vw,vh,vx,vy,width,bottom-top,vx+vw/2,(top+bottom)/2),requested,requested
+
+
+def make_ass(path,cues,opts,stream,duration,w,h,auto_background=False,landscape_overlay=False,caption_row=None,title_in_top_background=False):
     opts=normalize_style(opts)
     if not cues:opts['subtitle_area']='video'
-    vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
-    below=opts['subtitle_area']=='below_video'
-    sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100)
-    if below and cues:
-        opts['_subtitle_rows']=min(5,max(len(subtitle_lines(text,opts,round(sub_size),sw)[1]) for _,a,b,text in cues))
+    if auto_background and not landscape_overlay and w>h and cues:
+        initial_size=opts['subtitle_font_size'] or round(h*opts['font_percent']/100)
+        if any(len(subtitle_lines(text,opts,initial_size,w*.84)[1])>2 for _,_,_,text in cues):
+            opts['subtitle_area']='below_video';opts['_auto_below_video']=True
+    overlay=bool(landscape_overlay and w>h and cues)
+    if overlay:
+        opts['subtitle_area']='video'
+        (vw,vh,vx,vy,sw,sh,sx,sy),sub_size,requested_size=fixed_landscape_layout(opts,stream,w,h,cues,caption_row)
+        below=False
+    else:
         vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
+        below=opts['subtitle_area']=='below_video'
+        sub_size=opts['subtitle_font_size'] or round(vh*opts['font_percent']/100);requested_size=sub_size
+        if below and cues:
+            opts['_subtitle_rows']=min(5,max(len(subtitle_lines(text,opts,round(sub_size),sw)[1]) for _,a,b,text in cues))
+            vw,vh,vx,vy,sw,sh,sx,sy=layout(opts,stream,w,h)
     left,top,right,bottom=sx-sw/2,sy-sh/2,sx+sw/2,sy+sh/2
     title_size=opts['title_font_size'] or round(h*opts['title_size']/100)
     header=f'''[Script Info]
@@ -77,12 +115,13 @@ Style: Title,{opts['title_font']},{title_size},{ass_colour(opts['title_color'])}
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 '''
-    sizes=[];shrunk=[];split_cues=[];display_cues=[]
+    sizes=[];shrunk=[];split_cues=[];display_cues=[];short_pages=[]
     for ident,a,b,text in cues:
-        available=sh-2*opts['subtitle_outline']-16 if below else min(vh*.40,max(sh,sy+sh/2-vy-8))
+        available=sh-2*opts['subtitle_outline']-16 if below or overlay else min(vh*.40,max(sh,sy+sh/2-vy-8))
         size=round(sub_size)
         text,lines=subtitle_lines(text,opts,size,sw)
-        max_lines=min(5,int((available+.001)//(size*(1.2 if below else 1.4))))
+        if size<requested_size:shrunk.append(ident)
+        max_lines=min(5,int((available+.001)//(size*(1.25 if overlay else 1.2 if below else 1.4))))
         if max_lines<1:
             raise ValueError('字幕区域高度不足一行，请扩大区域高度或减小统一字号。')
         pages=[lines[i:i+max_lines] for i in range(0,len(lines),max_lines)]
@@ -94,17 +133,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for page,weight in zip(pages,weights):
             start=a+(b-a)*elapsed/total;elapsed+=weight
             end=b if elapsed==total else a+(b-a)*elapsed/total
+            if len(pages)>1 and end-start<1:short_pages.append(ident)
             sizes.append(size)
             styled=styled_lines(text,page,opts)
             plain='\n'.join(''.join(c for _,c in row) for row in page)
             display_cues.append((start,end,plain))
             # Clip glyphs and outlines to the background rectangle as a final
             # guard, including font substitutions with different metrics.
-            clip=f'\\clip({math.ceil(left)},{math.ceil(top)},{math.floor(right)},{math.floor(bottom)})' if below else ''
-            header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an2\\pos({sx:.1f},{bottom-8-opts["subtitle_outline"] if below else bottom:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
-    actual_title=None
+            clip=f'\\clip({math.ceil(left)},{math.ceil(top)},{math.floor(right)},{math.floor(bottom)})' if below or overlay else ''
+            anchor=8 if below or overlay else 2
+            baseline=top+opts['subtitle_outline']+4 if below or overlay else bottom
+            header+=f'Dialogue: 1,{stamp(start,True)},{stamp(end,True)},Sub,,0,0,0,,{{\\an{anchor}\\pos({sx:.1f},{baseline:.1f})\\fs{size}\\q2{clip}}}{styled}\n'
+    actual_title=None;title_center=None
     if opts['title'].strip():
         tx=w*opts['title_x']/100;ty=h*opts['title_y']/100
+        if title_in_top_background:
+            if vy<h*.075:raise ValueError('横版上方背景不足以放置标题。请在素材与画面中恢复老师画面最大高度，或清空横版标题；不会把标题盖到老师身上。')
+            if not h*.025<ty<vy-h*.025:ty=vy/2
         tw=min(w*opts['title_width']/100,2*min(tx-w*.025,w*.975-tx))
         if ty<vy:th=2*min(ty-h*.025,vy-h*.0125-ty)
         elif ty>vy+vh:th=2*min(ty-vy-vh-h*.0125,h*.975-ty)
@@ -118,19 +163,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             size,lines=fit_lines(text,title_size,tw+12,th,False,leading=1.2)
         except ValueError:
             size,lines=fit_lines(text,title_size,tw+12,th,True,leading=1.2)
-        actual_title=size
+        actual_title=size;title_center=[tx,ty]
         text=styled_lines(text,lines,opts,highlight=False)
         # libass normalizes this bundled font to its 1448/1000 hhea height.
         # Match the 230px FreeType brush title used in the approved V11 render.
         render_size=round(size*1.448,2) if opts['title_font'].casefold()=='yuji boku' else size
         header+=f'Dialogue: 2,0:00:00.00,{stamp(duration,True)},Title,,0,0,0,,{{\\an5\\pos({tx:.1f},{ty:.1f})\\fs{render_size}\\q2}}{text}\n'
     Path(path).write_text(header,encoding='utf-8-sig')
-    report=dict(subtitle_requested_px=sub_size,subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
-                title_requested_px=title_size,title_actual_px=actual_title,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
+    report=dict(subtitle_requested_px=requested_size,landscape_fixed_video=overlay,caption_anchor='original_subtitle_region' if overlay and caption_row else 'lower_video' if overlay else 'default',subtitle_actual_px=sorted(set(sizes)),shrunk_cues=shrunk,
+                title_requested_px=title_size,title_actual_px=actual_title,title_center=title_center,subtitle_center=[sx,sy],video_box=[vx,vy,vw,vh],
                 subtitle_area=opts['subtitle_area'],subtitle_box=[left,top,right,bottom],
+                subtitle_anchor_adjustment_px=round(opts.get('_landscape_anchor_adjustment',0),3),
                 subtitle_offset_requested_px=opts['subtitle_offset_y'],
-                subtitle_offset_applied_px=round(top-(vy+vh+h*.02),3) if below else 0,
-                split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue')
+                subtitle_offset_applied_px=round(top-(vy+vh+max(12,h*.00625)),3) if below else round(opts.get('_landscape_offset_applied',0),3) if overlay else 0,
+                split_cues=split_cues,display_cue_count=len(display_cues),split_timing='proportional_within_adjusted_cue',short_pages=sorted(set(short_pages)),auto_background=bool(opts.get('_auto_below_video')),all_text_preserved=True)
     (Path(path).parent/'layout_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
     (Path(path).parent/'publish_subtitles.srt').write_text(
         '\n\n'.join(f'{i}\n{stamp(a)} --> {stamp(b)}\n{text}'

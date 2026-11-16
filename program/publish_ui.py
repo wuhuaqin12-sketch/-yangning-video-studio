@@ -29,19 +29,33 @@ def show(app, open_path):
         'srt':str(folder/'subtitles.srt') if (folder/'subtitles.srt').is_file() else app.v['source_srt'].get(),
         'background':'','output':preferred(job.get('output') or app.v['output'].get()),'preview_time':'1'}
     values.update(saved_style)
-    if project:
+    sequence_panel=getattr(app,'sequence_panel',None)
+    managed=sequence_panel is not None
+    sequence_active=bool(sequence_panel and sequence_panel.enabled.get())
+    if sequence_active:
+        values['video']=app.v['video'].get();values['srt']=app.v['source_srt'].get()
+        values['background']=sequence_panel.v['background'].get()
+    if project and not sequence_active:
         values['video']=str(folder/'video.mp4') if (folder/'video.mp4').is_file() else (cm['video'] if clean else meta['job']['video'])
         values['srt']=str(folder/'subtitles.srt')
     elif meta.get('job',{}).get('burn'):values['video']=''
     win=tk.Toplevel(app.root);win.title('制作发布成片 · 字体 / 颜色 / 重点词');win.geometry('920x700');win.minsize(780,620)
     box=ttk.Frame(win,padding=12);box.pack(fill='both',expand=True)
     ttk.Label(box,text='标题、字幕与重点词样式',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
-    ttk.Label(box,text='所有语言统一字号，长句自动分行。保存排版后，回主界面一键导出；预览可选。',wraplength=860).pack(anchor='w',pady=5)
+    ttk.Label(box,text=('素材、背景、封面和保存位置统一在主页面；此处设置竖版标题、两种比例的字幕与重点词。横版不显示标题。保存后回主页面一键导出。' if managed else '保存排版后，回主页面一键导出；预览可选。'),wraplength=860).pack(anchor='w',pady=5)
+    for mode in ('landscape','portrait'):
+        key=mode+'_subtitle_offset_y'
+        if key not in saved_style:values[key]=saved_style.get('subtitle_offset_y',0)
+    for mode in ('landscape','portrait'):
+        key=mode+'_subtitle_font_size'
+        if key not in saved_style:values[key]=saved_style.get('subtitle_font_size',defaults[key])
     variables={k:(tk.BooleanVar(value=v) if isinstance(v,bool) else tk.StringVar(value=str(v))) for k,v in values.items()}
     tabs=ttk.Notebook(box);tabs.pack(fill='both',expand=True,pady=5)
     pages={}
     for key,label in [('assets','素材与画面'),('title','标题'),('subtitle','字幕'),('keywords','重点词颜色'),('cover','封面')]:
-        page=ttk.Frame(tabs,padding=12);tabs.add(page,text=label);page.columnconfigure(1,weight=1);pages[key]=page
+        page=ttk.Frame(tabs,padding=12)
+        if not managed or key in ('title','subtitle','keywords'):tabs.add(page,text=label)
+        page.columnconfigure(1,weight=1);pages[key]=page
     families=sorted(set(tkfont.families(win))|{'Yuji Boku','Noto Serif CJK JP'})
     def entry(page,row,key,label,kind='text'):
         ttk.Label(page,text=label).grid(row=row,column=0,sticky='w',pady=6,padx=(0,12))
@@ -90,20 +104,23 @@ def show(app, open_path):
     ttk.Label(page,text='日语标题默认 Yuji Boku（佑字 朴）毛笔体。可选本机字体，也可直接输入字体名。',wraplength=780).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
-    for row,(key,label) in enumerate([('subtitle_font_size','大小（成片像素，默认70）'),('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
-    ttk.Label(page,text='字幕上下微调（像素）').grid(row=4,column=0,sticky='w',pady=6)
-    position=ttk.Frame(page);position.grid(row=4,column=1,columnspan=2,sticky='w')
-    ttk.Spinbox(position,from_=-400,to=400,increment=10,textvariable=variables['subtitle_offset_y'],width=8).pack(side='left',padx=(0,8))
-    def shift_subtitle(amount):
-        try:value=float(variables['subtitle_offset_y'].get())+amount
+    sizes=[] if managed else [('subtitle_font_size','字幕字号（像素）')]
+    for row,(key,label) in enumerate(sizes+[('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
+    def shift_subtitle(key,amount):
+        try:value=float(variables[key].get())+amount
         except ValueError:
             messagebox.showerror('字幕位置','请填写数字；0为默认位置。',parent=win);return
-        variables['subtitle_offset_y'].set(f'{max(-400,min(400,value)):g}')
-    ttk.Button(position,text='上移',command=lambda:shift_subtitle(-10)).pack(side='left',padx=3)
-    ttk.Button(position,text='下移',command=lambda:shift_subtitle(10)).pack(side='left',padx=3)
-    ttk.Button(position,text='恢复位置',command=lambda:variables['subtitle_offset_y'].set('0')).pack(side='left',padx=3)
-    colour_row(page,8,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='有背景图时，新字幕默认在老师视频下方居中，最多5行。\n上下微调：0为默认，负数上移，正数下移；点击“预览排版”查看效果。\n到达背景边界后自动停止移动，字幕不会进入老师画面或底部安全区。\n保存排版或样式会记住微调值。没有背景图时沿用视频内位置，不应用此微调。',wraplength=780).grid(row=5,column=0,columnspan=3,sticky='w',pady=6)
+        variables[key].set(f'{max(-400,min(400,value)):g}')
+    positions=[] if managed else [('subtitle_offset_y','字幕上下微调（像素）')]
+    for row,(key,label) in enumerate(positions,5 if managed else 4):
+        ttk.Label(page,text=label).grid(row=row,column=0,sticky='w',pady=6)
+        position=ttk.Frame(page);position.grid(row=row,column=1,columnspan=2,sticky='w')
+        ttk.Spinbox(position,from_=-400,to=400,increment=10,textvariable=variables[key],width=8).pack(side='left',padx=(0,8))
+        ttk.Button(position,text='上移',command=lambda k=key:shift_subtitle(k,-10)).pack(side='left',padx=3)
+        ttk.Button(position,text='下移',command=lambda k=key:shift_subtitle(k,10)).pack(side='left',padx=3)
+        ttk.Button(position,text='恢复位置',command=lambda k=key:variables[k].set('0')).pack(side='left',padx=3)
+    colour_row(page,9,'outline_color','描边颜色（标题、字幕共用）')
+    ttk.Label(page,text='字号与上下位置在主页面对应横版、竖版设置中调整。横版默认放在原中文字幕区域；竖版仍放在视频下方背景区。\n两个比例分别保存，负数上移、正数下移，单位为成片像素；到达安全边界会停止。\n0为默认位置；仍需调整时点上移或下移。预览与正式导出使用同一位置。\n新字幕不能完全遮住不同字形的中文残留，仍需去除原中文字和描边。',wraplength=780).grid(row=7,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')
@@ -166,12 +183,19 @@ def show(app, open_path):
         msg.set('正在生成封面；完成后自动打开。');app.worker(work)
     ttk.Button(page,text='预览 / 导出封面',command=cover_preview).grid(row=5,column=0,columnspan=2,sticky='w',pady=8)
     line=ttk.Frame(box);line.pack(fill='x',pady=5)
-    ttk.Label(line,text='所有语言字幕统一字号；最多5行，空间不足或超长时自动分屏。').pack(side='left')
+    ttk.Label(line,text='横竖版字号分别保存；长句换行或分屏，最多5行；过大无法显示时提示。').pack(side='left')
     ttk.Label(line,text='预览时间 秒').pack(side='left',padx=(12,3));ttk.Entry(line,textvariable=variables['preview_time'],width=7).pack(side='left')
-    msg=tk.StringVar(value='先预览字体、字形、颜色、重点词及位置。字体须包含对应语言的文字。')
+    msg=tk.StringVar(value='排版预览沿用主页面的背景与画面大小；只检查文字排版，不处理配音与原中文字幕。字体须包含所填文字。')
     ttk.Label(box,textvariable=msg,wraplength=860).pack(anchor='w',pady=4)
     def collect():
-        result={k:v.get() for k,v in variables.items()};result['keywords']=words.get('1.0','end-1c');return result
+        result={k:v.get() for k,v in variables.items()};result['keywords']=words.get('1.0','end-1c')
+        if managed:
+            main_style=sequence_panel.current_style()
+            for key in sequence_panel.style_vars:result[key]=main_style[key]
+            result['background']=sequence_panel.v['background'].get();result['output']=app.v['output'].get()
+            result['video_width']=app.pending_style.get('video_width',100);result['video_height']=app.pending_style.get('video_height',76)
+            if sequence_panel.enabled.get():result['video']=app.v['video'].get();result['srt']=app.v['source_srt'].get()
+        return result
     def apply_style(style):
         for k,v in style.items():
             if k in variables:variables[k].set(v)
@@ -186,7 +210,7 @@ def show(app, open_path):
         if not path:return
         try:apply_style(load_preset(path));msg.set('样式已载入；请先预览。')
         except Exception as e:messagebox.showerror('载入样式',str(e),parent=win)
-    def go(preview):
+    def go(preview,ratio=None):
         if app.busy:return
         if app.v['language'].get() != 'ja':
             words.delete('1.0','end')
@@ -194,10 +218,19 @@ def show(app, open_path):
             settings=collect();settings['output']=remember(settings['output']);app.v['output'].set(settings['output'])
             if job:job['output']=settings['output'];app.save()
             settings.update(normalize_style(settings));settings['auto_fit']=False
+            sequence_snapshot=sequence_panel.value() if managed and sequence_panel.enabled.get() else None
         except Exception as e:messagebox.showerror('检查样式',str(e),parent=win);return
         def work():
             try:
-                if project:
+                if sequence_snapshot is not None:
+                    if preview:
+                        from style_preview import render
+                        p=sequence_snapshot
+                        p['background']=settings['background']
+                        path=render(settings,p,ratio or 'landscape',app.stop,app.progress)
+                        app.events.put(('publish_done',path))
+                    app.progress('样式已保存；预览与对应横竖版使用同一排版，不处理配音或去字幕。')
+                elif project:
                     expected=cm['video'] if clean else meta['job']['video']
                     allowed={Path(expected).resolve(),(folder/'video.mp4').resolve()}
                     if Path(settings['video']).resolve() not in allowed:raise ValueError('请使用本工程的视频。')
@@ -220,4 +253,11 @@ def show(app, open_path):
             except Exception as e:app.events.put(('error',str(e)))
         msg.set('处理中，可在主窗口点击停止。完成后自动打开结果。');app.worker(work)
     buttons=ttk.Frame(box);buttons.pack(fill='x',pady=3)
-    for label,command in [('恢复默认',lambda:apply_style(defaults)),('保存样式',save),('载入样式',load),('预览排版',lambda:go(True)),('保存排版（不导出整片）',lambda:go(False))]:ttk.Button(buttons,text=label,command=command).pack(side='left',padx=(0,6))
+    actions=[('恢复默认',lambda:apply_style(defaults)),('保存样式',save),('载入样式',load)]
+    if sequence_active:
+        modes=sequence_panel.value()['output_mode']
+        if modes in ('landscape','both','auto'):actions.append(('预览横版排版',lambda:go(True,'landscape')))
+        if modes in ('portrait','both','auto'):actions.append(('预览竖版排版',lambda:go(True,'portrait')))
+    else:actions.append(('预览排版',lambda:go(True)))
+    actions.append(('保存排版（不导出整片）',lambda:go(False)))
+    for label,command in actions:ttk.Button(buttons,text=label,command=command).pack(side='left',padx=(0,6))

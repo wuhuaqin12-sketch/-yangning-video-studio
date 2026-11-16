@@ -2,7 +2,7 @@
 import hashlib,json,os,re,shutil,stat,tempfile,urllib.parse,urllib.request,uuid,zipfile
 from pathlib import Path
 
-APP_VERSION='0.12.10'
+APP_VERSION='0.14.0'
 MAX_PACKAGE=200*1024*1024
 MAX_EXTRACTED=600*1024*1024
 
@@ -92,7 +92,10 @@ def stage_package(archive,root,expected_version=None):
                 raise ValueError('更新包展开后过大。')
             names=set()
             for i in infos:
-                name=i.filename
+                # ZipInfo normalizes Windows separators in filename while
+                # reading. Validate the original central-directory name before
+                # extraction so platform normalization cannot bypass checks.
+                name=i.orig_filename
                 parts=name.replace('\\','/').split('/')
                 if name.startswith(('/','\\')) or '\\' in name or ':' in name or '..' in parts:
                     raise ValueError('更新包含不安全的文件路径。')

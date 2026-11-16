@@ -1,0 +1,183 @@
+import json,tempfile,threading,unittest
+from pathlib import Path
+from unittest.mock import patch
+from PIL import Image
+import project_vnext as p
+import sequence_vnext as s
+from media import probe,parse_srt
+
+class ProjectTests(unittest.TestCase):
+    def test_defaults_and_independent_layouts(self):
+        a=p.defaults();b=p.defaults();a['layouts']['portrait']['subtitle_offset_y']=50
+        self.assertEqual(b['layouts']['portrait']['subtitle_offset_y'],0)
+        self.assertTrue(b['layouts']['landscape']['remove_chinese']);self.assertFalse(b['layouts']['portrait']['remove_chinese'])
+        self.assertEqual(p.normalize({'cover_seconds':'3'})['cover_seconds'],3)
+    def test_save_load_reports_missing_and_keeps_fields(self):
+        with tempfile.TemporaryDirectory() as d:
+            f=Path(d)/'project.json';j=dict(video=str(Path(d)/'missing.mp4'),sequence=p.defaults(),burn=False)
+            j['sequence'].update(intro_enabled=True,intro_video=str(Path(d)/'opening.mp4'),outro_enabled=True,outro_video=str(Path(d)/'ending.mp4'))
+            p.save_project(f,j);loaded,missing=p.load_project(f)
+            self.assertEqual(loaded['sequence'],j['sequence']);self.assertEqual(len(missing),3);self.assertFalse(loaded['burn'])
+    def test_visual_edits_reuse_key_but_interior_audio_change_does_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            f=Path(d)/'a';f.write_bytes(b'a'*200000)
+            j=dict(video=str(f),audio=str(f),source_srt=str(f),target_srt=str(f),speed=1.0)
+            key=p.processing_key(j)
+            self.assertEqual(key,p.processing_key({**j,'publish_settings':{'title':'changed'},'burn':True,'sequence':{'cover':'new'}}))
+            with f.open('r+b') as stream:stream.seek(100000);stream.write(b'z')
+            self.assertNotEqual(key,p.processing_key(j))
+    def test_collision_does_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as d:
+            first=p.unique_output(d,'sutra','ja','portrait');first.write_bytes(b'keep')
+            second=p.unique_output(d,'sutra','ja','portrait')
+            self.assertNotEqual(first,second);self.assertEqual(first.read_bytes(),b'keep')
+            first.with_suffix('.srt').write_text('keep subtitles',encoding='utf8');first.unlink()
+            third=p.unique_output(d,'sutra','ja','portrait');self.assertNotEqual(first,third)
+            self.assertEqual(first.with_suffix('.srt').read_text(encoding='utf8'),'keep subtitles')
+    def test_portable_project_resolves_paths_from_its_own_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'assets').mkdir();(root/'assets/body.mp4').write_bytes(b'media')
+            p.save_project(root/'project.json',dict(video='assets/body.mp4',output='output',sequence=p.defaults()))
+            job,missing=p.load_project(root/'project.json')
+            self.assertFalse(missing);self.assertEqual(Path(job['video']).resolve(),(root/'assets/body.mp4').resolve())
+            self.assertEqual(Path(job['output']).resolve(),(root/'output').resolve())
+            (root/'assets/music.wav').write_bytes(b'music')
+            job['sequence']['background_audio']='assets/music.wav'
+            p.save_project(root/'music.json',job)
+            loaded,missing=p.load_project(root/'music.json')
+            self.assertFalse(missing);self.assertEqual(Path(loaded['sequence']['background_audio']).resolve(),(root/'assets/music.wav').resolve())
+    def test_manual_modes_preserve_long_content_selection(self):
+        q=p.defaults();q['output_mode']='both'
+        self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['landscape','portrait'])
+        q['output_mode']='portrait';self.assertEqual(s.choose_modes(q,1000,dict(width=1920,height=1080)),['portrait'])
+    def test_unreviewed_separation_cannot_silently_export(self):
+        q=p.defaults();q.update(intro_video=__file__,intro_audio=__file__,intro_srt=__file__,intro_mode='music_voice')
+        with self.assertRaisesRegex(ValueError,'已去人声'):s.opening({'language':'ja'},q,Path('.'),threading.Event(),lambda _:None)
+
+class RenderTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);self.cancel=threading.Event()
+        self.clip=self.root/'source.mp4'
+        s.ff(['-f','lavfi','-i','color=blue:s=320x180:r=30:d=0.8','-f','lavfi','-i','sine=frequency=440:duration=0.8','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',self.clip],self.cancel)
+    def test_cover_first_frame_correct_and_mismatch_requires_choice(self):
+        im=self.root/'red.png';Image.new('RGB',(160,90),'red').save(im)
+        q=p.defaults();cover=s.cover_clip(str(im),'landscape',q,self.root,self.cancel)
+        frame=self.root/'first.png';s.ff(['-i',cover,'-frames:v','1',frame],self.cancel)
+        with Image.open(frame) as f:self.assertGreater(f.getpixel((960,540))[0],220)
+        with self.assertRaisesRegex(ValueError,'比例'):s.cover_clip(str(im),'portrait',q,self.root,self.cancel)
+    def test_vertical_subtitles_and_complete_ending(self):
+        q=p.defaults();sub=[(1,0.1,0.7,'金剛経の智慧。')]
+        first=s.compose_segment(str(self.clip),sub,{'subtitle_font_size':55},'portrait',q,self.root,self.cancel,True,'body')
+        last=s.compose_segment(str(self.clip),[],{},'portrait',q,self.root,self.cancel,False,'ending')
+        out=self.root/'joined.mp4';s.concat_clips([first,last],out,self.root,self.cancel)
+        data=probe(out,self.cancel);v=next(x for x in data['streams'] if x['codec_type']=='video')
+        self.assertEqual((v['width'],v['height']),(1080,1920));self.assertGreater(float(data['format']['duration']),1.5)
+        ass=(self.root/'body_portrait.ass').read_text();self.assertIn('金剛経',ass);self.assertIn('\\clip',ass)
+    def test_short_opening_voice_keeps_full_music_and_join_timestamps(self):
+        voice=self.root/'voice.wav'
+        s.ff(['-f','lavfi','-i','sine=frequency=880:duration=0.2',voice],self.cancel)
+        refs=self.root/'head.srt';s.write_srt(refs,[(1,.1,.3,'試聴')])
+        timing=self.root/'voice.srt';s.write_srt(timing,[(1,0,.18,'試聴')])
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='music_voice',intro_audio=str(voice),intro_srt=str(refs),intro_target_srt=str(timing),intro_clean_audio=True)
+        mixed,_=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        streams=probe(mixed,self.cancel)['streams'];a=next(x for x in streams if x['codec_type']=='audio')
+        self.assertAlmostEqual(float(a['duration']),.8,delta=.03)
+        joined=self.root/'continuous.mp4';s.concat_clips([mixed,self.clip],joined,self.root,self.cancel)
+        from media import run,executable
+        packets=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-of','json',str(joined)],self.cancel))['packets']
+        self.assertLess(max(float(x.get('duration_time',0)) for x in packets),.05)
+        times=[float(x['pts_time']) for x in packets];self.assertLess(max(b-a for a,b in zip(times,times[1:])),.05)
+
+    def test_imported_music_replaces_original_without_separation(self):
+        music=self.root/'music.wav';s.ff(['-f','lavfi','-i','sine=frequency=660:duration=1',music],self.cancel)
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='external_music',background_audio=str(music),intro_clean_audio=False)
+        with patch('background_separation.separate',side_effect=AssertionError('must not separate')):
+            out,cues=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        self.assertFalse(cues)
+        from media import executable
+        import numpy as np,subprocess
+        raw=subprocess.check_output([executable('ffmpeg'),'-v','error','-i',out,'-vn','-ar','8000','-ac','1','-f','f32le','-'])
+        samples=np.frombuffer(raw,np.float32);peak=np.argmax(abs(np.fft.rfft(samples)))*8000/len(samples)
+        self.assertAlmostEqual(peak,660,delta=3)
+        q['background_audio_offset']=.7
+        with self.assertRaisesRegex(ValueError,'不会自动循环'):s.imported_background(q,str(self.clip),self.root,self.cancel,lambda _:None)
+        q['intro_mode']='original'
+        with self.assertRaisesRegex(ValueError,'已导入'):s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+    def test_imported_music_with_voice_skips_original_speech(self):
+        music=self.root/'music.wav';voice=self.root/'voice.wav'
+        s.ff(['-f','lavfi','-i','sine=frequency=660:duration=1',music],self.cancel)
+        s.ff(['-f','lavfi','-i','sine=frequency=880:duration=0.2',voice],self.cancel)
+        refs=self.root/'head.srt';s.write_srt(refs,[(1,.1,.3,'試聴')])
+        timing=self.root/'voice.srt';s.write_srt(timing,[(1,0,.18,'試聴')])
+        q=p.defaults();q.update(intro_video=str(self.clip),intro_mode='music_voice',intro_audio=str(voice),intro_srt=str(refs),intro_target_srt=str(timing),background_audio=str(music))
+        with patch('background_separation.separate',side_effect=AssertionError('must not separate')):
+            out,cues=s.opening({'language':'ja'},q,self.root,self.cancel,lambda _:None)
+        self.assertEqual(len(cues),1)
+        a=next(x for x in probe(out,self.cancel)['streams'] if x['codec_type']=='audio');self.assertAlmostEqual(float(a['duration']),.8,delta=.03)
+        import numpy as np,subprocess
+        from media import executable
+        raw=subprocess.check_output([executable('ffmpeg'),'-v','error','-ss','0.55','-i',out,'-t','0.2','-ar','8000','-ac','1','-f','f32le','-'])
+        tail=np.frombuffer(raw,np.float32);self.assertGreater(float(np.sqrt(np.mean(tail*tail))),.01)
+        peak=np.argmax(abs(np.fft.rfft(tail)))*8000/len(tail);self.assertAlmostEqual(peak,660,delta=8)
+
+
+    def test_repair_needs_review_and_never_crops(self):
+        q=p.defaults()['layouts']['landscape'];q['repair_roi']='20,120,280,30'
+        direct=s.repair(str(self.clip),q,self.root,self.cancel)
+        self.assertTrue(Path(direct).is_file())
+        out=s.repair(str(self.clip),q,self.root,self.cancel,preview=True,length=.3)
+        stream=next(x for x in probe(out,self.cancel)['streams'] if x['codec_type']=='video')
+        self.assertEqual((stream['width'],stream['height']),(320,180))
+
+    def test_real_pipeline_dual_covers_dissolve_and_audio_cache(self):
+        ref=self.root/'ref.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n金剛経。\n',encoding='utf8')
+        wide=self.root/'wide.png';tall=self.root/'tall.png'
+        Image.new('RGB',(160,90),'red').save(wide);Image.new('RGB',(90,160),'green').save(tall)
+        q=p.defaults();q.update(output_mode='both',intro_enabled=True,intro_video=str(self.clip),outro_enabled=True,outro_video=str(self.clip),cover_landscape=str(wide),cover_portrait=str(tall),cover_seconds=2,cover_transition='dissolve')
+        q['layouts']['landscape']['remove_chinese']=False
+        job=dict(video=str(self.clip),audio=str(self.clip),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'out'),sequence=q,publish_settings={},name='test')
+        folder=Path(s.process(job,self.cancel))
+        report=json.loads((folder/'report.json').read_text());self.assertEqual(len(report['results']),2)
+        for result in report['results']:
+            self.assertGreater(result['duration'],4.2);self.assertLess(result['duration'],4.8)
+            self.assertTrue(Path(result['path']).is_file())
+        cache=list((self.root/'out/.yangning_cache').rglob('analysis.json'));self.assertEqual(len(cache),1)
+        # A style-only change must reuse the exact existing audio/timing result.
+        before=cache[0].stat().st_mtime_ns
+        j={**job,'publish_settings':{'title':''},'burn':False}
+        cached=s.aligned(j,self.root/'out/.yangning_cache',self.cancel,lambda _:None)
+        self.assertEqual((cached/'analysis.json').stat().st_mtime_ns,before)
+    def test_ready_made_ending_uses_full_canvas_and_no_body_title(self):
+        clip=self.root/'portrait_ending.mp4'
+        s.ff(['-f','lavfi','-i','color=red:s=108x192:r=30:d=1.2','-f','lavfi','-i','sine=frequency=880:duration=1.2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',clip],self.cancel)
+        before=p.file_digest(clip);q=p.defaults()
+        out=s.compose_segment(str(clip),[],{'title':'BODY TITLE','video_width':50,'video_height':40},'portrait',q,self.root,self.cancel,False,'ending')
+        frame=self.root/'ending_frame.png';s.ff(['-i',out,'-frames:v','1',frame],self.cancel)
+        with Image.open(frame) as image:
+            self.assertEqual(image.size,(1080,1920))
+            for xy in ((10,10),(540,960),(1060,1900)):
+                red,green,blue=image.convert('RGB').getpixel(xy);self.assertGreater(red,200);self.assertLess(green,40);self.assertLess(blue,40)
+        self.assertAlmostEqual(s.seconds(out,self.cancel),1.2,delta=.08);self.assertEqual(p.file_digest(clip),before)
+
+    def test_dual_exports_label_both_mp4_and_srt_and_keep_full_content(self):
+        ref=self.root/'dual.srt';s.write_srt(ref,[(1,.1,.7,'横版と竖版の字幕。')])
+        q=p.defaults();q.update(output_mode='both');q['layouts']['landscape']['remove_chinese']=False
+        job=dict(video=str(self.clip),audio=str(self.clip),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'dual_out'),sequence=q,name='金刚经')
+        folder=Path(s.process(job,self.cancel));report=json.loads((folder/'report.json').read_text(encoding='utf8'))
+        self.assertEqual(len(report['results']),2)
+        for result,label in zip(report['results'],('横版_16x9','竖版_9x16')):
+            path=Path(result['path']);self.assertIn(label,path.stem);self.assertTrue(path.with_suffix('.srt').is_file())
+            self.assertIn(label,path.with_suffix('.srt').name);self.assertEqual(len(parse_srt(path.with_suffix('.srt'))),1)
+            self.assertGreater(result['duration'],.75);self.assertLess(result['duration'],.95)
+
+    def test_phone_tail_metadata_cannot_request_nonexistent_frames(self):
+        from engine import prepare,render
+        ref=self.root/'tail.srt';ref.write_text('1\n00:00:00,100 --> 00:00:00,700\n正文。\n',encoding='utf8')
+        job=dict(video=str(self.clip),audio=str(self.clip),source_srt=str(ref),target_srt=str(ref),alignment='timed',language='ja',speed=1,trim=False,burn=False,output=str(self.root/'tail_out'))
+        folder=Path(prepare(job,self.cancel));meta=json.loads((folder/'analysis.json').read_text());meta['video_duration']+=2/30
+        (folder/'analysis.json').write_text(json.dumps(meta))
+        render(folder,self.cancel)
+        report=json.loads((folder/'report.json').read_text())
+        self.assertEqual(report['decoded_source_frames'],24);self.assertTrue(report['full_decode_passed'])
+
+if __name__=='__main__':unittest.main()

@@ -7,14 +7,14 @@ from pathlib import Path
 
 DEFAULTS = dict(title='', font='Noto Serif CJK JP', title_font='Yuji Boku',
     subtitle_color='#FFFFFF', title_color='#34221B', outline_color='#202020',
-    subtitle_outline=3, title_outline=0, subtitle_area='below_video', subtitle_offset_y=0, subtitle_x=50, subtitle_y=76,
+    subtitle_outline=3, title_outline=0, landscape_subtitle_offset_y=0, portrait_subtitle_offset_y=0, subtitle_area='below_video', subtitle_offset_y=0, subtitle_x=50, subtitle_y=76,
     subtitle_width=92, subtitle_height=32, font_percent=4.5,
-    subtitle_font_size=70, title_font_size=230, title_x=50, title_y=25,
+    subtitle_font_size=70, landscape_subtitle_font_size=80, portrait_subtitle_font_size=70, title_font_size=230, title_x=50, title_y=25,
     title_width=94, title_size=12, video_width=100, video_height=76,
     auto_fit=True, keywords='', keyword_color='#E53935',
     keyword_ignore_case=True, keyword_whole_words=False)
 
-LIMITS = {'subtitle_offset_y':(-400,400), 'subtitle_x':(0,100), 'subtitle_y':(0,100),
+LIMITS = {'landscape_subtitle_offset_y':(-400,400), 'portrait_subtitle_offset_y':(-400,400), 'subtitle_offset_y':(-400,400), 'subtitle_x':(0,100), 'subtitle_y':(0,100),
     'subtitle_width':(5,100), 'subtitle_height':(3,80), 'font_percent':(1,25),
     'title_x':(0,100), 'title_y':(0,100), 'title_width':(5,100),
     'title_size':(1,25), 'video_width':(20,100), 'video_height':(20,100),
@@ -58,6 +58,10 @@ def parse_keywords(text, default_colour):
 
 def normalize_style(values):
     opts={**DEFAULTS,**{k:v for k,v in values.items() if k in DEFAULTS}}
+    for key in ('landscape_subtitle_offset_y','portrait_subtitle_offset_y'):
+        if key not in values:opts[key]=values.get('subtitle_offset_y',0)
+    for key in ('landscape_subtitle_font_size','portrait_subtitle_font_size'):
+        if key not in values:opts[key]=values.get('subtitle_font_size',DEFAULTS[key])
     if opts['subtitle_area'] not in ('below_video','video'):
         raise ValueError('字幕区域无效，请恢复默认排版。')
     for key,(lo,hi) in LIMITS.items():
@@ -65,7 +69,7 @@ def normalize_style(values):
         except (TypeError,ValueError):raise ValueError('排版数值无效：'+key)
         if not math.isfinite(n) or not lo<=n<=hi:raise ValueError(f'{key} 应为 {lo:g}–{hi:g}。')
         opts[key]=n
-    for key in ('subtitle_font_size','title_font_size'):
+    for key in ('subtitle_font_size','landscape_subtitle_font_size','portrait_subtitle_font_size','title_font_size'):
         if opts[key] in ('',None):opts[key]='';continue
         try:n=float(opts[key])
         except (TypeError,ValueError):raise ValueError('字号须为数字。')

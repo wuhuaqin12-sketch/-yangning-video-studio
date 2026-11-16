@@ -1,7 +1,12 @@
 """First launch installs a private environment, then starts the local desktop GUI."""
 import os,sys,subprocess,venv,shutil,struct,hashlib,uuid
 from pathlib import Path
-ROOT=Path(__file__).resolve().parent;ENV=(Path(os.environ['YANGNING_INSTALL_ROOT'])/'runtime' if os.environ.get('YANGNING_INSTALL_ROOT') else ROOT/'.venv');PY=ENV/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+ROOT=Path(__file__).resolve().parent
+from desktop_update import APP_VERSION
+from upgrade_guard import runtime_dir
+ENV=runtime_dir(Path(os.environ['YANGNING_INSTALL_ROOT']),APP_VERSION) if os.environ.get('YANGNING_INSTALL_ROOT') else ROOT/'.venv'
+PY=ENV/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+
 def invoke(args,required=True):
     env=os.environ.copy();env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8'
     r=subprocess.run(args,cwd=ROOT,env=env)
@@ -38,6 +43,11 @@ def main():
     reason=current_reason()
     if reason:raise RuntimeError(reason)
     if os.name=='nt' and struct.calcsize('P')!=8:raise RuntimeError('请使用64位Python 3.12；当前Python为32位。无需安装编译器。')
+    if os.environ.get('YANGNING_INSTALL_ROOT'):
+        from upgrade_guard import prepare
+        root=Path(os.environ['YANGNING_INSTALL_ROOT'])
+        settings=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')
+        prepare(root,ROOT.parent,settings,APP_VERSION)
     ensure_runtime()
     marker=ENV/('setup_'+hashlib.sha256((ROOT/'requirements.txt').read_bytes()).hexdigest()[:16]+'.ok')
     if not marker.exists():
@@ -52,6 +62,9 @@ def main():
                 executable('ffmpeg');executable('ffprobe')
             else:raise RuntimeError('未找到 FFmpeg。请把 ffmpeg.exe 与 ffprobe.exe 放入 program/tools，再打开工具。')
         marker.write_text('0.2',encoding='ascii')
+    if os.environ.get('YANGNING_INSTALL_ROOT'):
+        from upgrade_guard import promote_launcher
+        promote_launcher(Path(os.environ['YANGNING_INSTALL_ROOT']),ROOT.parent)
     # Reference-guided alignment is installed lazily inside its cancellable worker.
     if '--setup-only' not in sys.argv:invoke([str(PY),str(ROOT/'app.py')])
 if __name__=='__main__':

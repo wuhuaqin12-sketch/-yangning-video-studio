@@ -1,45 +1,31 @@
-"""Build and publish a release only after required CI jobs have passed."""
-import json,os,subprocess,sys
+"""Publish the exact Windows-tested candidate; never rebuild or overwrite stable assets."""
+import hashlib,json,os,subprocess,sys,tempfile,zipfile
 from pathlib import Path
-root=Path(__file__).resolve().parent.parent
-data=json.loads((root/'release.json').read_text());base_version=data['version']
-repo=os.environ['GITHUB_REPOSITORY']
-# Choose a new patch version without requiring manual edits to release.json.
-# Published releases are immutable: never overwrite an existing version.
-def next_version():
-    import re
-    def version_tuple(value):
-        if not re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}',value):raise ValueError('Invalid version: '+str(value))
-        return tuple(map(int,value.split('.')))
-    base=version_tuple(base_version)
-    result=subprocess.run(['gh','release','list','--repo',repo,'--limit','100','--json','tagName,isDraft'],capture_output=True,text=True,check=True)
-    published=[]
-    for entry in json.loads(result.stdout):
-        if entry.get('isDraft'):continue
-        tag_name=entry.get('tagName','')
-        try:
-            if tag_name.startswith('v'):published.append(version_tuple(tag_name[1:]))
-        except ValueError:pass
-    if not published:return base_version
-    latest=max(published)
-    if base>latest:return base_version
-    return '.'.join(map(str,(latest[0],latest[1],latest[2]+1)))
-version=next_version()
-tag='v'+version
-out=Path(os.environ['RUNNER_TEMP'])/'yangning-release'
-manifest_url='https://github.com/'+repo+'/releases/latest/download/latest.json'
-package_url='https://github.com/'+repo+'/releases/download/'+tag+'/YangNing_VideoStudio_Windows_'+version+'.zip'
-subprocess.run([sys.executable,str(root/'make_release.py'),'--version',version,'--package-url',package_url,'--manifest-url',manifest_url,'--output',str(out),'--notes','字幕行数上限由2行增加到5行。长字幕按需要扩大下方背景字幕区，保留字号和上下微调；始终避开老师画面及底部安全区，空间不足或超过5行时自动分屏，保留完整文字与原句起止时间。更新并重启后重新导出。'],check=True)
+root=Path(__file__).resolve().parents[1];version=json.loads((root/'release.json').read_text())['version']
+repo=os.environ['GITHUB_REPOSITORY'];tag='v'+version
+out=Path(os.environ['RUNNER_TEMP'])/'YangNingFormalAcceptance/package';archive=out/('YangNing_VideoStudio_Windows_'+version+'.zip')
+info=json.loads((out/'latest.json').read_text())
+assert info['version']==version and info['sha256']==hashlib.sha256(archive.read_bytes()).hexdigest() and info['size']==archive.stat().st_size
+assert info['url']=='https://github.com/'+repo+'/releases/download/'+tag+'/'+archive.name
+with zipfile.ZipFile(archive) as z:
+    assert z.testzip() is None
+    meta=json.loads(z.read('release.json'));assert meta['version']==version and meta.get('channel')!='test'
+    assert meta['update_manifest_url']=='https://github.com/'+repo+'/releases/latest/download/latest.json'
+    assert hashlib.sha256(z.read('recovery/v0.12.11-original.zip')).hexdigest()=='ac6b5a09c35d92c88c986334b959c4847540a0175b05d9cc0321235be60f200e'
 def gh(*args,**kwargs):return subprocess.run(['gh',*args,'--repo',repo],**kwargs)
-result=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
-if result.returncode==0:
-    if not json.loads(result.stdout)['isDraft']:
-        print('This version is already published; existing release left unchanged.')
-        sys.exit(0)
+old=gh('release','view',tag,'--json','isDraft',capture_output=True,text=True)
+if old.returncode==0:
+    if not json.loads(old.stdout)['isDraft']:
+        print('Existing published version retained; nothing overwritten.');sys.exit(0)
 else:
-    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version,'--notes','字幕行数上限由2行增加到5行。长字幕按需要扩大下方背景字幕区，保留字号和上下微调；始终避开老师画面及底部安全区，空间不足或超过5行时自动分屏，保留完整文字与原句起止时间。更新并重启后重新导出。','--draft',check=True)
-gh('release','upload',tag,str(out/('YangNing_VideoStudio_Windows_'+version+'.zip')),str(out/'latest.json'),'--clobber',check=True)
+    gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version+' 正式版','--notes-file',str(root/'RELEASE_0_14_0_ZH.md'),'--draft',check=True)
+verification=out/('verification_'+version+'.json');record=json.loads(verification.read_text(encoding='utf8'))
+assert record['sha256']==info['sha256'] and record['source_commit']==os.environ['GITHUB_SHA']
+assert all(record[k] is True for k in ('old_check_update','old_download_verified','formal_gui','fresh_install','stable_restore','old_runtime_preserved','user_media_preserved'))
+checks=out/'SHA256SUMS.txt';checks.write_text(info['sha256']+'  '+archive.name+'\n',encoding='utf8')
+gh('release','upload',tag,str(archive),str(out/'latest.json'),str(checks),str(verification),str(root/'RELEASE_0_14_0_ZH.md'),'--clobber',check=True)
+with tempfile.TemporaryDirectory() as d:
+    gh('release','download',tag,'--pattern',archive.name,'--dir',d,check=True)
+    assert hashlib.sha256((Path(d)/archive.name).read_bytes()).hexdigest()==info['sha256']
 gh('release','edit',tag,'--draft=false','--latest',check=True)
-print('Release published:',tag)
-
-
+print('FORMAL_RELEASE_PUBLISHED',tag,info['sha256'])

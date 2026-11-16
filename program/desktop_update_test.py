@@ -8,7 +8,12 @@ def package(path,version='0.12.0',extra=None):
         z.writestr('release.json',json.dumps(dict(app='YangNingStudio',schema=1,version=version)))
         for name in ('app.py','bootstrap.py','desktop_update.py','desktop_launch.py','requirements.txt'):
             z.writestr('program/'+name,'# release\n')
-        for name,value in (extra or {}).items():z.writestr(name,value)
+        for name,value in (extra or {}).items():
+            # On Windows ZipInfo(name) normalizes backslashes to '/' before
+            # writing; assign the raw member name after construction so this
+            # fixture actually tests a hostile ZIP on every platform.
+            info=zipfile.ZipInfo();info.filename=name
+            z.writestr(info,value)
 
 class UpdateTests(unittest.TestCase):
     def setUp(self):

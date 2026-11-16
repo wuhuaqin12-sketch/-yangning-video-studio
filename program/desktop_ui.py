@@ -7,12 +7,13 @@ from desktop_update import (APP_VERSION,install_root,read_config,save_config,
 from media import run,Cancelled
 
 class DesktopUpdates:
-    def __init__(self,app,parent):
+    def __init__(self,app,parent,compact=False):
         self.app=app;self.checking=False;self.root=install_root()
         row=ttk.Frame(parent);row.pack(fill='x',pady=(2,4))
         ttk.Label(row,text='桌面版 '+APP_VERSION).pack(side='left')
-        ttk.Button(row,text='检查更新',command=lambda:self.check(True)).pack(side='right')
-        ttk.Button(row,text='更新设置',command=self.settings).pack(side='right',padx=6)
+        if not compact:ttk.Button(row,text='检查更新',command=lambda:self.check(True)).pack(side='right')
+        
+        if not compact:ttk.Button(row,text='更新设置',command=self.settings).pack(side='right',padx=6)
         app.root.after(2500,lambda:self.check(False))
 
     def installed(self):
@@ -97,7 +98,7 @@ class DesktopUpdates:
                 if self.app.stop.is_set():raise Cancelled()
                 env=os.environ.copy();env['YANGNING_INSTALL_ROOT']=str(self.root)
                 # Installed processes already inherit the root used by bootstrap.
-                python=self.root/'runtime'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+                python=__import__('upgrade_guard').runtime_dir(self.root,APP_VERSION)/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
                 self.app.progress('正在检查新版运行环境…')
                 run([str(python),str(target/'program'/'bootstrap.py'),'--setup-only'],self.app.stop)
                 if self.app.stop.is_set():raise Cancelled()
@@ -115,5 +116,5 @@ class DesktopUpdates:
             old=current.get('previous_version')
             if not old:raise ValueError('尚无可恢复的上一版本。')
             if messagebox.askyesno('恢复上一版',f'下次启动改用 {old}？素材和成片会保留。',parent=win):
-                activate(self.root,old);messagebox.showinfo('已恢复','请关闭软件，再从桌面打开。',parent=win)
+                __import__('upgrade_guard').rollback_previous(self.root,__import__('app').DATA);messagebox.showinfo('已恢复','请关闭软件，再从桌面打开。',parent=win)
         except Exception as e:messagebox.showerror('恢复版本',str(e),parent=win)
