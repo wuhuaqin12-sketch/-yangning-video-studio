@@ -50,6 +50,24 @@ class BodyFirstUITests(unittest.TestCase):
 
 
 
+    def test_inline_font_and_offset_persist_and_intro_advanced_stays_folded(self):
+        p=self.panel
+        p.style_vars['landscape_subtitle_font_size'].set('200')
+        p.style_vars['landscape_subtitle_offset_y'].set('18')
+        p.persist_style()
+        import app
+        saved=json.loads((app.DATA/'style_no_denoise.json').read_text(encoding='utf8'))
+        self.assertEqual(saved['landscape_subtitle_font_size'],200)
+        self.assertEqual(saved['landscape_subtitle_offset_y'],18)
+        self.mode(1);p.v['intro_enabled'].set(True)
+        p.intro_choice.set('replace');p.change_intro_sound();self.root.update()
+        self.assertEqual(p.v['intro_mode'].get(),'music_voice')
+        self.assertTrue(p.intro_voice.winfo_ismapped());self.assertTrue(p.music.winfo_ismapped())
+        self.assertFalse(p.intro_more.winfo_ismapped())
+        p.toggle_intro_more();self.root.update();self.assertTrue(p.intro_more.winfo_ismapped())
+        p.intro_choice.set('original');p.change_intro_sound();self.root.update()
+        self.assertFalse(p.intro_voice.winfo_ismapped());self.assertFalse(p.music.winfo_ismapped());self.assertFalse(p.intro_more.winfo_ismapped())
+
     def test_cantonese_exposes_required_aligned_srt_and_indonesian_stays_automatic(self):
         self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'timed')

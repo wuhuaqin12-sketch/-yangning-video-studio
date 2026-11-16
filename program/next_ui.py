@@ -108,7 +108,7 @@ class SequencePanel:
         self.music=ttk.LabelFrame(self.segments,text='片头音乐（可选）',padding=5)
         file_row(self.music,'background_audio','片头背景音乐（可选）')
         ttk.Label(self.music,text='固定片头音乐：选择后自动记住，仅用于片头；文件移动后请重选。').pack(anchor='w')
-        ttk.Button(self.music,text='音乐起点 / 音量 / 清除',command=self.background_audio_settings).pack(anchor='w')
+        ttk.Button(self.intro_more,text='背景音乐起点 / 音量',command=self.background_audio_settings).pack(anchor='w')
         self.segment_anchor=ttk.Frame(self.segments);self.segment_anchor.pack(fill='x')
         self.preview_controls=ttk.Frame(self.box)
         preview_buttons=ttk.Frame(self.preview_controls);preview_buttons.pack(fill='x')

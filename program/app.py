@@ -604,5 +604,6 @@ class App:
         self.root.after(100,self.poll)
     def close(self):
         if self.busy:messagebox.showinfo('正在处理','请先点击停止，等待任务结束后关闭。');return
+        self.sequence_panel.persist_style();self.sequence_panel.auto_save()
         self.save();self.root.destroy()
 if __name__=='__main__':App(tk.Tk()).root.mainloop()
