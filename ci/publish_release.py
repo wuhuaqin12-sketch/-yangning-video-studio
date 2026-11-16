@@ -19,8 +19,11 @@ if old.returncode==0:
         print('Existing published version retained; nothing overwritten.');sys.exit(0)
 else:
     gh('release','create',tag,'--target',os.environ['GITHUB_SHA'],'--title','杨宁视频工作室 '+version+' 正式版','--notes-file',str(root/'RELEASE_0_14_0_ZH.md'),'--draft',check=True)
+verification=out/('verification_'+version+'.json');record=json.loads(verification.read_text(encoding='utf8'))
+assert record['sha256']==info['sha256'] and record['source_commit']==os.environ['GITHUB_SHA']
+assert all(record[k] is True for k in ('old_check_update','old_download_verified','formal_gui','fresh_install','stable_restore','old_runtime_preserved','user_media_preserved'))
 checks=out/'SHA256SUMS.txt';checks.write_text(info['sha256']+'  '+archive.name+'\n',encoding='utf8')
-gh('release','upload',tag,str(archive),str(out/'latest.json'),str(checks),str(root/'RELEASE_0_14_0_ZH.md'),'--clobber',check=True)
+gh('release','upload',tag,str(archive),str(out/'latest.json'),str(checks),str(verification),str(root/'RELEASE_0_14_0_ZH.md'),'--clobber',check=True)
 with tempfile.TemporaryDirectory() as d:
     gh('release','download',tag,'--pattern',archive.name,'--dir',d,check=True)
     assert hashlib.sha256((Path(d)/archive.name).read_bytes()).hexdigest()==info['sha256']

@@ -51,6 +51,11 @@ def main():
     assert not (fresh/'preview_profile.json').exists()
     assert (fresh/'protected/v0.12.11-original.zip').exists()
     (sandbox/'formal-acceptance.json').write_text(json.dumps(dict(version=VERSION,old_check_update=True,old_download_verified=True,formal_gui=True,fresh_install=True,stable_restore=True,old_runtime_preserved=True,user_media_preserved=True,sha256=hashlib.sha256(package.read_bytes()).hexdigest()),indent=2),encoding='utf8')
+    evidence=json.loads((sandbox/'formal-acceptance.json').read_text(encoding='utf8'))
+    evidence['source_commit']=os.environ.get('GITHUB_SHA','')
+    evidence['mobile_checks']=json.loads((sandbox/'mobile-compatibility.json').read_text(encoding='utf8'))
+    evidence['stable_original_sha256']='ac6b5a09c35d92c88c986334b959c4847540a0175b05d9cc0321235be60f200e'
+    (package_dir/'verification_0.14.0.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf8')
     print('FORMAL_CHECK_UPDATE_INSTALL_AND_STABLE_RECOVERY_PASS',flush=True)
 
 if __name__=='__main__':main()
