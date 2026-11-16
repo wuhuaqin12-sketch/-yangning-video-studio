@@ -39,3 +39,37 @@ class IntegratedReleaseTests(unittest.TestCase):
         self.assertEqual(runtime_dir(Path('install'),'0.12.11'),Path('install/runtime'))
         self.assertEqual(runtime_dir(Path('install'),'0.14.0'),Path('install/runtimes/0.14.0'))
         self.assertNotEqual(runtime_dir(Path('install'),'0.14.0'),runtime_dir(Path('install'),'0.14.1'))
+
+    def test_previous_version_restores_matching_settings_without_touching_media(self):
+        from desktop_update import atomic_json
+        from stable_recovery import snapshot
+        from upgrade_guard import rollback_previous
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/'install';settings=Path(d)/'settings';settings.mkdir()
+            old=root/'versions/0.12.11/program';old.mkdir(parents=True);(old/'app.py').write_text('# old program')
+            atomic_json(root/'current.json',{'version':'0.12.11'})
+            atomic_json(settings/'style_no_denoise.json',{'title':'old'})
+            saved=snapshot(root,settings)
+            atomic_json(root/'protected/pre-upgrade-0.14.0.json',{'backup':str(saved)})
+            atomic_json(root/'current.json',{'version':'0.14.0','previous_version':'0.12.11'})
+            atomic_json(settings/'style_no_denoise.json',{'title':'new'})
+            media=settings/'my_video.mp4';media.write_bytes(b'keep')
+            self.assertEqual(rollback_previous(root,settings),'0.12.11')
+            self.assertEqual(json.loads((settings/'style_no_denoise.json').read_text())['title'],'old')
+            self.assertEqual(media.read_bytes(),b'keep')
+            self.assertEqual(json.loads((root/'current.json').read_text())['version'],'0.12.11')
+    def test_bad_backup_does_not_change_current_program_or_settings(self):
+        from desktop_update import atomic_json
+        from stable_recovery import snapshot
+        from upgrade_guard import rollback_previous
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/'install';settings=Path(d)/'settings';settings.mkdir()
+            atomic_json(root/'current.json',{'version':'0.12.11'})
+            atomic_json(settings/'style_no_denoise.json',{'title':'old'})
+            saved=snapshot(root,settings)
+            atomic_json(root/'protected/pre-upgrade-0.14.0.json',{'backup':str(saved)})
+            atomic_json(root/'current.json',{'version':'0.14.0','previous_version':'0.12.11'})
+            atomic_json(saved/'settings/style_no_denoise.json',{'title':'damaged'})
+            with self.assertRaisesRegex(ValueError,'校验失败'):rollback_previous(root,settings)
+            self.assertEqual(json.loads((root/'current.json').read_text())['version'],'0.14.0')
+            self.assertEqual(json.loads((settings/'style_no_denoise.json').read_text())['title'],'old')

@@ -42,7 +42,15 @@ def main():
     restored=json.loads((root/'current.json').read_text());assert restored['version']=='0.12.11' and restored['legacy_profile']
     assert (root/'runtimes'/VERSION/'Scripts/python.exe').exists() and (root/'runtime/pyvenv.cfg').read_bytes()==old_health
     assert sentinel.read_bytes()==b'original user media'
-    (sandbox/'formal-acceptance.json').write_text(json.dumps(dict(version=VERSION,old_check_update=True,old_download_verified=True,formal_gui=True,stable_restore=True,old_runtime_preserved=True,user_media_preserved=True,sha256=hashlib.sha256(package.read_bytes()).hexdigest()),indent=2),encoding='utf8')
+    # Run the actual first-time installer separately from the update path.
+    fresh=sandbox/'fresh-install';fresh_env=env.copy();fresh_env['YANGNING_INSTALL_ROOT']=str(fresh);fresh_env['LOCALAPPDATA']=str(sandbox/'fresh-local');fresh_env['YANGNING_DATA_ROOT']=str(sandbox/'fresh-profile')
+    subprocess.run([sys.executable,str(root/'versions'/VERSION/'program/install_desktop.py'),'--quiet'],env=fresh_env,check=True)
+    assert json.loads((fresh/'current.json').read_text())['version']==VERSION
+    assert json.loads((fresh/'update_config.json').read_text())['manifest_url']==feed
+    assert (fresh/'runtimes'/VERSION/'Scripts/pythonw.exe').exists()
+    assert not (fresh/'preview_profile.json').exists()
+    assert (fresh/'protected/v0.12.11-original.zip').exists()
+    (sandbox/'formal-acceptance.json').write_text(json.dumps(dict(version=VERSION,old_check_update=True,old_download_verified=True,formal_gui=True,fresh_install=True,stable_restore=True,old_runtime_preserved=True,user_media_preserved=True,sha256=hashlib.sha256(package.read_bytes()).hexdigest()),indent=2),encoding='utf8')
     print('FORMAL_CHECK_UPDATE_INSTALL_AND_STABLE_RECOVERY_PASS',flush=True)
 
 if __name__=='__main__':main()

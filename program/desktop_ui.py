@@ -116,5 +116,5 @@ class DesktopUpdates:
             old=current.get('previous_version')
             if not old:raise ValueError('尚无可恢复的上一版本。')
             if messagebox.askyesno('恢复上一版',f'下次启动改用 {old}？素材和成片会保留。',parent=win):
-                activate(self.root,old);messagebox.showinfo('已恢复','请关闭软件，再从桌面打开。',parent=win)
+                __import__('upgrade_guard').rollback_previous(self.root,__import__('app').DATA);messagebox.showinfo('已恢复','请关闭软件，再从桌面打开。',parent=win)
         except Exception as e:messagebox.showerror('恢复版本',str(e),parent=win)

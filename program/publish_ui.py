@@ -120,7 +120,7 @@ def show(app, open_path):
         ttk.Button(position,text='下移',command=lambda k=key:shift_subtitle(k,10)).pack(side='left',padx=3)
         ttk.Button(position,text='恢复位置',command=lambda k=key:variables[k].set('0')).pack(side='left',padx=3)
     colour_row(page,9,'outline_color','描边颜色（标题、字幕共用）')
-    ttk.Label(page,text='横版默认放在原中文字幕区域；竖版仍放在视频下方背景区。\n两个比例分别保存，负数上移、正数下移，单位为成片像素；到达安全边界会停止。\n0为默认位置；仍需调整时点上移或下移。预览与正式导出使用同一位置。\n新字幕不能完全遮住不同字形的中文残留，仍需去除原中文字和描边。',wraplength=780).grid(row=7,column=0,columnspan=3,sticky='w',pady=6)
+    ttk.Label(page,text='字号与上下位置在主页面对应横版、竖版设置中调整。横版默认放在原中文字幕区域；竖版仍放在视频下方背景区。\n两个比例分别保存，负数上移、正数下移，单位为成片像素；到达安全边界会停止。\n0为默认位置；仍需调整时点上移或下移。预览与正式导出使用同一位置。\n新字幕不能完全遮住不同字形的中文残留，仍需去除原中文字和描边。',wraplength=780).grid(row=7,column=0,columnspan=3,sticky='w',pady=6)
     page=pages['keywords']
     ttk.Label(page,text='仅日语字幕自动识别重点词（红色 / 黄色）；其他语言不自动上色。可手动修改。',wraplength=780).grid(row=0,column=0,columnspan=3,sticky='w',pady=5)
     colour_row(page,1,'keyword_color','未指定颜色的重点词用此颜色')

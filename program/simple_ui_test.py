@@ -9,7 +9,8 @@ class SimpleUITests(unittest.TestCase):
     def test_main_button_and_advanced_controls(self):
         src=Path(__file__).with_name('app.py').read_text(encoding='utf8')
         self.assertRegex(src, r"text='一键生成视频'.*command=self.one_click_simple")
-        self.assertIn("text='声音 / 停顿设置'",src)
+        self.assertIn("('声音处理',self.sound_settings)",src)
+        self.assertIn("('停顿与速度',self.timing_settings)",src)
         self.assertIn("label='项目'",src)
         self.assertIn("self.activity_open=False",src)
         self.assertIn("burn=False",src)
