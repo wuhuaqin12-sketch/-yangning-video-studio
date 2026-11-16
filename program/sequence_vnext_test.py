@@ -69,7 +69,15 @@ class RenderTests(unittest.TestCase):
         q=p.defaults();sub=[(1,0.1,0.7,'金剛経の智慧。')]
         first=s.compose_segment(str(self.clip),sub,{'subtitle_font_size':55},'portrait',q,self.root,self.cancel,True,'body')
         last=s.compose_segment(str(self.clip),[],{},'portrait',q,self.root,self.cancel,False,'ending')
-        out=self.root/'joined.mp4';s.concat_clips([first,last],out,self.root,self.cancel)
+        out=self.root/'joined.mp4';calls=[];failed=[];original_ff=s.ff
+        def capture(args,cancel,cwd=None):
+            calls.append(list(args))
+            try:return original_ff(args,cancel,cwd)
+            except Exception:
+                failed.append(list(args));raise
+        with patch.object(s,'ff',side_effect=capture):s.concat_clips([first,last],out,self.root,self.cancel)
+        self.assertTrue(any('-f' in call and call[call.index('-f')+1]=='concat' and '-c' in call and call[call.index('-c')+1]=='copy' for call in calls),calls)
+        self.assertFalse(any('-c' in call and call[call.index('-c')+1]=='copy' for call in failed),failed)
         data=probe(out,self.cancel);v=next(x for x in data['streams'] if x['codec_type']=='video')
         self.assertEqual((v['width'],v['height']),(1080,1920));self.assertGreater(float(data['format']['duration']),1.5)
         ass=(self.root/'body_portrait.ass').read_text();self.assertIn('金剛経',ass);self.assertIn('\\clip',ass)
