@@ -51,6 +51,17 @@ class MultiTests(unittest.TestCase):
         self.assertEqual(result[0][3],'Pikiran pertama pada dasarnya tenang.')
         self.assertEqual(json.loads((self.p/'words.json').read_text(encoding='utf8'))['language'],'id')
 
+    def test_cantonese_uses_chinese_acoustic_backend(self):
+        def worker(req,folder,cancel,progress):
+            data=json.loads(req.read_text(encoding='utf8'))
+            self.assertEqual(data['language'],'zh')
+            self.assertEqual(data['text'],'般若波羅蜜。')
+            (folder/'multilingual_result.json').write_text(json.dumps({'segments':[{'words':[dict(word='般若波羅蜜。',start=.5,end=2.)]}]}),encoding='utf8')
+        with patch.object(m,'_worker_run',side_effect=worker):
+            result=m.align([(1,20,30,'般若波羅蜜。')],self.f,self.p,threading.Event(),lambda s:None,'yue',3.)
+        self.assertEqual(result[0][1:3],(.5,2.))
+        self.assertEqual(json.loads((self.p/'words.json').read_text(encoding='utf8'))['language'],'yue')
+
     def test_french_segment_repartition(self):
         cues=[(1,20,30,'Vous êtes assis ici.'),(2,30,40,'Votre esprit s’arrête.')]
         result={'segments':[{'words':[{'word':'Vous êtes ', 'start':0.2,'end':1.0}]},
