@@ -2,7 +2,7 @@
 import json,math,os,re,subprocess,sys,time,unicodedata
 from pathlib import Path
 from media import Cancelled,executable
-LANGUAGES={'en','ja','fr','de','es','it','ko','pt','zh','id'}
+LANGUAGES={'en','ja','fr','de','es','it','ko','pt','zh','id','yue'}
 def text_key(text):
     text=re.sub('<[^>]*>','',text)
     return ''.join(c for c in unicodedata.normalize('NFKC',text).casefold() if c.isalnum())
@@ -91,7 +91,7 @@ def align(cues,audio,folder,cancel,progress,language,duration):
     folder=Path(folder);request=folder/'alignment_request.json'
     text='\n'.join(re.sub('<[^>]*>','',c[3]).replace('\n',' ').strip() for c in cues)
     if any(not text_key(c[3]) for c in cues):raise ValueError('参考稿含空句。')
-    request.write_text(json.dumps(dict(audio=str(Path(audio).resolve()),text=text,language=language),ensure_ascii=False),encoding='utf8')
+    request.write_text(json.dumps(dict(audio=str(Path(audio).resolve()),text=text,language=('zh' if language=='yue' else language)),ensure_ascii=False),encoding='utf8')
     _worker_run(request,folder,cancel,progress)
     result=json.loads((folder/'multilingual_result.json').read_text(encoding='utf8'))
     try:

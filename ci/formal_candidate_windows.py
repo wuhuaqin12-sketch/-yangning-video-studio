@@ -5,7 +5,7 @@ repo=Path(__file__).resolve().parents[1];sys.path.insert(0,str(repo/'program'))
 from desktop_update import atomic_json
 from stable_recovery import preserve_archive,stage_stable
 
-VERSION='0.14.0'
+VERSION='0.14.1'
 def main():
     sandbox=Path(os.environ['RUNNER_TEMP'])/'YangNingFormalAcceptance';sandbox.mkdir(exist_ok=True)
     root=sandbox/'install';local=sandbox/'localappdata';settings=local/'YangNingStudio';settings.mkdir(parents=True,exist_ok=True)
@@ -55,7 +55,7 @@ def main():
     evidence['source_commit']=os.environ.get('GITHUB_SHA','')
     evidence['mobile_checks']=json.loads((sandbox/'mobile-compatibility.json').read_text(encoding='utf8'))
     evidence['stable_original_sha256']='ac6b5a09c35d92c88c986334b959c4847540a0175b05d9cc0321235be60f200e'
-    (package_dir/'verification_0.14.0.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf8')
+    (package_dir/('verification_'+VERSION+'.json')).write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf8')
     print('FORMAL_CHECK_UPDATE_INSTALL_AND_STABLE_RECOVERY_PASS',flush=True)
 
 if __name__=='__main__':main()

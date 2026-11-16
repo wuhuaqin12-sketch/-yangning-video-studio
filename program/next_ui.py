@@ -38,9 +38,8 @@ class SequencePanel:
         ttk.Label(bar,text='输出比例').pack(side='left')
         self.output_mode_box=ttk.Combobox(bar,textvariable=self.mode,state='readonly',values=('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),width=22)
         self.output_mode_box.pack(side='left',padx=(8,16));self.output_mode_box.bind('<<ComboboxSelected>>',self.change_mode)
-        self.appearance_button=ttk.Button(bar,text='背景 / 封面 / 字幕设置 ▾',command=self.toggle_appearance);self.appearance_button.pack(side='left')
+        self.appearance_button=ttk.Button(bar,text='背景 / 封面 / 标题 / 字幕设置 ▾',command=self.toggle_appearance);self.appearance_button.pack(side='left')
         row=ttk.Frame(self.controls);row.pack(fill='x',pady=4)
-        ttk.Button(row,text='更多文字样式',command=app.publish).pack(side='left')
         ttk.Button(row,text='竖版画面大小（高级）',command=self.picture_settings).pack(side='left',padx=8)
         ttk.Label(self.controls,text='横版：16:9等比完整显示，不加背景和标题。竖版：保留背景、标题及视频下方字幕。',wraplength=760).pack(anchor='w',pady=3)
         p=defaults()
@@ -67,6 +66,20 @@ class SequencePanel:
             ttk.Label(row,text=label).pack(side='left',padx=4)
             box=choice_combo(row,self.v[key],values,width=12);box.pack(side='left');self.cover_choices[key]=box
         ttk.Label(self.cover_options,text='封面实际写入MP4开头；期间静音，配音和字幕从后续视频开始。').pack(anchor='w')
+        # Title and subtitle typography live together with background and cover.
+        # Reuse the existing pending_style dictionary to preserve saved projects.
+        from publish_style import DEFAULTS as STYLE_DEFAULTS
+        self.title_style_vars={}
+        title_frame=ttk.LabelFrame(self.controls,text='标题（竖版）',padding=6)
+        title_frame.pack(fill='x',pady=4)
+        for key,label in [('title','标题文字'),('title_font','标题字体'),('title_font_size','标题字号'),('title_color','标题颜色'),('title_x','水平位置 %'),('title_y','上下位置 %')]:
+            line=ttk.Frame(title_frame);line.pack(fill='x',pady=2)
+            ttk.Label(line,text=label,width=15).pack(side='left')
+            value=str(app.pending_style.get(key,STYLE_DEFAULTS[key]))
+            var=tk.StringVar(value=value);self.title_style_vars[key]=var
+            ttk.Entry(line,textvariable=var).pack(side='left',fill='x',expand=True)
+            var.trace_add('write',lambda *_:self.style_changed())
+        ttk.Label(title_frame,text='横版不叠加标题；原有标题样式会保留。',wraplength=740).pack(anchor='w')
         self.layout_details=ttk.Frame(self.controls)
         self.layouts=ttk.Notebook(self.layout_details);self.layouts.pack(fill='x',pady=4)
         for mode,label in [('landscape','横版设置'),('portrait','竖版设置')]:
@@ -141,7 +154,7 @@ class SequencePanel:
         ttk.Label(parent,text='字号与位置分别保存；正数下移，负数上移。',wraplength=740).pack(anchor='w')
     def current_style(self):
         from publish_style import normalize_style
-        return normalize_style({**self.app.pending_style,**{k:v.get() for k,v in self.style_vars.items()}})
+        return normalize_style({**self.app.pending_style,**{k:v.get() for k,v in self.style_vars.items()},**{k:v.get() for k,v in self.title_style_vars.items()}})
     def style_changed(self):
         if self.style_restoring:return
         try:self.app.pending_style=self.current_style()
@@ -317,7 +330,7 @@ class SequencePanel:
         for idx,name in enumerate(('landscape','portrait')):
             self.layouts.tab(idx,state='normal' if selected in ('both','auto',name) else 'hidden')
         if selected in ('landscape','portrait'):self.layouts.select(0 if selected=='landscape' else 1)
-        self.appearance_button.configure(text='收起背景 / 封面 / 字幕设置 ▴' if self.appearance_open.get() else '背景 / 封面 / 字幕设置 ▾')
+        self.appearance_button.configure(text='收起背景 / 封面 / 标题 / 字幕设置 ▴' if self.appearance_open.get() else '背景 / 封面 / 标题 / 字幕设置 ▾')
         self.changed()
     def project(self):
         j={k:v.get() for k,v in self.app.v.items()};j.update(sequence=self.value(),ui_state={'segment_mode':self.segment_mode.get(),'appearance_open':self.appearance_open.get(),'details_open':self.details_open.get(),'parts_preferences':{k:self.v[k].get() for k in ('intro_enabled','outro_enabled','background_audio')}},publish_settings=self.app.pending_style,trim=self.app.auto_cut.get(),next_enabled=self.enabled.get())

@@ -231,10 +231,49 @@ def cover_clip(image,mode,p,folder,cancel):
 
 def concat_clips(clips,out,folder,cancel):
     durations=[]
+    metadata=[]
     for clip in clips:
         streams=probe(clip,cancel)['streams'];v=next(x for x in streams if x['codec_type']=='video');a=next(x for x in streams if x['codec_type']=='audio')
         durations.append(float(v['duration']))
         if abs(float(v['duration'])-float(a['duration']))>.08:raise RuntimeError('拼接片段的音轨未覆盖全部画面，已停止，避免下一段无声。')
+        hashes=[]
+        for selector in ('v:0','a:0'):
+            report=json.loads(run([executable('ffprobe'),'-v','error','-select_streams',selector,'-show_data_hash','sha256','-show_entries','stream=extradata_hash','-of','json',str(clip)],cancel))
+            hashes.append(report['streams'][0].get('extradata_hash'))
+        metadata.append((v,a,*hashes))
+    # Segments produced by compose_segment/cover_clip already use one mobile
+    # encoding contract. If their stream parameters and MP4 timebases match,
+    # join the independently encoded segments by packet copy. This avoids a
+    # second full H.264/AAC encode while retaining the safe decode/re-encode
+    # path for original clips or any mismatched source.
+    def signature(pair):
+        v,a,v_extra,a_extra=pair
+        return (v.get('codec_name'),v.get('profile'),v.get('level'),v.get('width'),v.get('height'),
+                v.get('pix_fmt'),v.get('codec_tag_string'),v.get('time_base'),v.get('avg_frame_rate'),
+                v.get('sample_aspect_ratio'),v.get('color_range'),v.get('color_space'),v.get('color_transfer'),
+                v.get('color_primaries'),v.get('field_order'),v.get('has_b_frames'),v_extra,
+                a.get('codec_name'),a.get('profile'),a.get('sample_rate'),a.get('channels'),
+                a.get('channel_layout'),a.get('time_base'),a_extra)
+    if metadata and all(signature(x)==signature(metadata[0]) for x in metadata):
+        listing=Path(folder)/('concat_copy_'+Path(out).stem+'.txt')
+        def quote(path):return "file '"+str(Path(path).resolve()).replace("'", "'\\''")+"'"
+        listing.write_text('ffconcat version 1.0'+chr(10)+chr(10).join(quote(x) for x in clips)+chr(10),encoding='utf8')
+        try:
+            ff(['-f','concat','-safe','0','-i',listing,'-c','copy','-movflags','+faststart',out],cancel)
+            streams=probe(out,cancel)['streams'];v=next(x for x in streams if x['codec_type']=='video');a=next(x for x in streams if x['codec_type']=='audio')
+            if abs(seconds(out,cancel)-sum(durations))>.3 or abs(float(v['duration'])-float(a['duration']))>.18:
+                raise RuntimeError('无损拼接的时长或音画末端校验不通过。')
+            run([executable('ffmpeg'),'-nostdin','-v','error','-xerror','-i',str(out),'-f','null','-'],cancel)
+            inspect_mobile(out,cancel)
+            packets=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(out)],cancel))['packets']
+            previous=None
+            for packet in packets:
+                timestamp=float(packet.get('pts_time',0));span=float(packet.get('duration_time',0))
+                if span>.08 or (previous is not None and timestamp-previous>.08):raise RuntimeError('无损拼接的音频时间戳校验不通过。')
+                previous=timestamp
+            return
+        except (OSError,RuntimeError,ValueError,StopIteration):
+            Path(out).unlink(missing_ok=True)
     # Decode each independent MP4 with its own timebase/SPS. The concat demuxer
     # cannot safely infer a new segment's timebase after a still-image cover.
     inputs=[];filters=[];labels=[]
@@ -344,7 +383,12 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             first=parts[1];transition=folder/('cover_transition_'+mode+'.mp4')
             ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]',*encode_args(),transition],cancel)
             parts=[transition,*parts[2:]]
-        concat_clips(parts,full,folder,cancel)
+        # A single normalized segment needs no concat filter or second H.264 encode.
+        # Keep the full decode, timestamp, duration and mobile checks below.
+        if len(parts)==1:
+            shutil.copyfile(parts[0],full)
+        else:
+            concat_clips(parts,full,folder,cancel)
         packet_data=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(full)],cancel))['packets']
         previous=None
         for packet in packet_data:
