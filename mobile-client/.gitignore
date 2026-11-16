@@ -1,7 +1,10 @@
 node_modules/
 .sites-runtime/
-dist/app.js
-dist/qa.js
-dist/*.LEGAL.txt
+dist/*.js*
 dist/licenses/
 dist/samples/
+dist/onnx/
+dist/dict/
+dist/sync-test-data/
+dist/sync-qa.html
+*.tar.gz
