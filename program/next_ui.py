@@ -25,23 +25,23 @@ class SequencePanel:
     def __init__(self,app,parent):
         self.app=app;self.v={};self.layout_vars={};self.saved_timer=None;self.restoring=True
         self.repair_previews={};self.last_preview='';self.approved_preview='';self.separation_preview_token='';self.layout_styles={};self.pause_override=None;self.region_status={}
-        self.enabled=tk.BooleanVar(value=False)
+        self.enabled=tk.BooleanVar(value=True)
         self.appearance_open=tk.BooleanVar(value=False);self.details_open=tk.BooleanVar(value=False)
         self.segment_mode=tk.StringVar(value=SEGMENT_MODES[0])
-        self.box=ttk.LabelFrame(parent,text='② 画面与字幕',padding=8);self.box.pack(fill='x',pady=5)
+        self.box=ttk.LabelFrame(parent,text='② 选择成片',padding=12,style='Section.TLabelframe');self.box.pack(fill='x',pady=5)
         bar=ttk.Frame(self.box);bar.pack(fill='x')
         ttk.Label(app.material_mode_row,text='素材方式',width=18).pack(side='left')
         self.segment_mode_box=ttk.Combobox(app.material_mode_row,textvariable=self.segment_mode,values=SEGMENT_MODES,state='readonly',width=30)
         self.segment_mode_box.pack(side='left');self.segment_mode_box.bind('<<ComboboxSelected>>',self.change_segments)
         self.controls=ttk.Frame(self.box,padding=(4,6))
-        self.mode=tk.StringVar(value='智能自动选择');self.v['output_mode']=tk.StringVar(value='auto')
+        self.mode=tk.StringVar(value='只生成竖版9:16');self.v['output_mode']=tk.StringVar(value='portrait')
         ttk.Label(bar,text='输出比例').pack(side='left')
         self.output_mode_box=ttk.Combobox(bar,textvariable=self.mode,state='readonly',values=('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),width=22)
         self.output_mode_box.pack(side='left',padx=(8,16));self.output_mode_box.bind('<<ComboboxSelected>>',self.change_mode)
         self.appearance_button=ttk.Button(bar,text='背景 / 封面 / 字幕设置 ▾',command=self.toggle_appearance);self.appearance_button.pack(side='left')
         row=ttk.Frame(self.controls);row.pack(fill='x',pady=4)
-        ttk.Button(row,text='标题 / 字幕 / 重点词',command=app.publish).pack(side='left')
-        ttk.Button(row,text='竖版画面大小',command=self.picture_settings).pack(side='left',padx=8)
+        ttk.Button(row,text='更多文字样式',command=app.publish).pack(side='left')
+        ttk.Button(row,text='竖版画面大小（高级）',command=self.picture_settings).pack(side='left',padx=8)
         ttk.Label(self.controls,text='横版：16:9等比完整显示，不加背景和标题。竖版：保留背景、标题及视频下方字幕。',wraplength=760).pack(anchor='w',pady=3)
         p=defaults()
         for key,value in p.items():
@@ -51,8 +51,12 @@ class SequencePanel:
             r=ttk.Frame(parent);r.pack(fill='x',pady=3)
             ttk.Label(r,text=label,width=22).pack(side='left');ttk.Entry(r,textvariable=self.v[key]).pack(side='left',fill='x',expand=True)
             ttk.Button(r,text='选择',command=lambda:self.pick(key)).pack(side='left',padx=4)
+            clear=ttk.Button(r,text='清除',command=lambda:self.clear_asset(key))
+            def refresh(*_):
+                clear.pack(side='left') if self.v[key].get() else clear.pack_forget()
+            self.v[key].trace_add('write',refresh);refresh()
             return r
-        file_row(self.controls,'background','竖版背景图（可选）')
+        self.background_row=file_row(self.controls,'background','竖版背景图（可选）')
         self.cover_anchor=ttk.Frame(self.controls);self.cover_anchor.pack(fill='x')
         self.cover_single=file_row(self.controls,'cover','封面图（可选）')
         self.cover_l=file_row(self.controls,'cover_landscape','横版封面图16:9');self.cover_p=file_row(self.controls,'cover_portrait','竖版封面图9:16')
@@ -63,12 +67,12 @@ class SequencePanel:
             ttk.Label(row,text=label).pack(side='left',padx=4)
             box=choice_combo(row,self.v[key],values,width=12);box.pack(side='left');self.cover_choices[key]=box
         ttk.Label(self.cover_options,text='封面实际写入MP4开头；期间静音，配音和字幕从后续视频开始。').pack(anchor='w')
-        ttk.Button(self.controls,text='字幕位置 / 原中文字幕处理 ▾',command=self.toggle_details).pack(anchor='w',pady=5)
         self.layout_details=ttk.Frame(self.controls)
         self.layouts=ttk.Notebook(self.layout_details);self.layouts.pack(fill='x',pady=4)
         for mode,label in [('landscape','横版设置'),('portrait','竖版设置')]:
             frame=ttk.Frame(self.layouts,padding=6);self.layouts.add(frame,text=label)
             variables={key:(tk.BooleanVar(value=value) if isinstance(value,bool) else tk.StringVar(value=value)) for key,value in p['layouts'][mode].items() if key!='style'};self.layout_vars[mode]=variables;self.layout_styles[mode]={}
+            self.add_typography(frame,mode)
             ttk.Checkbutton(frame,text='去除原视频已烧录中文字幕',variable=variables['remove_chinese']).pack(anchor='w')
             ttk.Label(frame,text='字幕字号与位置自动安排；长句向下换行，更多文字分屏。默认只清除中文字与描边。',wraplength=800).pack(anchor='w',pady=3)
             actions=ttk.Frame(frame);actions.pack(fill='x',pady=3)
@@ -85,17 +89,25 @@ class SequencePanel:
         ttk.Checkbutton(self.segment_switch,text='添加片尾',variable=self.v['outro_enabled'],command=self.update).pack(side='left',padx=20)
         self.intro=ttk.LabelFrame(self.segments,text='片头',padding=6)
         file_row(self.intro,'intro_video','片头视频')
+        self.intro_choice=tk.StringVar(value='original');self.music_only=tk.BooleanVar(value=False);self.intro_more_open=tk.BooleanVar(value=False)
+        self.intro_more=ttk.Frame(self.intro)
         row=ttk.Frame(self.intro);row.pack(fill='x')
-        ttk.Radiobutton(row,text='完整保留原声',variable=self.v['intro_mode'],value='original',command=self.update).pack(side='left')
-        ttk.Radiobutton(row,text='音乐＋现成配音',variable=self.v['intro_mode'],value='music_voice',command=self.update).pack(side='left',padx=12)
-        ttk.Radiobutton(row,text='只用导入的背景音乐',variable=self.v['intro_mode'],value='external_music',command=self.update).pack(side='left')
+        ttk.Radiobutton(row,text='保留片头原声',variable=self.intro_choice,value='original',command=self.change_intro_sound).pack(side='left')
+        ttk.Radiobutton(row,text='替换片头声音',variable=self.intro_choice,value='replace',command=self.change_intro_sound).pack(side='left',padx=12)
+
         self.intro_voice=ttk.Frame(self.intro)
-        file_row(self.intro_voice,'intro_audio','片头配音');file_row(self.intro_voice,'intro_srt','片头原画面SRT');file_row(self.intro_voice,'intro_target_srt','已对齐配音SRT（可空）')
-        ttk.Checkbutton(self.intro_voice,text='片头视频本身已去人声 / 纯音乐',variable=self.v['intro_clean_audio']).pack(anchor='w')
+        file_row(self.intro_voice,'intro_audio','外语配音');file_row(self.intro_voice,'intro_srt','片头SRT（原画面时间）')
+        file_row(self.intro_more,'intro_target_srt','已对齐配音SRT（可空）')
+        ttk.Checkbutton(self.intro_more,text='只替换音乐，不加配音',variable=self.music_only,command=self.change_intro_sound).pack(anchor='w')
+        self.intro_more_button=ttk.Button(self.intro,text='更多片头设置 ▾',command=self.toggle_intro_more)
+        ttk.Checkbutton(self.intro_more,text='片头视频本身已去人声 / 纯音乐',variable=self.v['intro_clean_audio']).pack(anchor='w')
         self.outro=ttk.LabelFrame(self.segments,text='片尾：完整保留画面和音乐，无需配音或SRT',padding=6);file_row(self.outro,'outro_video','片尾视频')
+        from ui_assets import load_music
+        self.music_preferences=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')
+        self.v['background_audio'].set(load_music(self.music_preferences))
         self.music=ttk.LabelFrame(self.segments,text='片头音乐（可选）',padding=5)
         file_row(self.music,'background_audio','片头背景音乐（可选）')
-        ttk.Label(self.music,text='导入已去人声的音乐，仅作用于片头。').pack(anchor='w')
+        ttk.Label(self.music,text='固定片头音乐：选择后自动记住，仅用于片头；文件移动后请重选。').pack(anchor='w')
         ttk.Button(self.music,text='音乐起点 / 音量 / 清除',command=self.background_audio_settings).pack(anchor='w')
         self.segment_anchor=ttk.Frame(self.segments);self.segment_anchor.pack(fill='x')
         self.preview_controls=ttk.Frame(self.box)
@@ -116,6 +128,38 @@ class SequencePanel:
             except (OSError,ValueError,KeyError,TypeError):pass
         for variable in [self.enabled,self.mode,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
         self.update();app.root.after(1200,self.offer_recover)
+    def add_typography(self,parent,mode):
+        if not hasattr(self,'style_vars'):self.style_vars={};self.style_timer=None;self.style_restoring=False
+        from publish_style import DEFAULTS
+        row=ttk.Frame(parent);row.pack(fill='x',pady=5)
+        for suffix,label in (('subtitle_font_size','字号'),('subtitle_offset_y','上下微调')):
+            key=mode+'_'+suffix
+            value=self.app.pending_style.get(key,self.app.pending_style.get(suffix,DEFAULTS[key]))
+            v=tk.StringVar(value=str(value));self.style_vars[key]=v
+            ttk.Label(row,text=label).pack(side='left',padx=(4,4));ttk.Entry(row,textvariable=v,width=8).pack(side='left',padx=(0,12))
+            v.trace_add('write',lambda *_:self.style_changed())
+        ttk.Label(parent,text='字号与位置分别保存；正数下移，负数上移。',wraplength=740).pack(anchor='w')
+    def current_style(self):
+        from publish_style import normalize_style
+        return normalize_style({**self.app.pending_style,**{k:v.get() for k,v in self.style_vars.items()}})
+    def style_changed(self):
+        if self.style_restoring:return
+        try:self.app.pending_style=self.current_style()
+        except ValueError:return
+        if self.style_timer:self.app.root.after_cancel(self.style_timer)
+        self.style_timer=self.app.root.after(400,self.persist_style)
+    def persist_style(self):
+        self.style_timer=None
+        from desktop_update import atomic_json
+        from app import DATA
+        atomic_json(DATA/'style_no_denoise.json',self.app.pending_style)
+        self.changed()
+    def sync_styles(self):
+        from publish_style import DEFAULTS
+        self.style_restoring=True
+        try:
+            for key,v in self.style_vars.items():v.set(str(self.app.pending_style.get(key,DEFAULTS[key])))
+        finally:self.style_restoring=False
     def toggle_appearance(self):
         self.appearance_open.set(not self.appearance_open.get());self.update()
     def toggle_details(self):
@@ -149,6 +193,12 @@ class SequencePanel:
                 self.app.events.put(('repair_roi_expanded',mode,value))
             self.app.worker(work)
         except Exception as e:messagebox.showerror('扩展字幕行',str(e))
+    def preview_dialog(self):
+        if self.app.busy:return
+        win=tk.Toplevel(self.app.root);win.title('预览（可选）');box=ttk.Frame(win,padding=14);box.pack(fill='both',expand=True)
+        self.number(box,'preview_start','从第几秒开始');self.number(box,'preview_seconds','预览时长（1–60秒）')
+        def start():win.destroy();self.preview()
+        ttk.Button(box,text='生成范围预览',command=start).pack(anchor='e',pady=8)
     def preview_range(self):
         win=tk.Toplevel(self.app.root);win.title('预览范围');box=ttk.Frame(win,padding=15);box.pack(fill='both',expand=True)
         self.number(box,'preview_start','从第几秒开始');self.number(box,'preview_seconds','预览秒数（1–60）')
@@ -173,15 +223,22 @@ class SequencePanel:
             return value==default
         return any(not same(p[k],base[k]) for k in keys)
     def change_segments(self,event=None):
-        self.enabled.set(self.segment_mode.get()!=SEGMENT_MODES[0] or self.custom_appearance());self.update()
+        self.enabled.set(True);self.update()
     def number(self,parent,key,label):
         row=ttk.Frame(parent);row.pack(fill='x',pady=3);ttk.Label(row,text=label).pack(side='left');ttk.Entry(row,textvariable=self.v[key],width=14).pack(side='left',padx=8)
     def pick_background_audio(self):
-        path=filedialog.askopenfilename(filetypes=[('音频 / 已去人声片头','*.wav *.mp3 *.m4a *.flac *.mp4 *.mov'),('全部文件','*.*')])
-        if path:
-            self.v['background_audio'].set(path)
-            if self.v['intro_mode'].get()=='original':self.v['intro_mode'].set('external_music')
-            self.enabled.set(True);self.update()
+        self.pick('background_audio')
+    def change_intro_sound(self):
+        self.v['intro_mode'].set('original' if self.intro_choice.get()=='original' else 'external_music' if self.music_only.get() else 'music_voice');self.update()
+    def toggle_intro_more(self):
+        self.intro_more_open.set(not self.intro_more_open.get());self.update()
+    def clear_asset(self,key):
+        self.v[key].set('')
+        if key in ('cover_landscape','cover_portrait'):self.v['cover'].set('')
+        if key=='background_audio':
+            from ui_assets import remember_music
+            remember_music(self.music_preferences,'')
+        self.update()
     def background_audio_settings(self):
         win=tk.Toplevel(self.app.root);win.title('片头背景音乐与音量');win.geometry('680x270')
         box=ttk.Frame(win,padding=16);box.pack(fill='both',expand=True)
@@ -189,12 +246,18 @@ class SequencePanel:
         self.number(box,'background_audio_offset','从背景音乐文件第几秒开始')
         self.number(box,'intro_music_gain','背景音乐音量倍数（0–2）')
         ttk.Label(box,text='导入的是已去掉讲话的音乐，不是自动人声分离。\n只替换片头原声，可与片头日语配音混合；正文和片尾不加这条音乐。\n音乐过短会提示，不自动循环、加速或铺满整片。',wraplength=620).pack(anchor='w',pady=8)
-        ttk.Button(box,text='清除背景音乐',command=lambda:self.v['background_audio'].set('')).pack(anchor='w')
+        ttk.Button(box,text='清除背景音乐',command=lambda:self.clear_asset('background_audio')).pack(anchor='w')
 
 
     def pick(self,key):
-        p=filedialog.askopenfilename()
-        if p:self.v[key].set(p);self.enabled.set(True);self.update()
+        from ui_assets import filetypes,check_image,remember_music
+        p=filedialog.askopenfilename(filetypes=filetypes(key))
+        if not p:return
+        try:
+            if key in ('background','cover','cover_landscape','cover_portrait'):check_image(p,'背景或封面')
+            if key=='background_audio':remember_music(self.music_preferences,p)
+            self.v[key].set(p);self.enabled.set(True);self.update()
+        except Exception as e:messagebox.showerror('素材类型',str(e),parent=self.app.root)
     def pick_subtitle_region(self,mode):
         from roi_picker import show
         show(self,mode)
@@ -218,8 +281,8 @@ class SequencePanel:
         except (ValueError,tk.TclError):return
         if any(self.v[k].get() for k in ('cover','cover_landscape','cover_portrait')):self.cover_options.pack(fill='x',after=self.cover_anchor)
         else:self.cover_options.pack_forget()
-        if self.enabled.get():self.preview_controls.pack(fill='x',pady=4)
-        else:self.preview_controls.pack_forget()
+        self.preview_controls.pack_forget()
+        self.app.refresh_export_summary()
         if self.restoring:return
         if self.saved_timer:self.app.root.after_cancel(self.saved_timer)
         self.saved_timer=self.app.root.after(1000,self.auto_save)
@@ -227,21 +290,33 @@ class SequencePanel:
         mode=self.segment_mode.get()
         for part in (self.controls,self.segments,self.preview_controls):part.pack_forget()
         if self.appearance_open.get():self.controls.pack(fill='x')
-        self.layout_details.pack(fill='x') if self.details_open.get() else self.layout_details.pack_forget()
+        self.layout_details.pack(fill='x')
         for row in (self.cover_single,self.cover_l,self.cover_p):row.pack_forget()
-        for row in ((self.cover_l,self.cover_p) if self.v['output_mode'].get()=='both' else (self.cover_single,)):row.pack(fill='x',pady=3,before=self.cover_anchor)
+        selected=self.v['output_mode'].get()
+        self.background_row.pack(fill='x',before=self.cover_anchor) if selected!='landscape' else self.background_row.pack_forget()
+        for row in ((self.cover_l,self.cover_p) if selected in ('both','auto') else (self.cover_l,) if selected=='landscape' else (self.cover_p,)):row.pack(fill='x',pady=3,before=self.cover_anchor)
         self.cover_options.pack(fill='x',after=self.cover_anchor) if any(self.v[k].get() for k in ('cover','cover_landscape','cover_portrait')) else self.cover_options.pack_forget()
         if mode!=SEGMENT_MODES[0]:self.segments.pack(fill='x',pady=5)
         for part in (self.segment_switch,self.intro,self.outro,self.music):part.pack_forget()
         if mode==SEGMENT_MODES[1]:self.segment_switch.pack(fill='x',before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get():self.intro.pack(fill='x',pady=4,before=self.segment_anchor)
+        self.intro_choice.set('original' if self.v['intro_mode'].get()=='original' else 'replace')
+        self.music_only.set(self.v['intro_mode'].get()=='external_music')
         self.intro_voice.pack(fill='x') if self.v['intro_mode'].get()=='music_voice' else self.intro_voice.pack_forget()
+        self.intro_more_button.pack_forget();self.intro_more.pack_forget()
+        if self.v['intro_mode'].get()!='original':
+            self.intro_more_button.pack(fill='x')
+            if self.intro_more_open.get():self.intro_more.pack(fill='x')
         if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get() and self.v['intro_mode'].get()!='original':self.music.pack(fill='x',pady=4,before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['outro_enabled'].get():self.outro.pack(fill='x',pady=4,before=self.segment_anchor)
-        if self.enabled.get():self.preview_controls.pack(fill='x',pady=4)
+        self.preview_controls.pack_forget()
         if hasattr(self.app,'media_labels'):
             for key,label in [('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）')]:self.app.media_labels[key].configure(text=label)
         self.segments.configure(text='片头 / 片尾（按需启用）')
+        selected=self.v['output_mode'].get()
+        for idx,name in enumerate(('landscape','portrait')):
+            self.layouts.tab(idx,state='normal' if selected in ('both','auto',name) else 'hidden')
+        if selected in ('landscape','portrait'):self.layouts.select(0 if selected=='landscape' else 1)
         self.appearance_button.configure(text='收起背景 / 封面 / 字幕设置 ▴' if self.appearance_open.get() else '背景 / 封面 / 字幕设置 ▾')
         self.changed()
     def project(self):
@@ -273,12 +348,16 @@ class SequencePanel:
             labels={'ja':'日语','en':'英语','fr':'法语','de':'德语','id':'印尼语','zh':'中文','yue':'粤语','ko':'韩语','es':'西班牙语','pt':'葡萄牙语','it':'意大利语'}
             self.app.language_name.set(labels.get(job.get('language'),'其他语言'))
             self.app.refresh_language_fields()
-            self.app.pending_style=job.get('publish_settings') or {}
+            self.app.pending_style=job.get('publish_settings') or {};self.sync_styles()
             self.pause_override=job.get('_pause_override')
             for key,var in self.v.items():var.set(job['sequence'][key])
             for mode,d in self.layout_vars.items():
                 for key,var in d.items():var.set(job['sequence']['layouts'][mode][key])
                 self.layout_styles[mode]=dict(job['sequence']['layouts'][mode].get('style') or {})
+            if self.v['cover'].get():
+                for ratio in ('landscape','portrait'):
+                    if not self.v['cover_'+ratio].get():self.v['cover_'+ratio].set(self.v['cover'].get())
+                self.v['cover'].set('')
             ui=job.get('ui_state') or {}
             derived=SEGMENT_MODES[1] if job['sequence']['intro_enabled'] or job['sequence']['outro_enabled'] else SEGMENT_MODES[0]
             saved_mode=ui.get('segment_mode')
@@ -286,7 +365,7 @@ class SequencePanel:
             for k,value in ui.get('parts_preferences',{}).items():
                 if k in ('intro_enabled','outro_enabled','background_audio'):self.v[k].set(value)
             self.appearance_open.set(ui.get('appearance_open',False));self.details_open.set(ui.get('details_open',False))
-            self.enabled.set(job.get('next_enabled',True));self.mode.set(dict(zip(('auto','landscape','portrait','both'),('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版')))[self.v['output_mode'].get()]);self.update()
+            self.enabled.set(True);self.mode.set(dict(zip(('auto','landscape','portrait','both'),('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版')))[self.v['output_mode'].get()]);self.update()
             if missing:messagebox.showwarning('素材需要重新选择','以下素材已移动或删除：\n'+'\n'.join(missing.values()))
         except Exception as e:messagebox.showerror('打开项目',str(e))
         finally:self.restoring=False;self.changed()
@@ -319,7 +398,7 @@ class SequencePanel:
         except Exception as e:messagebox.showerror('字幕修复预览',str(e))
     def recover(self):
         if self.app.busy:return
-        if not messagebox.askyesno('恢复稳定版','先备份本测试版设置，使用独立运行环境和干净配置启动原始v12.11。不会删除视频、音频、字幕、图片或导出文件。首次需要联网准备旧版依赖。继续？'):return
+        if not messagebox.askyesno('恢复稳定版','先备份当前版本设置，使用独立运行环境和干净配置启动原始v12.11。不会删除视频、音频、字幕、图片或导出文件。首次需要联网准备旧版依赖。继续？'):return
         def work():
             from recovery_ui_backend import restore_isolated
             path=restore_isolated(self.app.stop,self.app.progress)

@@ -14,12 +14,14 @@ def main():
     env=os.environ.copy();env['YANGNING_INSTALL_ROOT']=str(runtime_root);env['PYTHONUTF8']='1';env['PYTHONIOENCODING']='utf-8'
     if (root/'preview_profile.json').is_file():env['YANGNING_DATA_ROOT']=str(root/'profile'/'YangNingStudio')
     if current.get('legacy_profile'):
-        env['LOCALAPPDATA']=str(runtime_root/'profile');env.pop('YANGNING_DATA_ROOT',None)
+        env['LOCALAPPDATA']=str(runtime_root/'profile');env['YANGNING_INSTALL_ROOT']=str(root);env.pop('YANGNING_DATA_ROOT',None)
         env['PATH']=str(runtime_root/'tools')+os.pathsep+env.get('PATH','')
-    python=runtime_root/'runtime'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+    modern=not scope and tuple(map(int,version.split('.')))>=(0,14,0)
+    runtime= root/'runtimes'/version if modern else runtime_root/'runtime'
+    python=runtime/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
     with (root/'launch.log').open('a',encoding='utf8') as log:
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
-        result=subprocess.run([str(python),str(program/'bootstrap.py')],cwd=program,env=env,stdout=log,stderr=log,**flags)
+        result=subprocess.run([str(python),str(program/('app.py' if current.get('legacy_profile') else 'bootstrap.py'))],cwd=program,env=env,stdout=log,stderr=log,**flags)
     if result.returncode:raise RuntimeError('启动失败。请查看 '+str(root/'launch.log'))
 
 if __name__=='__main__':

@@ -104,14 +104,14 @@ def show(app, open_path):
     ttk.Label(page,text='日语标题默认 Yuji Boku（佑字 朴）毛笔体。可选本机字体，也可直接输入字体名。',wraplength=780).grid(row=8,column=0,columnspan=3,sticky='w',pady=8)
     page=pages['subtitle']
     entry(page,0,'font','字体种类','font');colour_row(page,1,'subtitle_color','普通文字颜色')
-    sizes=[('landscape_subtitle_font_size','横版字号（像素）'),('portrait_subtitle_font_size','竖版字号（像素）')] if managed else [('subtitle_font_size','字幕字号（像素）')]
+    sizes=[] if managed else [('subtitle_font_size','字幕字号（像素）')]
     for row,(key,label) in enumerate(sizes+[('subtitle_outline','描边宽度（像素）')],2):entry(page,row,key,label)
     def shift_subtitle(key,amount):
         try:value=float(variables[key].get())+amount
         except ValueError:
             messagebox.showerror('字幕位置','请填写数字；0为默认位置。',parent=win);return
         variables[key].set(f'{max(-400,min(400,value)):g}')
-    positions=[('landscape_subtitle_offset_y','横版字幕上下微调'),('portrait_subtitle_offset_y','竖版字幕上下微调')] if managed else [('subtitle_offset_y','字幕上下微调（像素）')]
+    positions=[] if managed else [('subtitle_offset_y','字幕上下微调（像素）')]
     for row,(key,label) in enumerate(positions,5 if managed else 4):
         ttk.Label(page,text=label).grid(row=row,column=0,sticky='w',pady=6)
         position=ttk.Frame(page);position.grid(row=row,column=1,columnspan=2,sticky='w')
@@ -190,6 +190,8 @@ def show(app, open_path):
     def collect():
         result={k:v.get() for k,v in variables.items()};result['keywords']=words.get('1.0','end-1c')
         if managed:
+            main_style=sequence_panel.current_style()
+            for key in sequence_panel.style_vars:result[key]=main_style[key]
             result['background']=sequence_panel.v['background'].get();result['output']=app.v['output'].get()
             result['video_width']=app.pending_style.get('video_width',100);result['video_height']=app.pending_style.get('video_height',76)
             if sequence_panel.enabled.get():result['video']=app.v['video'].get();result['srt']=app.v['source_srt'].get()

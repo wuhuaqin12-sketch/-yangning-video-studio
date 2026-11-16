@@ -38,7 +38,7 @@ def install():
     # Keep this stable launcher backward compatible across app updates.
     shutil.copyfile(target/'program'/'desktop_launch.py',root/'desktop_launch.py')
     from windows_shortcut import create_shortcuts
-    create_shortcuts(root/'runtime'/'Scripts'/'pythonw.exe',root/'desktop_launch.py',root)
+    create_shortcuts(__import__('upgrade_guard').runtime_dir(root,APP_VERSION)/'Scripts'/'pythonw.exe',root/'desktop_launch.py',root)
     activate(root,APP_VERSION)
     if release.get('update_manifest_url') and not (root/'update_config.json').exists():
         save_config(release['update_manifest_url'],root)

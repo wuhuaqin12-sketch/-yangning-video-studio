@@ -98,7 +98,7 @@ class DesktopUpdates:
                 if self.app.stop.is_set():raise Cancelled()
                 env=os.environ.copy();env['YANGNING_INSTALL_ROOT']=str(self.root)
                 # Installed processes already inherit the root used by bootstrap.
-                python=self.root/'runtime'/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
+                python=__import__('upgrade_guard').runtime_dir(self.root,APP_VERSION)/('Scripts/python.exe' if os.name=='nt' else 'bin/python')
                 self.app.progress('正在检查新版运行环境…')
                 run([str(python),str(target/'program'/'bootstrap.py'),'--setup-only'],self.app.stop)
                 if self.app.stop.is_set():raise Cancelled()

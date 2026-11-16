@@ -23,7 +23,7 @@ class BodyFirstUITests(unittest.TestCase):
         self.panel.segment_mode.set(SEGMENT_MODES[index]);self.panel.change_segments();self.root.update()
     def test_default_body_is_compact_and_classic_flow_stays_available(self):
         p=self.panel
-        self.assertFalse(p.enabled.get());self.assertFalse(self.app.sequence_settings)
+        self.assertTrue(p.enabled.get());self.assertEqual(self.app.sequence_settings["output_mode"],"portrait")
         self.assertTrue(p.segment_mode_box.winfo_ismapped());self.assertEqual(p.segment_mode_box.master,self.app.material_mode_row)
         self.assertTrue(p.output_mode_box.winfo_ismapped())
         self.assertEqual(p.segments.master,self.app.segment_host)
@@ -35,7 +35,7 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertEqual(p.layout_vars['portrait']['subtitle_font_size'].get(),'')
         self.assertEqual(p.layout_vars['landscape']['repair_method'].get(),'glyph')
         self.assertTrue(p.layout_vars['landscape']['repair_full_width'].get())
-        self.app.v['video'].set('ordinary.mp4');self.root.update();self.assertFalse(p.enabled.get())
+        self.app.v['video'].set('ordinary.mp4');self.root.update();self.assertTrue(p.enabled.get())
         self.assertLess(self.app.main_button.winfo_rooty()+self.app.main_button.winfo_height(),self.root.winfo_rooty()+self.root.winfo_height())
         self.assertTrue(callable(self.app.advanced));self.assertTrue(callable(self.app.timing_settings));self.assertTrue(callable(self.app.final_export))
     def test_modes_show_only_relevant_fields_and_preserve_disabled_assets(self):
@@ -188,12 +188,9 @@ class BodyFirstUITests(unittest.TestCase):
             for child in w.winfo_children():yield child;yield from widgets(child)
         tabs=next(w for w in widgets(dialog) if isinstance(w,ttk.Notebook))
         self.assertEqual([tabs.tab(t,'text') for t in tabs.tabs()],['标题','字幕','重点词颜色'])
-        for name,value in [('横版字号（像素）','120'),('竖版字号（像素）','70')]:
-            label=next(w for w in widgets(dialog) if isinstance(w,ttk.Label) and w.cget('text')==name)
-            field=label.master.grid_slaves(row=label.grid_info()['row'],column=1)[0];field.delete(0,'end');field.insert(0,value)
-        spins=[w for w in widgets(dialog) if isinstance(w,ttk.Spinbox)]
-        self.assertEqual(len(spins),2)
-        for spin,value in zip(spins,('60','20')):spin.delete(0,'end');spin.insert(0,value)
+        self.panel.style_vars['landscape_subtitle_font_size'].set('120');self.panel.style_vars['portrait_subtitle_font_size'].set('70')
+        self.panel.style_vars['landscape_subtitle_offset_y'].set('60');self.panel.style_vars['portrait_subtitle_offset_y'].set('20')
+        self.assertFalse(any(isinstance(w,ttk.Spinbox) for w in widgets(dialog)))
         button=next(w for w in widgets(dialog) if isinstance(w,ttk.Button) and w.cget('text')=='预览横版排版')
         with patch.object(self.app,'worker',side_effect=lambda work:work()),patch('style_preview.render',return_value=str(bg)) as render,patch('app.open_path'):
             button.invoke();render.assert_called_once()

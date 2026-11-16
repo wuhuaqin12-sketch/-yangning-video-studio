@@ -21,7 +21,7 @@ def main():
     args=p.parse_args();version_tuple(args.version)
     https_url(args.package_url);https_url(args.manifest_url)
     root=Path(__file__).resolve().parent;out=Path(args.output).resolve()
-    if args.test_package:
+    if tuple(map(int,args.version.split('.'))) >= (0,14,0) or args.test_package:
         from stable_recovery import verify_archive
         verify_archive(root/'recovery/v0.12.11-original.zip')
     if root==out or root in out.parents:raise ValueError('输出目录请放在源码目录以外。')
@@ -31,7 +31,7 @@ def main():
         for f in root.rglob('*'):
             if not f.is_file() or any(part in ('.venv','__pycache__','.git') or part.startswith('.venv.failed_') for part in f.parts) or f.suffix=='.pyc':continue
             name=f.relative_to(root).as_posix()
-            if args.test_package and (name in RETIRED_PREVIEW_FILES or f.name.endswith('_test.py') or (f.suffix=='.md' and f.name not in ('README.md','SUBTITLE_SIZE_0_13_16_ZH.md'))):continue
+            if name in RETIRED_PREVIEW_FILES or f.name.endswith('_test.py') or (f.suffix=='.md' and f.name not in ('README.md','RELEASE_0_14_0_ZH.md')):continue
             body=f.read_bytes()
             if name=='release.json':
                 body=json.dumps(dict(app='YangNingStudio',schema=1,version=args.version,update_manifest_url='' if args.test_package else args.manifest_url,**({'channel':'test'} if args.test_package else {}))).encode()

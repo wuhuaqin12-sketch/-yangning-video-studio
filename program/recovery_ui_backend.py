@@ -8,10 +8,8 @@ from media import run
 def restore_isolated(cancel,progress=lambda s:None):
     if os.name!='nt':raise RuntimeError('稳定版恢复启动需要Windows；本环境不会伪报启动成功。')
     root=install_root()
-    if not (root/'preview_profile.json').exists():
-        root=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudioDesktopPreview'
-        atomic_json(root/'preview_profile.json',{'channel':'test','isolated_profile':True})
-    profile=root/'profile/YangNingStudio'
+    is_test=(root/'preview_profile.json').exists()
+    profile=root/'profile/YangNingStudio' if is_test else Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')
     snapshot(root,profile)
     progress('校验并保护原始v12.11恢复包…')
     bundled=Path(__file__).parent.parent/'recovery/v0.12.11-original.zip'
@@ -53,11 +51,11 @@ def restore_isolated(cancel,progress=lambda s:None):
     from windows_shortcut import create_shortcuts
     previous=os.environ.get('YANGNING_SHORTCUT_NAME')
     try:
-        os.environ['YANGNING_SHORTCUT_NAME']='杨宁视频工作室 测试版'
+        os.environ['YANGNING_SHORTCUT_NAME']='杨宁视频工作室 测试版' if is_test else '杨宁视频工作室'
         create_shortcuts(python.with_name('pythonw.exe'),root/'desktop_launch.py',root)
     finally:
         if previous is None:os.environ.pop('YANGNING_SHORTCUT_NAME',None)
         else:os.environ['YANGNING_SHORTCUT_NAME']=previous
     atomic_json(root/'protected/isolated_restore.json',{'version':STABLE_VERSION,'platform':sys.platform,'setup_and_gui_checked':True,'profile':str(isolated/'profile'),'runtime':str(isolated/'runtime')})
-    progress('v12.11独立恢复检查通过。关闭测试版，再从测试版快捷方式启动；素材和导出文件均保留。')
+    progress('v12.11恢复检查通过。关闭软件后从原工作室快捷方式启动；素材和导出文件均保留。')
     return root

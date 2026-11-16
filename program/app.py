@@ -48,9 +48,10 @@ class App:
         pane=ttk.Frame(canvas,padding=10);pane_id=canvas.create_window((0,0),window=pane,anchor='nw')
         pane.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>',lambda e:canvas.itemconfigure(pane_id,width=e.width))
+        self.apply_simple_styles()
         heading=ttk.Frame(pane);heading.pack(fill='x',pady=(0,4))
         ttk.Label(heading,text='杨宁视频工作室',font=('Microsoft YaHei UI',20,'bold')).pack(side='left')
-        form=ttk.LabelFrame(pane,text='① 导入素材',padding=8);form.pack(fill='x',pady=6)
+        form=ttk.LabelFrame(pane,text='① 导入素材',padding=12,style='Section.TLabelframe');form.pack(fill='x',pady=6)
         self.material_form=form
         self.material_mode_row=ttk.Frame(form);self.material_mode_row.grid(row=0,column=0,columnspan=3,sticky='ew',pady=(0,6))
         self.segment_host=ttk.Frame(form);self.segment_host.grid(row=7,column=0,columnspan=3,sticky='ew')
@@ -74,20 +75,25 @@ class App:
         ttk.Label(options,text='配音语言').pack(side='left')
         language=ttk.Combobox(options,textvariable=self.language_name,values=('按文件名判断','日语','英语','中文','粤语','法语','印尼语','德语','西班牙语','意大利语','韩语','葡萄牙语','其他语言'),state='readonly',width=12)
         language.pack(side='left',padx=(6,12));language.bind('<<ComboboxSelected>>',self.language_changed)
-        ttk.Label(options,text='配音速度').pack(side='left')
-        ttk.Combobox(options,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=6).pack(side='left',padx=6)
-        ttk.Button(options,text='声音 / 停顿设置',command=self.sound_settings).pack(side='left',padx=10)
-        final=ttk.LabelFrame(pane,text='③ 导出视频',padding=8);final.pack(fill='x',pady=6)
+        self.speed_controls=ttk.Frame(options)
+        ttk.Label(self.speed_controls,text='配音速度').pack(side='left')
+        ttk.Combobox(self.speed_controls,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly',width=6).pack(side='left',padx=6)
+        ttk.Label(options,text='速度1.0×；更多声音设置在“工具”菜单').pack(side='left',padx=10)
+        final=ttk.LabelFrame(pane,text='③ 保存并生成',padding=12,style='Section.TLabelframe');final.pack(fill='x',pady=6)
         destination=ttk.Frame(final);destination.pack(fill='x',pady=(0,6))
         ttk.Label(destination,text='保存到').pack(side='left',padx=(0,8))
         ttk.Entry(destination,textvariable=self.v['output']).pack(side='left',fill='x',expand=True)
         ttk.Button(destination,text='选择文件夹',command=lambda:self.pick('output')).pack(side='left',padx=(6,0))
         line=ttk.Frame(final);line.pack(fill='x')
-        self.main_button=ttk.Button(line,text='一键生成视频',command=self.one_click_simple)
+        self.main_button=ttk.Button(line,text='一键生成视频',style='Primary.TButton',command=self.one_click_simple)
         self.main_button.pack(side='left',ipadx=24,ipady=8)
-        ttk.Button(line,text='停止',command=self.request_stop).pack(side='left',padx=12)
-        ttk.Button(line,text='打开输出文件夹',command=self.open_result).pack(side='left')
-        self.status=tk.StringVar(value='默认只做正文；需要片头片尾时，再更改素材方式。')
+        self.stop_button=ttk.Button(line,text='停止',command=self.request_stop)
+        ttk.Button(line,text='打开完整成片位置',command=self.open_result).pack(side='left',padx=8)
+        ttk.Button(line,text='预览（可选）',command=self.sequence_panel.preview_dialog).pack(side='left')
+        self.export_summary=tk.StringVar(value='本次生成：竖版MP4＋SRT；新字幕尚未写入画面')
+        ttk.Label(final,textvariable=self.export_summary,wraplength=800).pack(anchor='w',pady=(7,0))
+        self.v['burn'].trace_add('write',lambda *_:self.refresh_export_summary())
+        self.status=tk.StringVar(value='默认竖版；可直接一键生成，预览可选。')
         ttk.Label(pane,textvariable=self.status,wraplength=900).pack(anchor='w',pady=(8,2))
         self.bar=ttk.Progressbar(pane,mode='indeterminate');self.bar.pack(fill='x',pady=(0,6))
         self.activity_header=ttk.Frame(pane);self.activity_header.pack(fill='x',pady=2)
@@ -107,6 +113,17 @@ class App:
         from ui_scroll import install_wheel
         install_wheel(canvas)
         self.refresh();root.after(100,self.poll);root.after(1000,self.heartbeat);root.protocol('WM_DELETE_WINDOW',self.close)
+    def apply_simple_styles(self):
+        style=ttk.Style(self.root)
+        style.configure('Section.TLabelframe.Label',font=('Microsoft YaHei UI',16,'bold'),foreground='#245DB0')
+        style.configure('Section.TLabelframe',padding=10)
+        style.configure('Primary.TButton',font=('Microsoft YaHei UI',12,'bold'),padding=(18,9))
+    def refresh_export_summary(self):
+        if not hasattr(self,'export_summary'):return
+        names={'portrait':'竖版MP4＋SRT','landscape':'横版MP4＋SRT','both':'横版、竖版两个完整MP4＋对应SRT','auto':'自动选择比例的完整MP4＋SRT'}
+        p=self.sequence_panel.value()
+        extra=('；含片头' if p['intro_enabled'] else '')+('；含片尾' if p['outro_enabled'] else '')
+        self.export_summary.set('本次生成：'+names[p['output_mode']]+('；新字幕写入画面' if self.v['burn'].get() else '；新字幕不写入画面')+extra)
     def set_activity(self,visible=None):
         self.activity_open=not self.activity_open if visible is None else bool(visible)
         if self.activity_open:self.activity.pack(after=self.activity_header,fill='both',expand=True,pady=3)
@@ -131,6 +148,8 @@ class App:
         if self.busy:return
         win=tk.Toplevel(self.root);win.title('停顿与速度');win.geometry('620x250')
         box=ttk.Frame(win,padding=18);box.pack(fill='both',expand=True)
+        ttk.Label(box,text='配音速度').pack(anchor='w')
+        ttk.Combobox(box,textvariable=self.v['speed'],values=('0.75','0.9','1.0','1.1','1.2','1.25','1.5','2.0'),state='readonly').pack(anchor='w')
         ttk.Checkbutton(box,text='剪短多余空白，保留自然停顿',variable=self.auto_cut).pack(anchor='w',pady=5)
         line=ttk.Frame(box);line.pack(fill='x',pady=8)
         ttk.Label(line,text='配音语言').pack(side='left')
@@ -362,11 +381,12 @@ class App:
             if automatic:widget.grid_remove()
             else:widget.grid()
     def pick(self,k):
-        selected=filedialog.askdirectory() if k=='output' else filedialog.askopenfilename()
+        from ui_assets import filetypes
+        selected=filedialog.askdirectory() if k=='output' else filedialog.askopenfilename(filetypes=filetypes(k))
         if selected:
             self.v[k].set(remember(selected) if k=='output' else selected)
     def settings(self):
-        j={k:v.get() for k,v in self.v.items()};j['publish_settings']=dict(self.pending_style);j['trim']=self.auto_cut.get();j.pop('preview_time',None)
+        j={k:v.get() for k,v in self.v.items()};j['publish_settings']=self.sequence_panel.current_style();j['trim']=self.auto_cut.get();j.pop('preview_time',None)
         # Validate current optional fields; never export an earlier cached value
         # while a currently edited title time/disclaimer duration is invalid.
         if self.sequence_panel.enabled.get():self.sequence_settings=self.sequence_panel.value()
@@ -422,6 +442,7 @@ class App:
         self.worker(go)
     def worker(self,fn):
         if self.busy:return
+        self.stop_button.pack(side='left',padx=8)
         self.busy=True;self.started=time.monotonic();self.stop.clear();self.bar.start(15);self.main_button.state(['disabled']);self.sequence_panel.set_processing_busy(True)
         self.status.set('已启动，正在检查素材…')
         def work():
@@ -538,6 +559,7 @@ class App:
             while True:
                 e=self.events.get_nowait()
                 if e[0]=='idle':
+                    self.stop_button.pack_forget()
                     self.busy=False;self.bar.stop();self.main_button.state(['!disabled']);self.sequence_panel.set_processing_busy(False)
                     if not self.jobs or self.status.get().startswith('已启动'):self.status.set('操作完成。')
                 elif e[0]=='desktop_update':self.desktop_updates.handle(e[1:])
@@ -552,6 +574,7 @@ class App:
                     self.sequence_panel.last_preview=e[1];self.sequence_panel.update();open_path(e[2])
                 elif e[0]=='style_saved':
                     self.pending_style=e[1]
+                    self.sequence_panel.sync_styles()
                     if 'background' in self.pending_style:self.pending_style['background']=self.sequence_panel.v['background'].get()
                     (DATA/'style_no_denoise.json').write_text(json.dumps(e[1],ensure_ascii=False,indent=2),encoding='utf8')
                     self.log_line('排版已保存，下次一键导出会应用。')

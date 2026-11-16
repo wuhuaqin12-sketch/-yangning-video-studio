@@ -4,7 +4,7 @@ from pathlib import Path
 from desktop_update import atomic_json
 
 SCHEMA=1
-DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='auto',intro_enabled=False,intro_video='',intro_mode='original',
+DEFAULTS=dict(background_audio='',background_audio_offset=0,output_mode='portrait',intro_enabled=False,intro_video='',intro_mode='original',
     intro_audio='',intro_srt='',intro_target_srt='',intro_clean_audio=False,
     intro_separation_approved='',intro_separation_model='htdemucs_ft',intro_music_gain=1.0,
     outro_enabled=False,outro_video='',cover='',cover_landscape='',cover_portrait='',

@@ -8,6 +8,7 @@ from PIL import Image,ImageOps
 from media import executable,run,probe,parse_srt,stamp,Cancelled
 from desktop_update import atomic_json
 from project_vnext import normalize,processing_key,unique_output,file_digest
+from mobile_video import encode_args,inspect as inspect_mobile
 
 def seconds(path,cancel):return float(probe(path,cancel)['format']['duration'])
 def write_srt(path,cues):
@@ -212,7 +213,7 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     has_audio=any(s['codec_type']=='audio' for s in probe(source,cancel)['streams'])
     if not has_audio:inputs+=['-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={duration}']
     audio_index=0 if has_audio else (2 if use_background else 1)
-    ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={duration},atrim=duration={duration}','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k','-t',duration,out],cancel,cwd=folder)
+    ff([*inputs,'-filter_complex_threads','1','-filter_complex',vf,'-map','[v]','-map',f'{audio_index}:a:0','-af',f'aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur={duration},atrim=duration={duration}',*encode_args(),'-t',duration,out],cancel,cwd=folder)
     return out
 
 def cover_clip(image,mode,p,folder,cancel):
@@ -225,7 +226,7 @@ def cover_clip(image,mode,p,folder,cancel):
     fit='increase' if p['cover_fit']=='crop' else 'decrease'
     vf=f'scale={width}:{height}:force_original_aspect_ratio={fit},'+(f'crop={width}:{height}' if fit=='increase' else f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black')+',setsar=1,fps=30'
     out=folder/('cover_'+mode+'.mp4')
-    ff(['-loop','1','-i',normalized,'-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={p["cover_seconds"]}','-vf',vf,'-t',p['cover_seconds'],'-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',out],cancel)
+    ff(['-loop','1','-i',normalized,'-f','lavfi','-i',f'anullsrc=r=48000:cl=stereo:d={p["cover_seconds"]}','-vf',vf,'-t',p['cover_seconds'],*encode_args(),out],cancel)
     return out
 
 def concat_clips(clips,out,folder,cancel):
@@ -234,10 +235,44 @@ def concat_clips(clips,out,folder,cancel):
         streams=probe(clip,cancel)['streams'];v=next(x for x in streams if x['codec_type']=='video');a=next(x for x in streams if x['codec_type']=='audio')
         durations.append(float(v['duration']))
         if abs(float(v['duration'])-float(a['duration']))>.08:raise RuntimeError('拼接片段的音轨未覆盖全部画面，已停止，避免下一段无声。')
-    # Inputs are freshly encoded homogeneous local paths; no user text enters concat syntax.
-    listing=folder/('concat_'+uuid.uuid4().hex+'.txt')
-    listing.write_text(''.join("file '"+str(Path(p).resolve()).replace("'","'\\''")+"'\nduration "+format(length,'.9f')+"\n" for p,length in zip(clips,durations)),encoding='utf8')
-    ff(['-f','concat','-safe','0','-i',listing,'-map','0:v:0','-map','0:a:0','-c:v','copy','-af','aresample=48000:async=1:first_pts=0','-c:a','aac','-b:a','192k','-movflags','+faststart',out],cancel)
+    # Decode each independent MP4 with its own timebase/SPS. The concat demuxer
+    # cannot safely infer a new segment's timebase after a still-image cover.
+    inputs=[];filters=[];labels=[]
+    for i,(clip,duration) in enumerate(zip(clips,durations)):
+        inputs+=['-i',clip]
+        filters.append(f'[{i}:v]fps=30,format=yuv420p,setsar=1,settb=AVTB,setpts=PTS-STARTPTS[v{i}]')
+        filters.append(f'[{i}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=duration={duration},asetpts=PTS-STARTPTS[a{i}]')
+        labels.append(f'[v{i}][a{i}]')
+    filters.append(''.join(labels)+f'concat=n={len(clips)}:v=1:a=1[v][a]')
+    ff([*inputs,'-filter_complex_threads','1','-filter_complex',';'.join(filters),'-map','[v]','-map','[a]',*encode_args(),'-t',sum(durations),out],cancel)
+
+
+def preflight_assets(job,p,cancel):
+    from ui_assets import check_image
+    source=valid_file(job['video'],'正文视频')
+    stream=next(s for s in probe(source,cancel)['streams'] if s['codec_type']=='video')
+    estimate=seconds(source,cancel)
+    if job.get('audio') and Path(job['audio']).is_file():estimate=max(estimate,seconds(job['audio'],cancel))
+    for enabled,key in (('intro_enabled','intro_video'),('outro_enabled','outro_video')):
+        if p.get(enabled):estimate+=seconds(valid_file(p[key],key),cancel)
+    if any(p.get(k) for k in ('cover','cover_landscape','cover_portrait')):estimate+=p['cover_seconds']
+    modes=choose_modes(p,estimate,stream)
+    if 'portrait' in modes and p.get('background'):check_image(p['background'],'竖版背景图')
+    for mode in modes:
+        cover=p.get('cover_'+mode) or p.get('cover')
+        if cover:check_image(cover,('横版' if mode=='landscape' else '竖版')+'封面')
+    if p.get('intro_enabled'):
+        intro=valid_file(p['intro_video'],'片头视频')
+        if p['intro_mode']!='original':
+            if p.get('background_audio'):
+                path=valid_file(p['background_audio'],'默认片头背景音乐（可能已移动）')
+                info=probe(path,cancel)
+                if not any(s['codec_type']=='audio' for s in info['streams']):raise ValueError('片头背景音乐没有可用音轨。')
+                if seconds(path,cancel)-p['background_audio_offset']<seconds(intro,cancel)-.05:raise ValueError('片头背景音乐太短，不能覆盖片头；不会自动循环。')
+            elif not p.get('intro_clean_audio'):raise ValueError('请先选择已去人声的片头背景音乐。')
+            if p['intro_mode']=='music_voice':
+                valid_file(p['intro_audio'],'片头外语配音');valid_file(p['intro_srt'],'片头SRT')
+    if p.get('outro_enabled'):valid_file(p['outro_video'],'片尾视频')
 
 def preflight_repair(job,p,cancel):
     source=valid_file(job['video'],'原视频')
@@ -265,6 +300,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
     p.update(opening_title_enabled=False,opening_topic_enabled=False,disclaimer_enabled=False,combined_replace_outro=False)
     if p.get('background_audio') and not p['intro_enabled']:
         raise ValueError('片头背景音乐只能用于独立片头，请先勾选添加片头并选择片头视频。')
+    preflight_assets(job,p,cancel)
     preflight_repair(job,p,cancel)
     output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
     folder=Path(tempfile.mkdtemp(prefix='YangNing_Next_',dir=output))
@@ -306,7 +342,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             # Fade between two actual images. Hold only the next segment's first
             # frame as a transition handle; its speech/content still starts at D.
             first=parts[1];transition=folder/('cover_transition_'+mode+'.mp4')
-            ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','18','-c:a','aac','-b:a','192k',transition],cancel)
+            ff(['-i',parts[0],'-i',first,'-filter_complex_threads','1','-filter_complex',f'[1:v]tpad=start_duration=0.5:start_mode=clone[n];[0:v][n]xfade=transition=fade:duration=0.5:offset={p["cover_seconds"]-.5}[v];[0:a][1:a]concat=n=2:v=0:a=1[a]','-map','[v]','-map','[a]',*encode_args(),transition],cancel)
             parts=[transition,*parts[2:]]
         concat_clips(parts,full,folder,cancel)
         packet_data=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(full)],cancel))['packets']
@@ -327,7 +363,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             start=p['preview_start'];length=min(p['preview_seconds'],actual-start)
             if length<=0:raise ValueError('预览开始位置超出完整视频。')
             dest=folder/('试看_'+('横版_16x9' if mode=='landscape' else '竖版_9x16')+'.mp4')
-            ff(['-i',full,'-ss',start,'-t',length,'-c:v','libx264','-preset','fast','-crf','18','-c:a','aac',dest],cancel)
+            ff(['-i',full,'-ss',start,'-t',length,*encode_args(),dest],cancel)
         else:
             name=job.get('name') or Path(job['video']).stem
             if '完整成片' not in name:name+='_完整成片'
@@ -335,7 +371,8 @@ def process(job,cancel,progress=lambda s:None,preview=False):
             try:os.replace(full,dest)
             except Exception:dest.unlink(missing_ok=True);raise
             shutil.copyfile(folder/('complete_'+mode+'.srt'),dest.with_suffix('.srt'))
-        results.append({'mode':mode,'label':('横版16:9' if mode=='landscape' else '竖版9:16')+('试看' if preview else '完整成片'),'path':str(dest),'duration':actual,'full_decode_passed':True})
+        mobile=inspect_mobile(dest,cancel)
+        results.append({'mobile_compatibility':mobile,'mode':mode,'label':('横版16:9' if mode=='landscape' else '竖版9:16')+('试看' if preview else '完整成片'),'path':str(dest),'duration':actual,'full_decode_passed':True})
         progress(results[-1]['label']+'：'+str(dest))
     (folder/'成片位置.txt').write_text(('这是制作缓存文件夹，完整成片在以下位置：' if not preview else '以下文件只是指定范围试看：')+'\n'+'\n'.join(r['label']+'：'+r['path'] for r in results),encoding='utf-8-sig')
     # Keep UI-compatible folder entry points without flattening editable originals.
