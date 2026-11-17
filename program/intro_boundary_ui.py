@@ -10,9 +10,11 @@ class IntroDialog:
         self.panel=panel;self.app=panel.app;self.result=None;self.seen=set()
         self.win=tk.Toplevel(self.app.root);self.win.title('片头视频 / 合并配音自动分界');self.win.geometry('800x460')
         page=ttk.Frame(self.win,padding=16);page.pack(fill='both',expand=True)
-        ttk.Label(page,text='按原视频SRT编号提议分界，不用手动数秒；候选必须先看画面、听声音。',wraplength=750).pack(anchor='w')
-        panel.number(page,'combined_intro_last_cue','片头最后字幕编号（本片默认12）')
-        ttk.Label(page,text='主页面SRT时间须对应原视频；默认1–12条片头、13条起正文。文字须与配音一致，或另提供已对齐配音SRT；其他视频可改编号。',wraplength=750).pack(anchor='w',pady=6)
+        ttk.Label(page,text='不用在 SRT 里加“正文开始/结束”标记，也不用手动填写秒数。按片头最后字幕编号定位；软件读取下一条字幕作为正文开始，最后一条字幕作为正文结束。候选需先看画面、试听配音。',wraplength=750).pack(anchor='w')
+        row=ttk.Frame(page);row.pack(fill='x',pady=3)
+        ttk.Label(row,textvariable=panel.intro_cue_status,wraplength=520).pack(side='left',fill='x',expand=True)
+        ttk.Button(row,text='从 SRT 选择片头最后一句',command=panel.pick_intro_last_cue).pack(side='left',padx=5)
+        ttk.Label(page,text='主页面 SRT 时间对应原视频画面。下一条字幕自动作为正文开始，最后一条字幕自动作为正文结束；其他视频只需在列表里选片头最后一句，不用手写编号或秒数。字幕文字须与配音一致，或另提供已对齐配音 SRT。',wraplength=750).pack(anchor='w',pady=6)
         ttk.Label(page,text='已对齐合并配音的SRT（可选，不是原视频时间轴）').pack(anchor='w')
         row=ttk.Frame(page);row.pack(fill='x',pady=5);self.aligned=tk.StringVar(value='')
         ttk.Entry(row,textvariable=self.aligned).pack(side='left',fill='x',expand=True);ttk.Button(row,text='选择',command=self.pick).pack(side='left',padx=6)
@@ -40,6 +42,7 @@ class IntroDialog:
         if self.app.busy:return
         try:
             video,audio,srt=self.inputs();last=int(float(self.panel.v['combined_intro_last_cue'].get()));language=self.app.v['language'].get();aligned=self.aligned.get();cached=self.panel.v['combined_aligned_srt'].get();token=self.panel.v['combined_alignment_token'].get()
+            if not audio:raise ValueError('请先选择整段配音文件；视频时间轴 SRT 和配音 SRT 使用各自独立时间。')
             self.folder=self.panel.autosave.parent/('IntroBoundary_'+uuid.uuid4().hex);self.result=None;self.seen.clear();self.ok.state(['disabled'])
             self.status.set('正在定位；如需本地语音定位，进度显示在主页面运行记录。');self.app.set_activity(True)
             def locate():

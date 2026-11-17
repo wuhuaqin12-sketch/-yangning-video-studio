@@ -19,6 +19,8 @@ jobs:
   core-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      ORT_DISABLE_TELEMETRY: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,13 +32,14 @@ jobs:
       - run: python -m pip install -r program/requirements.txt
       - run: python ci/fetch_fonts.py
       - run: python ci/fetch_noise_model.py
-      - run: python -m unittest alignment_runtime_test multilingual_test english_regression_test desktop_update_test long_caption_test publish_style_test.StyleTests clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test sequence_vnext_test bootstrap_test stable_recovery_test integration_release_test
+      - run: python -m unittest alignment_runtime_test multilingual_test english_regression_test desktop_update_test long_caption_test publish_style_test.StyleTests clean_project_test no_denoise_test voice_clean_test sound_report_test full_listen_test production_test sequence_vnext_test adaptive_workflow_test decoration_test opening_caption_preview_test ending_presets_test bootstrap_test stable_recovery_test integration_release_test
         working-directory: program
   windows-acceptance:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
       PYTHONUTF8: '1'
+      ORT_DISABLE_TELEMETRY: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,7 +62,7 @@ jobs:
       - name: Protect the original stable installer
         run: python -c "import sys,tempfile,shutil;from pathlib import Path;sys.path.insert(0,'program');from stable_recovery import preserve_archive;t=tempfile.TemporaryDirectory();p=preserve_archive(Path(t.name));Path('recovery').mkdir(exist_ok=True);shutil.copyfile(p,'recovery/v0.12.11-original.zip')"
       - name: Windows full function and UI regression
-        run: python -m unittest background_layout_test landscape_fixed_test parts_only_test sequence_vnext_test simple_ui_test pixel_aspect_test caption_top_test glyph_removal_test body_first_ui_test publish_style_test.StyleTests encoding_regression_test pause_regression_test multilingual_test clean_project_test desktop_update_test stable_recovery_test bootstrap_test integration_release_test
+        run: python -m unittest background_layout_test landscape_fixed_test parts_only_test sequence_vnext_test adaptive_workflow_test decoration_test opening_caption_preview_test ending_presets_test simple_ui_test pixel_aspect_test caption_top_test glyph_removal_test body_first_ui_test publish_style_test.StyleTests encoding_regression_test pause_regression_test multilingual_test clean_project_test desktop_update_test stable_recovery_test bootstrap_test integration_release_test
         working-directory: program
       - name: Five-minute compatible MP4 and actual browser seek
         run: python ci/mobile_playback_windows.py

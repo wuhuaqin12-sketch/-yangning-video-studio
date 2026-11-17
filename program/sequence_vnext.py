@@ -197,6 +197,12 @@ def compose_segment(source,cues,style,mode,p,folder,cancel,burn,label,repair_chi
     if report.get('split_cues'):progress('字幕已完整分屏，页时间按字数分配，不改变配音；需预览核对。')
     if report.get('short_pages'):progress('字幕排版提醒：编号'+','.join(map(str,report['short_pages']))+'部分页面不足1秒，请调整该句字幕时间或字号。')
     opening_title=False
+    if label=='opening':
+        from opening_caption import add_ass
+        for prefix in ('opening_title','opening_topic','opening_text_3'):
+            if p.get(prefix+'_enabled'):
+                add_ass(ass,p,p.get('_language','ja'),(vx,vy,vw,vh),duration,prefix)
+                opening_title=True
     # make_ass places empty caption tracks over video; keep the normal source fit.
     base=f'color=c=black:s={width}x{height}:r=30:d={duration}[bg]'
     inputs=['-i',source]
@@ -263,7 +269,8 @@ def concat_clips(clips,out,folder,cancel):
             streams=probe(out,cancel)['streams'];v=next(x for x in streams if x['codec_type']=='video');a=next(x for x in streams if x['codec_type']=='audio')
             if abs(seconds(out,cancel)-sum(durations))>.3 or abs(float(v['duration'])-float(a['duration']))>.18:
                 raise RuntimeError('无损拼接的时长或音画末端校验不通过。')
-            run([executable('ffmpeg'),'-nostdin','-v','error','-xerror','-i',str(out),'-f','null','-'],cancel)
+            decoded=run([executable('ffmpeg'),'-nostdin','-v','error','-xerror','-i',str(out),'-f','null','-'],cancel)
+            if decoded.strip():raise RuntimeError('无损拼接解码有时间戳异常，改用安全重编码。')
             inspect_mobile(out,cancel)
             packets=json.loads(run([executable('ffprobe'),'-v','error','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,duration_time','-of','json',str(out)],cancel))['packets']
             previous=None
@@ -333,10 +340,87 @@ def preflight_repair(job,p,cancel):
         if layout['repair_full_width']:x=0;w=stream['width']
         if min(x,y)<0 or min(w,h)<2 or x+w>stream['width'] or y+h>stream['height']:raise ValueError('字幕区域超出原视频，请重新鼠标框选。')
 
+def split_combined(job,p,folder,cancel,progress=lambda _:None):
+    """Split a single full source using video-SRT times and a separate audio clock."""
+    from media import parse_srt
+    p=normalize(p);folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
+    source=valid_file(job.get('video'),'完整视频 MP4');audio=valid_file(job.get('audio'),'整段配音')
+    srt=valid_file(job.get('source_srt'),'完整视频时间轴 SRT');ending=valid_file(p.get('outro_video'),'固定片尾视频')
+    if not p.get('background_audio'):raise ValueError('完整视频模式需要选择片头背景音乐；这条音乐只铺在片头，不会延伸到正文。')
+    refs=parse_srt(srt);total=seconds(source,cancel);audio_total=seconds(audio,cancel)
+    aligned_path=p.get('combined_aligned_srt')
+    if not aligned_path or not Path(aligned_path).is_file() or not p.get('combined_alignment_token'):
+        raise ValueError('请先点击“自动定位片头与配音分界”，预览并确认；视频时间与配音时间分别定位。')
+    from intro_boundary import alignment_token
+    if alignment_token(source,audio,srt,aligned_path)!=p['combined_alignment_token']:
+        raise ValueError('完整视频、配音或SRT已更换，请重新自动定位片头分界。')
+    refs_by_id={c[0]:c for c in refs};last_id=int(p['combined_intro_last_cue'])
+    if last_id not in refs_by_id or refs.index(refs_by_id[last_id])>=len(refs)-1:
+        raise ValueError('找不到片头最后一条及正文字幕，请检查片头字幕编号。')
+    i=next(i for i,c in enumerate(refs) if c[0]==last_id);body_refs=refs[i+1:]
+    if not body_refs:raise ValueError('完整 SRT 中没有正文字幕。')
+    intro_end=float(p['combined_intro_end'] or body_refs[0][1])
+    # The video SRT defines the original-video tail cut. Audio duration and its
+    # independently aligned SRT never move this visual boundary.
+    # Prefer an explicitly confirmed or old-ending-matched boundary. If none
+    # was supplied, keep a short natural pause after the last spoken subtitle.
+    outro_start=float(p['combined_outro_start'] or refs[-1][2]+2.0)
+    if not 0<intro_end<outro_start<total+.001:
+        raise ValueError('片头正文分界或片尾切换时间超出视频范围，请按完整视频的 SRT 时间轴检查。')
+    if refs[-1][2]>total+.1:raise ValueError('完整视频 SRT 超出原视频时长，请使用对应视频时间轴。')
+    audio_split=float(p['combined_audio_split'])
+    if not 0<audio_split<audio_total-.01:raise ValueError('整段配音分界无效，请重新定位。')
+    targets=parse_srt(aligned_path)
+    if [c[0] for c in refs]!=[c[0] for c in targets]:raise ValueError('视频 SRT 与配音定位 SRT 的字幕编号不一致，请重新定位。')
+    intro_target=[(n,a,b,t) for n,a,b,t in targets[:i+1]]
+    body_target=[]
+    for n,a,b,t in targets[i+1:]:
+        if a<audio_split-.04:raise ValueError(f'正文第{n}条配音时间早于独立音频分界，请重新定位或校对 SRT。')
+        body_target.append((n,max(0,a-audio_split),b-audio_split,t))
+    if not body_target:raise ValueError('分界后没有可用的正文配音字幕。')
+    body_source=[]
+    for n,a,b,t in body_refs:
+        if a<intro_end-.02:raise ValueError(f'正文第{n}条字幕早于片头分界，请检查片头最后字幕编号。')
+        body_source.append((n,max(0,a-intro_end),min(b,outro_start)-intro_end,t))
+    if not body_source or body_source[-1][2]<=body_source[-1][1]:raise ValueError('正文 SRT 在片尾切换点之前没有完整字幕。')
+    if body_target[-1][2]>audio_total-audio_split+.04:raise ValueError('正文配音 SRT 超出正文音频时长。')
+    duration_intro=intro_end;duration_body=outro_start-intro_end
+    intro_video=folder/'complete_intro.mp4';body_video=folder/'complete_body.mp4'
+    progress(f'按视频 SRT 分界：片头 0–{intro_end:.3f}s；固定片尾从 {outro_start:.3f}s 替换。')
+    for start,length,dest,label in ((0,duration_intro,intro_video,'片头'),(intro_end,duration_body,body_video,'正文')):
+        ff(['-ss',start,'-i',source,'-t',length,'-map','0:v:0','-an','-vf','fps=30,setsar=1','-c:v','libx264','-preset','fast','-crf','16','-pix_fmt','yuv420p','-movflags','+faststart',dest],cancel)
+        if abs(seconds(dest,cancel)-length)>.12:raise RuntimeError(label+'时长与视频 SRT 定位不符。')
+    def split_audio(a,b,dest):
+        ff(['-ss',a,'-i',audio,'-t',b-a,'-vn','-map','0:a:0','-ar','48000','-ac','2','-c:a','pcm_s16le',dest],cancel)
+    intro_audio=folder/'complete_intro_voice.wav';body_audio=folder/'complete_body_voice.wav'
+    split_audio(0,audio_split,intro_audio);split_audio(audio_split,audio_total,body_audio)
+    intro_srt=folder/'complete_intro_video.srt';intro_target_srt=folder/'complete_intro_voice.srt'
+    body_srt=folder/'complete_body_video.srt';body_target_srt=folder/'complete_body_voice.srt'
+    write_srt(intro_srt,refs[:i+1]);write_srt(intro_target_srt,intro_target)
+    write_srt(body_srt,body_source);write_srt(body_target_srt,body_target)
+    # The fixed complete-video ending already contains the disclaimer; don't
+    # append the optional standalone disclaimer card a second time here.
+    settings=dict(p);settings.update(combined=False,combined_replace_outro=False,disclaimer_enabled=False,intro_enabled=True,intro_video=str(intro_video),intro_mode='music_voice',intro_audio=str(intro_audio),intro_srt=str(intro_srt),intro_target_srt=str(intro_target_srt),intro_clean_audio=True,outro_enabled=True,outro_video=ending)
+    result=dict(job);result.update(video=str(body_video),audio=str(body_audio),source_srt=str(body_srt),target_srt=str(body_target_srt),alignment='timed',sequence=settings)
+    return result,settings
+
 def process(job,cancel,progress=lambda s:None,preview=False):
-    if (job.get('sequence') or {}).get('combined'):raise ValueError('完整视频切分与片尾替换已撤下，请分别导入片头、正文和片尾视频。')
+    if (job.get('sequence') or {}).get('combined'):
+        output=Path(job['output']).resolve();output.mkdir(parents=True,exist_ok=True)
+        split_folder=Path(tempfile.mkdtemp(prefix='YangNing_CompleteSplit_',dir=output))
+        try:
+            split_job,_=split_combined(job,job['sequence'],split_folder,cancel,progress)
+            result=Path(process(split_job,cancel,progress,preview=preview))
+            # Keep the completed report/preview where workflow.execute expects
+            # it, while discarding the large temporary split sources.
+            saved=output/('YangNing_Complete_Result_'+uuid.uuid4().hex[:10])
+            result.replace(saved)
+            return str(saved)
+        finally:shutil.rmtree(split_folder,ignore_errors=True)
     p=normalize(job.get('sequence'))
-    p.update(opening_title_enabled=False,opening_topic_enabled=False,disclaimer_enabled=False,combined_replace_outro=False)
+    # The selected fixed ending already carries its disclaimer. Ignore optional
+    # image append/overlay settings in the complete-video workflow.
+    p.update(disclaimer_enabled=False,combined_replace_outro=False)
     if p.get('background_audio') and not p['intro_enabled']:
         raise ValueError('片头背景音乐只能用于独立片头，请先勾选添加片头并选择片头视频。')
     preflight_assets(job,p,cancel)
@@ -402,7 +486,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
         if cues and cues[-1][2]>actual+.05:raise RuntimeError('最后一句字幕超出完整视频。')
         write_srt(folder/('complete_'+mode+'.srt'),cues)
         decode=ff(['-xerror','-i',full,'-f','null','-'],cancel)
-        if decode.strip():raise RuntimeError('完整解码有异常。')
+        if decode.strip():raise RuntimeError('完整解码有异常：'+decode.strip()[-1200:])
         if preview:
             start=p['preview_start'];length=min(p['preview_seconds'],actual-start)
             if length<=0:raise ValueError('预览开始位置超出完整视频。')

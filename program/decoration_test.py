@@ -29,6 +29,9 @@ class DecorationTests(unittest.TestCase):
         self.assertGreater(int(r['opening_title_color'][1:3],16),200)
         self.assertGreater(r['opening_title_reference_height'],5)
         with self.assertRaisesRegex(ValueError,'未识别'):detect(source,'完全不同的标题',0,1,self.cancel)
+        third=detect(source,'金刚经讲义',0,1,self.cancel,prefix='opening_text_3')
+        self.assertGreater(third['opening_text_3_end'],third['opening_text_3_start'])
+        self.assertEqual(third['opening_text_3_orientation'],'horizontal')
     def test_languages_and_manual_title_and_persisted_optional_fields(self):
         self.assertIn('金剛経',localized_title('','ja'));self.assertIn('Diamond Sutra',localized_title('','en'))
         self.assertEqual(localized_title('','ja','经题'),'経題');self.assertEqual(localized_title('','en','经题'),'Title of the Sutra')
@@ -55,6 +58,16 @@ class DecorationTests(unittest.TestCase):
             if n in (0,4):self.assertLess(count,10)
             else:self.assertGreater(count,100)
         self.assertAlmostEqual(seconds(out,self.cancel),9,delta=.06)
+    def test_third_search_term_has_independent_overlay_style_and_time(self):
+        source=self.make_video(duration=9);p=defaults()
+        p.update(opening_title_enabled=True,opening_title_text='Title one',opening_title_start=.5,opening_title_end=2,
+                 opening_topic_enabled=True,opening_topic_text='Title two',opening_topic_start=3,opening_topic_end=4.5,
+                 opening_text_3_enabled=True,opening_text_3_original='第三行',opening_text_3_text='Title three',opening_text_3_start=6,opening_text_3_end=8,_language='en')
+        compose_segment(source,[],{},'landscape',p,self.root,self.cancel,False,'opening')
+        ass=(self.root/'opening_landscape.ass').read_text(encoding='utf-8-sig')
+        self.assertIn('OpeningTranslated',ass);self.assertIn('OpeningTopicTranslated',ass);self.assertIn('OpeningText3Translated',ass)
+        self.assertIn('0:00:06.00,0:00:08.00,OpeningText3Translated',ass)
+        self.assertIn('Title three',ass)
     def test_arbitrary_entered_term_is_located(self):
         source=self.make_video(text='释迦牟尼佛')
         r=detect(source,'释迦牟尼佛',0,1,self.cancel)
@@ -103,7 +116,7 @@ class DecorationTests(unittest.TestCase):
         self.assertAlmostEqual(seconds(annotated,self.cancel),3,delta=.08)
         def audio(path):return subprocess.check_output([executable('ffmpeg'),'-v','error','-i',str(path),'-map','0:a:0','-c','copy','-f','adts','-'])
         self.assertEqual(audio(annotated),audio(ending))
-    def test_real_pipeline_keeps_srt_and_original_ending_before_appended_image(self):
+    def test_real_pipeline_does_not_append_duplicate_disclaimer_image(self):
         source=self.make_video();analysis=self.root/'analysis';analysis.mkdir()
         import shutil
         shutil.copyfile(source,analysis/'video.mp4');(analysis/'subtitles.srt').write_text('1\n00:00:00,100 --> 00:00:00,700\nテスト。\n',encoding='utf8')
@@ -113,7 +126,7 @@ class DecorationTests(unittest.TestCase):
         job=dict(video=str(source),output=str(self.root/'outputs'),language='ja',sequence=p,burn=False,name='notice test')
         with patch('sequence_vnext.aligned',return_value=analysis):folder=Path(process(job,self.cancel))
         record=json.loads((folder/'report.json').read_text())
-        self.assertAlmostEqual(record['results'][0]['duration'],4,delta=.15)
+        self.assertAlmostEqual(record['results'][0]['duration'],2,delta=.15)
         self.assertTrue(Path(record['results'][0]['path']).with_suffix('.srt').exists())
 
 if __name__=='__main__':unittest.main()

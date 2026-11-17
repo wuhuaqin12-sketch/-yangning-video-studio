@@ -36,10 +36,10 @@ class DiamondGateTests(unittest.TestCase):
             def __init__(self,value):self.value=value
             def get(self):return self.value
         p=defaults();p.update(combined_outro_start=120,combined_replace_outro=True,opening_title_enabled=True,background_audio='ja.wav')
-        panel=SimpleNamespace(v={k:Var(v) for k,v in p.items() if k!='layouts'},layout_vars={m:{k:Var(v) for k,v in layout.items() if k!='style'} for m,layout in p['layouts'].items()},layout_styles={m:{} for m in p['layouts']},segment_mode=Var(SEGMENT_MODES[2]),diamond_enabled=Var(False))
+        panel=SimpleNamespace(v={k:Var(v) for k,v in p.items() if k!='layouts'},layout_vars={m:{k:Var(v) for k,v in layout.items() if k!='style'} for m,layout in p['layouts'].items()},layout_styles={m:{} for m,layout in p['layouts'].items()},segment_mode=Var(SEGMENT_MODES[0]))
         panel.raw_value=lambda:SequencePanel.raw_value(panel)
         off=SequencePanel.value(panel)
-        self.assertFalse(off['combined']);self.assertFalse(off['combined_replace_outro']);self.assertFalse(off['opening_title_enabled']);self.assertEqual(off['background_audio'],'')
+        self.assertFalse(off['combined']);self.assertFalse(off['combined_replace_outro']);self.assertTrue(off['opening_title_enabled']);self.assertEqual(off['background_audio'],'')
         self.assertEqual(panel.v['combined_outro_start'].get(),120)
-        panel.diamond_enabled.value=True;on=SequencePanel.value(panel)
+        panel.segment_mode.value=SEGMENT_MODES[2];on=SequencePanel.value(panel)
         self.assertTrue(on['combined']);self.assertTrue(on['combined_replace_outro']);self.assertTrue(on['opening_title_enabled']);self.assertEqual(on['combined_outro_start'],120)

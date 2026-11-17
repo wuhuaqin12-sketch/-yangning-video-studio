@@ -6,7 +6,7 @@ from PIL import Image
 from sequence_vnext import ff,concat_clips,cover_clip,preflight_assets
 from mobile_video import inspect
 from project_vnext import defaults
-from ui_assets import check_image,remember_music,load_music
+from ui_assets import check_image,remember_music,load_music,remember_outro,load_outro
 
 class IntegratedReleaseTests(unittest.TestCase):
     def test_cover_mixed_pixel_formats_are_normalized_to_mobile_avc_and_frames_advance(self):
@@ -29,6 +29,16 @@ class IntegratedReleaseTests(unittest.TestCase):
             remember_music(root,p);self.assertEqual(load_music(root),str(p.resolve()))
             remember_music(root,'');self.assertEqual(load_music(root),'')
             self.assertEqual(p.read_bytes(),b'path fixture')
+
+    def test_fixed_outro_remembers_choice_and_can_be_cleared_independently(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);music=root/'music.wav';music.write_bytes(b'music');outro=root/'fixed-outro.mp4';outro.write_bytes(b'outro')
+            remember_music(root,music);remember_outro(root,outro)
+            self.assertEqual(load_music(root),str(music.resolve()))
+            self.assertEqual(load_outro(root),str(outro.resolve()))
+            remember_outro(root,'')
+            self.assertEqual(load_outro(root),'');self.assertEqual(load_music(root),str(music.resolve()))
+            with self.assertRaisesRegex(ValueError,'固定片尾视频不存在'):remember_outro(root,root/'missing.mp4')
     def test_bad_cover_stops_before_alignment_and_input_is_not_changed(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);bad=root/'video.mp4';bad.write_bytes(b'not an image')

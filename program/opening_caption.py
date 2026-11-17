@@ -1,5 +1,5 @@
 """Locate an existing title with local OCR; add an editable translated line."""
-import functools,math,re,tempfile
+import functools,math,re,tempfile,os
 from pathlib import Path
 import numpy as np
 from media import executable,run,probe,Cancelled,stamp
@@ -19,7 +19,9 @@ def normalized(text):
 
 @functools.lru_cache(maxsize=1)
 def engine():
-    # OCR is local; explicitly opt out before creating any ONNX sessions.
+    # OCR is local. Set the documented startup opt-out before ONNX Runtime loads;
+    # the API call alone can be too late to prevent uploader initialization.
+    os.environ['ORT_DISABLE_TELEMETRY']='1'
     try:
         import onnxruntime
         onnxruntime.disable_telemetry_events()
@@ -57,13 +59,17 @@ def sample_style(frame,points,characters):
     advance=float(np.median(np.diff(firsts))) if len(firsts)>1 else char_height*1.35
     return dict(x=min(95,x),y=min(92,y),color=f'#{r:02X}{g:02X}{b:02X}',reference_height=char_height/h*100,reference_advance=advance/h*100,orientation='vertical' if vertical else 'horizontal')
 
-def detect(source,target,start,end,cancel,progress=lambda _:None):
+def detect(source,target,start,end,cancel,progress=lambda _:None,prefix='opening_title'):
     if not normalized(target):raise ValueError('请填写原中文标题，用于匹配OCR结果。')
+    if prefix not in ('opening_title','opening_topic','opening_text_3'):raise ValueError('片头文字项目无效。')
     if not 0<=start<end or end-start>120:raise ValueError('自动定位范围须在120秒以内，请先缩小到片头标题出现的位置。')
     import cv2
     total=float(probe(source,cancel)['format']['duration']);end=min(end,total)
     if start>=end:raise ValueError('定位范围超出视频。')
-    samples=min(12,max(1,math.ceil(end-start)));step=(end-start)/samples
+    # Sample at up to 4 fps (bounded to 480 frames for a 120-second intro).
+    # The previous 12-frame cap could miss a short title and only locate it
+    # within several seconds. The result remains a proposal for preview.
+    step=.25;samples=max(1,math.ceil((end-start)/step));samples=min(480,samples);step=(end-start)/samples
     target=normalized(target);found=[];recognizer=engine()
     with tempfile.TemporaryDirectory(prefix='title_ocr_') as d:
         for i in range(samples):
@@ -85,7 +91,7 @@ def detect(source,target,start,end,cancel,progress=lambda _:None):
             progress(f'片头标题本地定位：{i+1}/{samples} 帧'+('，已找到匹配' if chosen else ''))
     if not found:raise ValueError('未识别到匹配的原中文标题。请核对标题文字、缩小出现时间范围，或手动填写位置；不会猜测位置。')
     colors=np.asarray([[int(v['color'][j:j+2],16) for j in (1,3,5)] for v in found]);color='#'+''.join(f'{int(c):02X}' for c in np.median(colors,axis=0))
-    return dict(opening_title_x=round(float(np.median([v['x'] for v in found])),2),opening_title_y=round(float(np.median([v['y'] for v in found])),2),opening_title_start=round(max(start,min(v['time'] for v in found)-step/2),3),opening_title_end=round(min(end,max(v['time'] for v in found)+step/2),3),opening_title_color=color,opening_title_reference_height=round(float(np.median([v['reference_height'] for v in found])),3),opening_title_reference_advance=round(float(np.median([v['reference_advance'] for v in found])),3),opening_title_orientation=max(('horizontal','vertical'),key=lambda s:sum(v['orientation']==s for v in found)),opening_title_match_size=True,recognized=found[0]['recognized'])
+    return {f'{prefix}_{key}':value for key,value in dict(x=round(float(np.median([v['x'] for v in found])),2),y=round(float(np.median([v['y'] for v in found])),2),start=round(max(start,min(v['time'] for v in found)-step/2),3),end=round(min(end,max(v['time'] for v in found)+step/2),3),color=color,reference_height=round(float(np.median([v['reference_height'] for v in found])),3),reference_advance=round(float(np.median([v['reference_advance'] for v in found])),3),orientation=max(('horizontal','vertical'),key=lambda s:sum(v['orientation']==s for v in found)),match_size=True).items()}|{'recognized':found[0]['recognized']}
 
 def add_ass(path,p,language,video_box,duration,prefix='opening_title'):
     from publish_style import fit_lines,ass_colour
@@ -114,8 +120,10 @@ def add_ass(path,p,language,video_box,duration,prefix='opening_title'):
         size=layout['size'];x=layout['x'];y=layout['y'];margin=box[1]*size/(asc+desc) if match else 0
         pages=times(layout['pages'],start,end)
         safe=lambda s:s.replace('\\','／').replace('{','｛').replace('}','｝')
-        data=Path(path).read_text(encoding='utf-8-sig');style_name='OpeningTranslated' if prefix=='opening_title' else 'OpeningTopicTranslated'
-        style=f'Style: {style_name},{font_name},{size},{ass_colour(color)},&H00FFFFFF,{ass_colour(color)},&HFF000000,0,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1\n'
+        data=Path(path).read_text(encoding='utf-8-sig');style_name={'opening_title':'OpeningTranslated','opening_topic':'OpeningTopicTranslated','opening_text_3':'OpeningText3Translated'}[prefix]
+        edge=ass_colour('#555555' if language=='ja' else color)
+        outline=1 if language=='ja' else 0;shadow=1 if language=='ja' else 0
+        style=f'Style: {style_name},{font_name},{size},{ass_colour(color)},&H00FFFFFF,{edge},&HFF000000,0,0,0,0,100,100,0,0,1,{outline},{shadow},8,0,0,0,1\n'
         data=data.replace('[Events]',style+'[Events]')
         for a,b,page in pages:
             if b<=0:continue
@@ -147,8 +155,10 @@ def add_ass(path,p,language,video_box,duration,prefix='opening_title'):
     safe=lambda s:s.replace('\\','／').replace('{','｛').replace('}','｝')
     rendered='' if vertical else r'\N'.join(safe(''.join(c for _,c in row)) for row in lines)
     data=Path(path).read_text(encoding='utf-8-sig')
-    style_name='OpeningTranslated' if prefix=='opening_title' else 'OpeningTopicTranslated'
-    style=f'Style: {style_name},{font_name},{size},{ass_colour(color)},&H00FFFFFF,{ass_colour(color)},&HFF000000,0,0,0,0,100,100,0,0,1,0,0,8,0,0,0,1\n'
+    style_name={'opening_title':'OpeningTranslated','opening_topic':'OpeningTopicTranslated','opening_text_3':'OpeningText3Translated'}[prefix]
+    edge=ass_colour('#555555' if language=='ja' else color)
+    outline=1 if language=='ja' else 0;shadow=1 if language=='ja' else 0
+    style=f'Style: {style_name},{font_name},{size},{ass_colour(color)},&H00FFFFFF,{edge},&HFF000000,0,0,0,0,100,100,0,0,1,{outline},{shadow},8,0,0,0,1\n'
     data=data.replace('[Events]',style+'[Events]')
     if vertical:
         for i,c in enumerate(chars):

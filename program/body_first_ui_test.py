@@ -81,11 +81,11 @@ class BodyFirstUITests(unittest.TestCase):
         music=self.folder/'music.wav';music.write_bytes(b'test-path-only');p.v['background_audio'].set(str(music));p.appearance_open.set(True);p.update()
         job=p.project();saved=self.folder/'project.json';save_project(saved,job)
         self.mode(0);p.v['background_audio'].set('');p.appearance_open.set(False);p.load(saved);self.root.update()
-        self.assertEqual(p.segment_mode.get(),'片头＋正文＋片尾（按需添加）');self.assertEqual(p.v['background_audio'].get(),str(music));self.assertTrue(p.appearance_open.get())
+        self.assertEqual(p.segment_mode.get(),'片头＋正文＋片尾（分开素材）');self.assertEqual(p.v['background_audio'].get(),str(music));self.assertTrue(p.appearance_open.get())
         job.pop('ui_state');job['sequence'].update(combined=True,intro_enabled=False,outro_enabled=False,background_audio='');save_project(saved,job)
         before=self.app.v['video'].get()
-        with patch('next_ui.messagebox.showerror') as error:p.load(saved);self.assertIn('已撤下',error.call_args.args[1])
-        self.assertEqual(self.app.v['video'].get(),before);self.assertEqual(p.segment_mode.get(),'片头＋正文＋片尾（按需添加）')
+        p.load(saved);self.root.update()
+        self.assertEqual(self.app.v['video'].get(),before);self.assertEqual(p.segment_mode.get(),SEGMENT_MODES[2])
     def test_chinese_choices_preserve_internal_values_and_reload(self):
         p=self.panel
         self.assertEqual(p.cover_choices['cover_transition'].display.get(),'直接切换')
@@ -141,30 +141,53 @@ class BodyFirstUITests(unittest.TestCase):
 
 
 
-    def test_only_two_modes_no_retired_controls_and_layout_defaults(self):
+    def test_three_modes_expose_full_video_controls_and_layout_defaults(self):
         from next_ui import SEGMENT_MODES
-        self.assertEqual(len(SEGMENT_MODES),2)
+        self.assertEqual(len(SEGMENT_MODES),3)
         def texts(w):
             for c in w.winfo_children():
                 try:yield str(c.cget('text'))
                 except Exception:pass
                 yield from texts(c)
         labels='\n'.join(texts(self.root))
-        for retired in ('金刚经视频专用','自动定位','替换原片尾','确认预览','上下偏移','标题上下位置','新字幕字号（像素，可空）'):
+        for retired in ('金刚经视频专用','上下偏移','标题上下位置','新字幕字号（像素，可空）'):
             self.assertNotIn(retired,labels)
+        self.assertIn('自动定位片头 / 正文分界',labels);self.assertIn('固定片尾',labels)
         p=self.panel
         for mode in ('landscape','portrait'):
             p.layout_vars[mode]['subtitle_offset_y'].set('200')
             p.layout_vars[mode]['title_y'].set('25')
-        p.v['combined_intro_end'].set('invalid old field')
-        p.v['opening_title_enabled'].set(True)
+        self.mode(2);p.v['combined_intro_end'].set('2');p.v['combined_outro_start'].set('100')
+        p.v['opening_title_enabled'].set(True);p.v['background_audio'].set('intro_music.wav')
         values=p.value()
-        self.assertFalse(values['combined']);self.assertFalse(values['opening_title_enabled'])
-        self.assertEqual(values['combined_intro_end'],0)
+        self.assertTrue(values['combined']);self.assertTrue(values['combined_replace_outro']);self.assertTrue(values['opening_title_enabled'])
+        self.assertEqual(values['combined_intro_end'],2);self.assertEqual(values['background_audio'],'intro_music.wav')
         self.assertEqual(values['layouts']['landscape']['subtitle_font_size'],'64')
         self.assertEqual(values['layouts']['portrait']['subtitle_font_size'],'')
         self.assertEqual(values['layouts']['landscape']['subtitle_offset_y'],0)
         self.assertEqual(values['layouts']['portrait']['title_y'],'')
+
+    def test_full_video_controls_stay_hidden_in_body_mode_and_title_has_color_picker(self):
+        p=self.panel
+        self.assertFalse(p.complete.winfo_ismapped())
+        def texts(w):
+            for c in w.winfo_children():
+                try:yield str(c.cget('text'))
+                except Exception:pass
+                yield from texts(c)
+        self.assertIn('选颜色',list(texts(p.controls)))
+        self.mode(2);self.assertTrue(p.complete.winfo_ismapped())
+        self.mode(0);self.assertFalse(p.complete.winfo_ismapped())
+
+    def test_selected_fixed_outro_is_remembered_as_default(self):
+        from ui_assets import load_outro
+        p=self.panel;ending=self.folder/'tail.mp4';ending.write_bytes(b'outro fixture')
+        with patch('next_ui.filedialog.askopenfilename',return_value=str(ending)):
+            p.pick('outro_video')
+        self.assertEqual(p.v['outro_video'].get(),str(ending))
+        self.assertEqual(load_outro(p.asset_preferences),str(ending.resolve()))
+        p.clear_asset('outro_video')
+        self.assertEqual(load_outro(p.asset_preferences),'')
     def test_one_click_exports_without_preview_or_confirmation(self):
         self.mode(1);self.panel.v['intro_enabled'].set(True);self.panel.update()
         self.app.language_manual=True
