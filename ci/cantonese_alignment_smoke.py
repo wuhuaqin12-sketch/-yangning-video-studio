@@ -18,7 +18,7 @@ def main():
     os.environ['YANGNING_DATA_ROOT']=str(data_root)
     status=lambda message:print(message,flush=True)
     prepare(status)
-request=urllib.request.Request(DATAFILE,headers={'Range':'bytes=0-6500000','User-Agent':'YangNingVideoStudio-CI/0.14.2'})
+    request=urllib.request.Request(DATAFILE,headers={'Range':'bytes=0-6500000','User-Agent':'YangNingVideoStudio-CI/0.14.2'})
     with urllib.request.urlopen(request,timeout=90) as response:
         if response.status!=206 or not (response.headers.get('Content-Range','').startswith('bytes 0-')):
             raise RuntimeError('SpiCE 音频未返回所需的范围数据，停止真实粤语定位验收。')
