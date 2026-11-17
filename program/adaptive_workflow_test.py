@@ -106,7 +106,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(targets[0][3],'BODY');self.assertEqual(j['alignment'],'timed')
         self.assertEqual(parse_srt(settings['intro_target_srt'])[0][3],'OPENING')
         self.assertAlmostEqual(seq.seconds(folder/'complete_body.mp4',self.stop),2.5,delta=.15)
-        self.assertEqual(j['sequence']['outro_video'],str(self.ending))
+        self.assertTrue(Path(j['sequence']['outro_video']).samefile(self.ending))
         self.assertGreater(seq.seconds(self.ending,self.stop),5-4.5)
     def test_complete_export_uses_video_srt_for_visual_cut_and_appends_longer_fixed_tail(self):
         q=self.detect('full_export');p=defaults();p.update(output_mode='landscape',combined=True,outro_video=str(self.ending),background_audio=str(self.music),combined_intro_end=q['video'],combined_audio_split=q['audio'],combined_outro_start=4.5,combined_aligned_srt=q['aligned_srt'],combined_alignment_token=q['token'])

@@ -76,6 +76,7 @@ class BodyFirstUITests(unittest.TestCase):
         self.assertEqual(self.app.v['alignment'].get(),'auto');self.assertFalse(self.app.target_entry.winfo_ismapped())
 
     def test_saved_ui_preferences_restore_and_old_projects_migrate(self):
+        from next_ui import SEGMENT_MODES
         from project_vnext import save_project
         p=self.panel;self.mode(1);p.v['intro_enabled'].set(True);p.v['intro_mode'].set('external_music')
         music=self.folder/'music.wav';music.write_bytes(b'test-path-only');p.v['background_audio'].set(str(music));p.appearance_open.set(True);p.update()
