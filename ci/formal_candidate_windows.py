@@ -5,7 +5,7 @@ repo=Path(__file__).resolve().parents[1];sys.path.insert(0,str(repo/'program'))
 from desktop_update import atomic_json
 from stable_recovery import preserve_archive,stage_stable
 
-VERSION='0.14.2'
+VERSION=json.loads((repo/'release.json').read_text(encoding='utf8'))['version']
 def main():
     sandbox=Path(os.environ['RUNNER_TEMP'])/'YangNingFormalAcceptance';sandbox.mkdir(exist_ok=True)
     root=sandbox/'install';local=sandbox/'localappdata';settings=local/'YangNingStudio';settings.mkdir(parents=True,exist_ok=True)
