@@ -1,8 +1,8 @@
 """Versioned per-user installs. HTTPS + digest verification; never replace user data."""
-import hashlib,json,os,re,shutil,stat,tempfile,urllib.parse,urllib.request,uuid,zipfile
+import hashlib,json,os,re,shutil,stat,tempfile,time,urllib.parse,urllib.request,uuid,zipfile
 from pathlib import Path
 
-APP_VERSION='0.14.2'
+APP_VERSION='0.14.3'
 MAX_PACKAGE=200*1024*1024
 MAX_EXTRACTED=600*1024*1024
 
@@ -118,8 +118,30 @@ def stage_package(archive,root,expected_version=None):
         for name in ('app.py','bootstrap.py','desktop_update.py','desktop_launch.py','requirements.txt'):
             if not (temp/'program'/name).is_file():raise ValueError('更新包不完整：'+name)
         target=versions/version
-        if target.exists():raise ValueError('此版本已经安装，请直接重新打开桌面软件。')
-        os.replace(temp,target)
+        def complete(path):
+            try:
+                info=json.loads((path/'release.json').read_text(encoding='utf8'))
+                return (info.get('app')=='YangNingStudio' and info.get('version')==version and
+                        all((path/'program'/name).is_file() for name in
+                            ('app.py','bootstrap.py','desktop_update.py','desktop_launch.py','requirements.txt')))
+            except (OSError,ValueError,AttributeError):return False
+        if target.exists():
+            if complete(target):
+                return version,target
+            raise ValueError('新版目录已存在但不完整。请关闭工作室后重试更新；原版本仍可使用。')
+        # Windows security scanners and another running studio instance can
+        # briefly hold a handle on the extracted directory. Retry the atomic
+        # same-volume rename. If a parallel updater won the race, accept its
+        # completed version rather than reporting a false failure.
+        for attempt,delay in enumerate((0,.25,.5,1,2,4)):
+            if delay:time.sleep(delay)
+            try:
+                os.replace(temp,target)
+                break
+            except PermissionError:
+                if complete(target):return version,target
+                if attempt==5:
+                    raise PermissionError('Windows 暂时拒绝切换更新目录。请关闭所有工作室窗口后重新检查更新；原版本仍可使用。')
         return version,target
     finally:
         if temp.exists():shutil.rmtree(temp)

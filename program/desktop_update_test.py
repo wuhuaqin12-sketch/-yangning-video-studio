@@ -30,10 +30,30 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(data['previous_version'],'0.12.0')
         activate(self.root,data['previous_version'])
         self.assertEqual(json.loads((self.root/'current.json').read_text())['version'],'0.12.0')
-    def test_duplicate_version_keeps_installed_files(self):
-        stage_package(self.z,self.root)
-        with self.assertRaises(ValueError):stage_package(self.z,self.root)
-        self.assertTrue((self.root/'versions/0.12.0/program/app.py').is_file())
+    def test_duplicate_complete_version_is_idempotent(self):
+        version,installed=stage_package(self.z,self.root)
+        second_version,second_path=stage_package(self.z,self.root)
+        self.assertEqual((second_version,second_path),(version,installed))
+        self.assertTrue(installed.is_dir())
+    def test_windows_access_denied_rename_retries_and_accepts_parallel_install(self):
+        from unittest.mock import patch
+        import desktop_update
+        real_replace=desktop_update.os.replace;calls=[]
+        def intermittent(src,dst):
+            calls.append(1)
+            if len(calls)<3:raise PermissionError(5,'Access is denied')
+            return real_replace(src,dst)
+        with patch('desktop_update.os.replace',side_effect=intermittent),patch('desktop_update.time.sleep'):
+            version,target=stage_package(self.z,self.root)
+        self.assertEqual(version,'0.12.0');self.assertTrue(target.is_dir());self.assertEqual(len(calls),3)
+
+        other=self.p/'parallel';calls=[]
+        def parallel_winner(src,dst):
+            calls.append(1);real_replace(src,dst)
+            raise PermissionError(5,'Access is denied')
+        with patch('desktop_update.os.replace',side_effect=parallel_winner),patch('desktop_update.time.sleep'):
+            version,target=stage_package(self.z,other)
+        self.assertEqual(version,'0.12.0');self.assertTrue(target.is_dir())
     def test_rejects_paths_and_windows_aliases(self):
         for name in ('../escape.py','/absolute.py','program/../../escape.py','C:/bad.py','program\\bad.py','program/CON.txt','program/file.','program/file:stream'):
             package(self.z,extra={name:'bad'})
