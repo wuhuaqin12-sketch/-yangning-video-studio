@@ -3,9 +3,10 @@ import json,math,shutil,tempfile
 from pathlib import Path
 from project_vnext import defaults,normalize
 from media import executable,run,probe
+from project_vnext import TITLE_PREFIXES
 
 def render(source,settings,language,prefix,output,cancel,progress=lambda _:None):
-    if prefix not in ('opening_title','opening_topic'):raise ValueError('译名分组选项无效。')
+    if prefix not in TITLE_PREFIXES:raise ValueError('译名分组选项无效。')
     if not Path(source).is_file():raise ValueError('请先导入含原文字的视频。')
     # Irrelevant segments, narration and the other title cannot block this preview.
     p=defaults();p.update({k:v for k,v in settings.items() if k.startswith(prefix+'_') and k in p});p=normalize(p)

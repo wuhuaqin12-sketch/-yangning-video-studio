@@ -8,11 +8,11 @@ from media import executable,parse_srt
 import sequence_vnext as seq
 
 class PartsOnlyTests(unittest.TestCase):
-    def test_retired_queue_stops_before_reading_or_changing_media(self):
-        with patch('sequence_vnext.probe',side_effect=AssertionError('must not read media')):
-            with self.assertRaisesRegex(ValueError,'已撤下'):
-                seq.process({'sequence':{'combined':True}},threading.Event())
-        self.assertFalse(hasattr(seq,'split_combined'))
+    def test_complete_video_split_is_available_and_requires_confirmed_srt_alignment(self):
+        self.assertTrue(callable(seq.split_combined))
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(ValueError,'完整视频 MP4'):
+                seq.split_combined({'video':'','audio':'','source_srt':''},defaults(),Path(d),threading.Event())
     def test_independent_intro_body_outro_direct_dual_export_has_correct_audio_and_cues(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);cancel=threading.Event();clips=[]

@@ -5,7 +5,7 @@ repo=Path(__file__).resolve().parents[1];sys.path.insert(0,str(repo/'program'))
 from desktop_update import atomic_json
 from stable_recovery import preserve_archive,stage_stable
 
-VERSION='0.14.1'
+VERSION='0.14.2'
 def main():
     sandbox=Path(os.environ['RUNNER_TEMP'])/'YangNingFormalAcceptance';sandbox.mkdir(exist_ok=True)
     root=sandbox/'install';local=sandbox/'localappdata';settings=local/'YangNingStudio';settings.mkdir(parents=True,exist_ok=True)
@@ -19,7 +19,7 @@ def main():
     package_dir=sandbox/'package';package_dir.mkdir(exist_ok=True)
     url='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/download/v'+VERSION+'/YangNing_VideoStudio_Windows_'+VERSION+'.zip'
     feed='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--version',VERSION,'--package-url',url,'--manifest-url',feed,'--output',str(package_dir),'--notes','简洁主页面、默认竖版、片头音乐记忆、字号位置修复、统一手机兼容编码、更新备份与稳定版恢复。'],check=True)
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--version',VERSION,'--package-url',url,'--manifest-url',feed,'--output',str(package_dir),'--notes','完整视频按视频SRT定位片头正文和片尾，配音独立定位；固定片尾与片头音乐记忆，片头文字识别翻译及字号字体颜色设置，标题调色盘；手机兼容合成及稳定版恢复。'],check=True)
     package=package_dir/('YangNing_VideoStudio_Windows_'+VERSION+'.zip')
     info=json.loads((package_dir/'latest.json').read_text())
     with zipfile.ZipFile(package) as z:

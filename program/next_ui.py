@@ -2,10 +2,10 @@
 import json,os,tempfile,uuid
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk,filedialog,messagebox
+from tkinter import ttk,filedialog,messagebox,colorchooser
 from project_vnext import defaults,normalize,save_project,load_project
 
-SEGMENT_MODES=('只做正文（默认）','片头＋正文＋片尾（按需添加）')
+SEGMENT_MODES=('只做正文（默认）','片头＋正文＋片尾（分开素材）','完整视频（按SRT定位并替换原片尾）')
 
 def choice_combo(parent,variable,labels,**options):
     """Chinese labels over stable saved values, including project reloads."""
@@ -48,7 +48,7 @@ class SequencePanel:
             self.v[key]=(tk.BooleanVar if isinstance(value,bool) else tk.StringVar)(value=value)
         def file_row(parent,key,label):
             r=ttk.Frame(parent);r.pack(fill='x',pady=3)
-            ttk.Label(r,text=label,width=22).pack(side='left');ttk.Entry(r,textvariable=self.v[key]).pack(side='left',fill='x',expand=True)
+            caption=ttk.Label(r,text=label,width=22);caption.pack(side='left');ttk.Entry(r,textvariable=self.v[key]).pack(side='left',fill='x',expand=True)
             ttk.Button(r,text='选择',command=lambda:self.pick(key)).pack(side='left',padx=4)
             clear=ttk.Button(r,text='清除',command=lambda:self.clear_asset(key))
             def refresh(*_):
@@ -78,6 +78,22 @@ class SequencePanel:
             value=str(app.pending_style.get(key,STYLE_DEFAULTS[key]))
             var=tk.StringVar(value=value);self.title_style_vars[key]=var
             ttk.Entry(line,textvariable=var).pack(side='left',fill='x',expand=True)
+            if key=='title_color':
+                chip=tk.Label(line,width=4,relief='sunken',bg='#34221B');chip.pack(side='left',padx=(5,2))
+                def refresh_title_chip(*_,v=var,c=chip):
+                    try:
+                        from publish_style import colour
+                        c.configure(bg=colour(v.get()))
+                    except (ValueError,tk.TclError):c.configure(bg='#808080')
+                var.trace_add('write',refresh_title_chip);refresh_title_chip()
+                def choose_title_color(v=var):
+                    try:
+                        from publish_style import colour
+                        initial=colour(v.get())
+                    except ValueError:initial='#34221B'
+                    chosen=colorchooser.askcolor(initialcolor=initial,parent=self.app.root,title='选择标题颜色')
+                    if chosen[1]:v.set(chosen[1].upper())
+                ttk.Button(line,text='选颜色',command=choose_title_color).pack(side='left',padx=(2,0))
             var.trace_add('write',lambda *_:self.style_changed())
         ttk.Label(title_frame,text='横版不叠加标题；原有标题样式会保留。',wraplength=740).pack(anchor='w')
         self.layout_details=ttk.Frame(self.controls)
@@ -115,11 +131,43 @@ class SequencePanel:
         self.intro_more_button=ttk.Button(self.intro,text='更多片头设置 ▾',command=self.toggle_intro_more)
         ttk.Checkbutton(self.intro_more,text='片头视频本身已去人声 / 纯音乐',variable=self.v['intro_clean_audio']).pack(anchor='w')
         self.outro=ttk.LabelFrame(self.segments,text='片尾：完整保留画面和音乐，无需配音或SRT',padding=6);file_row(self.outro,'outro_video','片尾视频')
-        from ui_assets import load_music
-        self.music_preferences=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')
-        self.v['background_audio'].set(load_music(self.music_preferences))
+        self.complete=ttk.LabelFrame(self.segments,text='完整视频：自动定位与固定片尾',padding=8)
+        self.intro_cue_status=tk.StringVar(value='当前片头最后一句：第12条（导入 SRT 后可查看内容）')
+        ttk.Label(self.complete,text='导入完整视频、整段配音和完整视频时间轴 SRT。SRT 不用手写“正文开始/结束”标记：正文从片头最后一条字幕之后开始，正文结束取 SRT 最后一条字幕结束时间。',wraplength=850).pack(anchor='w',pady=(0,5))
+        file_row(self.complete,'outro_video','固定片尾（自动记住）')
+        intro_row=ttk.LabelFrame(self.complete,text='① 片头 → 正文',padding=6);intro_row.pack(fill='x',pady=3)
+        row=ttk.Frame(intro_row);row.pack(fill='x')
+        ttk.Label(row,textvariable=self.intro_cue_status,wraplength=500).pack(side='left',fill='x',expand=True)
+        ttk.Button(row,text='选择片头最后一句',command=self.pick_intro_last_cue).pack(side='left',padx=5)
+        ttk.Button(row,text='自动定位片头 / 正文分界',command=self.locate_combined_intro).pack(side='left',padx=5)
+        ttk.Label(intro_row,text='本片默认第12条为片头最后一句、第13条起为正文；软件读取第13条的 SRT 时间作为正文画面起点。只需改编号，不必手填秒数。',wraplength=820).pack(anchor='w',pady=(4,0))
+        outro_row=ttk.LabelFrame(self.complete,text='② 正文 → 固定片尾',padding=6);outro_row.pack(fill='x',pady=3)
+        row=ttk.Frame(outro_row);row.pack(fill='x')
+        ttk.Button(row,text='自动定位原片尾并预览',command=self.locate_combined_outro).pack(side='left',padx=5)
+        ttk.Button(row,text='没有原片尾参考：按 SRT 生成候选',command=self.set_outro_from_srt).pack(side='left',padx=5)
+        ttk.Label(outro_row,text='优先按原片尾画面匹配并预览确认；找不到时才用 SRT 最后一句结束后2秒。配音变长时，固定片尾顺接在正文配音结束后。',wraplength=820).pack(anchor='w',pady=(4,0))
+        self.complete_status=tk.StringVar(value='定位状态：片头/正文、旧片尾尚未确认。')
+        ttk.Label(self.complete,textvariable=self.complete_status,wraplength=850).pack(anchor='w',pady=4)
+        for key in ('combined_intro_end','combined_outro_start','combined_audio_split'):
+            self.v[key].trace_add('write',lambda *_:self.refresh_complete_status())
+        for variable in (self.v['combined_intro_last_cue'],self.app.v['source_srt']):
+            variable.trace_add('write',lambda *_:self.refresh_complete_status())
+        self.v['combined_intro_last_cue'].trace_add('write',lambda *_:self.refresh_intro_cue_status())
+        self.app.v['source_srt'].trace_add('write',lambda *_:self.refresh_intro_cue_status())
+        self.complete_advanced_open=tk.BooleanVar(value=False)
+        ttk.Checkbutton(self.complete,text='手动微调时间（高级，通常不用）',variable=self.complete_advanced_open,command=self.toggle_complete_advanced).pack(anchor='w',pady=(2,0))
+        self.complete_advanced=ttk.Frame(self.complete)
+        self.number(self.complete_advanced,'combined_intro_end','正文画面开始（视频秒）')
+        self.number(self.complete_advanced,'combined_outro_start','固定片尾切换点（视频秒）')
+        self.number(self.complete_advanced,'combined_audio_split','片头配音结束（配音秒）')
+        ttk.Button(self.complete,text='片头中文字识别与外语译文（最多3项）',command=self.opening_texts).pack(anchor='w',pady=4)
+        ttk.Label(self.complete,text='片头背景音乐另在下方选择，只铺片头。固定片尾完整接在正文后，允许比原片尾长；新片尾自带免责声明，不会再叠加免责声明图片。',wraplength=850).pack(anchor='w',pady=3)
+        from ui_assets import load_music,load_outro
+        self.asset_preferences=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')
+        self.v['background_audio'].set(load_music(self.asset_preferences))
+        self.v['outro_video'].set(load_outro(self.asset_preferences))
         self.music=ttk.LabelFrame(self.segments,text='片头音乐（可选）',padding=5)
-        file_row(self.music,'background_audio','片头背景音乐（可选）')
+        self.music_row=file_row(self.music,'background_audio','片头背景音乐（可选）')
         ttk.Label(self.music,text='固定片头音乐：选择后自动记住，仅用于片头；文件移动后请重选。').pack(anchor='w')
         ttk.Button(self.intro_more,text='背景音乐起点 / 音量',command=self.background_audio_settings).pack(anchor='w')
         self.segment_anchor=ttk.Frame(self.segments);self.segment_anchor.pack(fill='x')
@@ -130,15 +178,6 @@ class SequencePanel:
         ttk.Label(self.preview_controls,text='预览可选；准备好素材后直接点“一键生成视频”导出完整成片。',wraplength=850).pack(anchor='w',pady=3)
         self.autosave=Path(os.environ.get('YANGNING_DATA_ROOT') or Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'YangNingStudio')/'last_project_next.json'
         self.has_startup_autosave=self.autosave.exists()
-        if self.has_startup_autosave:
-            try:
-                previous=json.loads(self.autosave.read_text(encoding='utf-8-sig'))['job']
-                if previous.get('sequence',{}).get('combined') or str(previous.get('ui_state',{}).get('segment_mode','')).startswith('整片'):
-                    import shutil
-                    backup=self.autosave.with_name('完整视频旧项目备份_'+uuid.uuid4().hex[:8]+'.json');shutil.copy2(self.autosave,backup)
-                    self.has_startup_autosave=False
-                    app.root.after(1500,lambda p=str(backup):app.log_line('旧完整视频项目已备份，未自动载入。请重新选择三段素材。备份：'+p))
-            except (OSError,ValueError,KeyError,TypeError):pass
         for variable in [self.enabled,self.mode,*self.v.values(),*[v for d in self.layout_vars.values() for v in d.values()],*app.v.values()]:variable.trace_add('write',lambda *_:self.changed())
         self.update();app.root.after(1200,self.offer_recover)
     def add_typography(self,parent,mode):
@@ -218,16 +257,13 @@ class SequencePanel:
         ttk.Button(box,text='完成',command=win.destroy).pack(anchor='e')
     def raw_value(self):
         p={k:v.get() for k,v in self.v.items()};p['layouts']={m:{**{k:v.get() for k,v in d.items()},'style':self.layout_styles[m]} for m,d in self.layout_vars.items()}
-        # Retired complete-video settings never enter new jobs or autosaves.
         base=defaults()
-        for key in p:
-            if key=='combined' or key.startswith(('combined_','opening_title_','opening_topic_','disclaimer_')):p[key]=base[key]
         for mode,layout in p['layouts'].items():
             for key in ('auto_long_subtitles','repair_full_width','subtitle_offset_y','title_y','title_font_size','subtitle_font_size','style'):layout[key]=base['layouts'][mode][key]
         return normalize(p)
     def custom_appearance(self):
         p=self.raw_value();base=defaults()
-        keys=('output_mode','background','cover','cover_landscape','cover_portrait','cover_seconds','cover_transition','cover_fit','layouts',*[k for k in p if k.startswith('opening_title_') or k.startswith('opening_topic_') or k.startswith('disclaimer_')])
+        keys=('output_mode','background','cover','cover_landscape','cover_portrait','cover_seconds','cover_transition','cover_fit','layouts',*[k for k in p if k.startswith(('opening_title_','opening_topic_','opening_text_3_','disclaimer_'))])
         def same(value,default):
             if isinstance(default,dict):return set(value)==set(default) and all(same(value[k],default[k]) for k in default)
             if isinstance(default,(int,float)) and not isinstance(default,bool):
@@ -250,7 +286,10 @@ class SequencePanel:
         if key in ('cover_landscape','cover_portrait'):self.v['cover'].set('')
         if key=='background_audio':
             from ui_assets import remember_music
-            remember_music(self.music_preferences,'')
+            remember_music(self.asset_preferences,'')
+        if key=='outro_video':
+            from ui_assets import remember_outro
+            remember_outro(self.asset_preferences,'')
         self.update()
     def background_audio_settings(self):
         win=tk.Toplevel(self.app.root);win.title('片头背景音乐与音量');win.geometry('680x270')
@@ -263,17 +302,116 @@ class SequencePanel:
 
 
     def pick(self,key):
-        from ui_assets import filetypes,check_image,remember_music
+        from ui_assets import filetypes,check_image,remember_music,remember_outro
         p=filedialog.askopenfilename(filetypes=filetypes(key))
         if not p:return
         try:
             if key in ('background','cover','cover_landscape','cover_portrait'):check_image(p,'背景或封面')
-            if key=='background_audio':remember_music(self.music_preferences,p)
+            if key=='background_audio':remember_music(self.asset_preferences,p)
+            if key=='outro_video':remember_outro(self.asset_preferences,p)
             self.v[key].set(p);self.enabled.set(True);self.update()
         except Exception as e:messagebox.showerror('素材类型',str(e),parent=self.app.root)
     def pick_subtitle_region(self,mode):
         from roi_picker import show
         show(self,mode)
+    def locate_combined_intro(self):
+        from intro_boundary_ui import show
+        show(self)
+    def pick_intro_last_cue(self):
+        try:
+            from media import parse_srt
+            path=self.app.v['source_srt'].get()
+            if not path:raise ValueError('请先导入完整视频时间轴 SRT。')
+            cues=parse_srt(path)
+            if len(cues)<2:raise ValueError('SRT 至少要有片头和正文字幕。')
+            win=tk.Toplevel(self.app.root);win.title('选择片头最后一句字幕');win.geometry('850x560')
+            box=ttk.Frame(win,padding=12);box.pack(fill='both',expand=True)
+            ttk.Label(box,text='请选择完整 SRT 中片头最后一句。软件会把下一条字幕的开始时间作为正文开始；不用填写时间。',wraplength=810).pack(anchor='w',pady=(0,8))
+            table=ttk.Treeview(box,columns=('id','start','end','text'),show='headings',selectmode='browse',height=16)
+            for key,label,width in (('id','编号',65),('start','开始',95),('end','结束',95),('text','字幕内容',540)):
+                table.heading(key,text=label);table.column(key,width=width,stretch=key=='text',anchor='w')
+            scroll=ttk.Scrollbar(box,orient='vertical',command=table.yview);table.configure(yscrollcommand=scroll.set)
+            table.pack(side='left',fill='both',expand=True);scroll.pack(side='left',fill='y')
+            def clock(value):
+                minutes=int(value//60);seconds=value-minutes*60
+                return f'{minutes:02d}:{seconds:06.3f}'
+            by_id={}
+            for cue in cues:
+                ident,a,b,text=cue;by_id[str(ident)]=cue
+                table.insert('','end',iid=str(ident),values=(ident,clock(a),clock(b),' '.join(text.split())))
+            selected_text=tk.StringVar(value='')
+            ttk.Label(box,textvariable=selected_text,wraplength=810).pack(fill='x',anchor='w',pady=8)
+            current=str(int(float(self.v['combined_intro_last_cue'].get())))
+            if current in by_id:table.selection_set(current);table.see(current)
+            def show_selected(_event=None):
+                sel=table.selection()
+                if not sel:return
+                cue=by_id[sel[0]];selected_text.set(f'将作为片头最后一句：第{cue[0]}条「{cue[3]}」')
+            table.bind('<<TreeviewSelect>>',show_selected);show_selected()
+            def accept(_event=None):
+                sel=table.selection()
+                if not sel:messagebox.showwarning('未选择字幕','请选择片头最后一句字幕。',parent=win);return
+                self.v['combined_intro_last_cue'].set(sel[0]);win.destroy()
+            actions=ttk.Frame(box);actions.pack(fill='x',pady=5)
+            ttk.Button(actions,text='使用这句',command=accept).pack(side='right')
+            ttk.Button(actions,text='取消',command=win.destroy).pack(side='right',padx=6)
+            table.bind('<Double-1>',accept)
+        except Exception as e:messagebox.showerror('选择片头字幕',str(e),parent=self.app.root)
+    def refresh_intro_cue_status(self):
+        if not hasattr(self,'intro_cue_status'):return
+        try:
+            from media import parse_srt
+            path=self.app.v['source_srt'].get();ident=int(float(self.v['combined_intro_last_cue'].get()))
+            cues=parse_srt(path) if path else []
+            cue=next((c for c in cues if c[0]==ident),None)
+            if cue:
+                text=' '.join(cue[3].split());text=(text[:48]+'…') if len(text)>48 else text
+                self.intro_cue_status.set(f'片头最后一句：第{ident}条「{text}」')
+            elif path:self.intro_cue_status.set(f'当前第{ident}条不在 SRT 中，请重新选择。')
+            else:self.intro_cue_status.set('当前片头最后一句：第12条（导入 SRT 后可查看内容）')
+        except (OSError,ValueError):self.intro_cue_status.set('SRT 暂不可读取，请检查字幕文件。')
+    def locate_combined_outro(self):
+        from ending_reference_ui import show
+        show(self)
+    def opening_texts(self):
+        from opening_text_ui import show
+        show(self)
+    def set_outro_from_srt(self):
+        try:
+            from media import parse_srt
+            refs=parse_srt(self.app.v['source_srt'].get())
+            if len(refs)<2:raise ValueError('完整视频 SRT 至少要有片头和正文字幕。')
+            last_id=int(float(self.v['combined_intro_last_cue'].get()))
+            ids=[c[0] for c in refs]
+            if last_id not in ids or ids.index(last_id)>=len(refs)-1:raise ValueError('片头最后字幕编号之后没有正文字幕。')
+            self.v['combined_intro_end'].set(f'{refs[ids.index(last_id)+1][1]:.3f}')
+            fallback=refs[-1][2]+2.0
+            self.v['combined_outro_start'].set(f'{fallback:.3f}')
+            self.v['combined_replace_outro'].set(True)
+            self.app.log_line(f'已按视频时间轴 SRT 填入：正文开始 {refs[ids.index(last_id)+1][1]:.3f} 秒；正文字幕结束 {refs[-1][2]:.3f} 秒；片尾候选 {fallback:.3f} 秒（延后2秒）。如有旧片尾参考，可再自动定位并预览确认。')
+        except Exception as e:messagebox.showerror('读取完整 SRT',str(e),parent=self.app.root)
+    def toggle_complete_advanced(self):
+        if self.complete_advanced_open.get():self.complete_advanced.pack(fill='x',pady=3)
+        else:self.complete_advanced.pack_forget()
+    def refresh_complete_status(self):
+        if not hasattr(self,'complete_status'):return
+        def clock(value):
+            try:
+                value=max(0,float(value));minutes=int(value//60);seconds=value-minutes*60
+                return f'{minutes:02d}:{seconds:06.3f}'
+            except (ValueError,TypeError):return ''
+        intro=clock(self.v['combined_intro_end'].get());outro=clock(self.v['combined_outro_start'].get());audio=clock(self.v['combined_audio_split'].get())
+        body_end=''
+        srt=self.app.v['source_srt'].get()
+        if srt:
+            try:
+                from media import parse_srt
+                cues=parse_srt(srt)
+                if cues:body_end=clock(cues[-1][2])
+            except (OSError,ValueError):pass
+        video_status=f'视频时间轴：正文开始 {intro or "待定位"}；SRT末句结束 {body_end or "待读取"}；原片尾切换 {outro or "待定位"}。'
+        audio_status=f'配音分界 {audio}（独立配音时间轴）' if audio else '配音分界待自动定位'
+        self.complete_status.set(video_status+'\n'+audio_status+'。')
     def pick_clean(self,mode):
         p=filedialog.askopenfilename()
         if p:self.layout_vars[mode]['clean_video'].set(p)
@@ -281,8 +419,13 @@ class SequencePanel:
         self.enabled.set(True);self.v['output_mode'].set(dict(zip(('智能自动选择','只生成横版16:9','只生成竖版9:16','横版＋竖版'),('auto','landscape','portrait','both')))[self.mode.get()]);self.update()
     def value(self):
         p=self.raw_value();mode=self.segment_mode.get()
-        if mode!=SEGMENT_MODES[1]:p['intro_enabled']=False;p['outro_enabled']=False
-        if not p['intro_enabled'] or p['intro_mode']=='original':p['background_audio']=''
+        if mode==SEGMENT_MODES[2]:
+            p['combined']=True;p['combined_replace_outro']=True
+            p['intro_enabled']=False;p['outro_enabled']=False
+        elif mode!=SEGMENT_MODES[1]:
+            p['combined']=False;p['combined_replace_outro']=False
+            p['intro_enabled']=False;p['outro_enabled']=False
+        if mode!=SEGMENT_MODES[2] and (mode!=SEGMENT_MODES[1] or not p['intro_enabled'] or p['intro_mode']=='original'):p['background_audio']=''
         return p
     def changed(self):
         if not self.restoring:
@@ -310,7 +453,7 @@ class SequencePanel:
         for row in ((self.cover_l,self.cover_p) if selected in ('both','auto') else (self.cover_l,) if selected=='landscape' else (self.cover_p,)):row.pack(fill='x',pady=3,before=self.cover_anchor)
         self.cover_options.pack(fill='x',after=self.cover_anchor) if any(self.v[k].get() for k in ('cover','cover_landscape','cover_portrait')) else self.cover_options.pack_forget()
         if mode!=SEGMENT_MODES[0]:self.segments.pack(fill='x',pady=5)
-        for part in (self.segment_switch,self.intro,self.outro,self.music):part.pack_forget()
+        for part in (self.segment_switch,self.intro,self.outro,self.complete,self.music):part.pack_forget()
         if mode==SEGMENT_MODES[1]:self.segment_switch.pack(fill='x',before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get():self.intro.pack(fill='x',pady=4,before=self.segment_anchor)
         self.intro_choice.set('original' if self.v['intro_mode'].get()=='original' else 'replace')
@@ -322,10 +465,16 @@ class SequencePanel:
             if self.intro_more_open.get():self.intro_more.pack(fill='x')
         if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get() and self.v['intro_mode'].get()!='original':self.music.pack(fill='x',pady=4,before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['outro_enabled'].get():self.outro.pack(fill='x',pady=4,before=self.segment_anchor)
+        if mode==SEGMENT_MODES[2]:
+            self.complete.pack(fill='x',pady=4,before=self.segment_anchor)
+            self.music_row.winfo_children()[0].configure(text='片头背景音乐（必选）')
+            self.music.pack(fill='x',pady=4,before=self.segment_anchor)
+        else:self.music_row.winfo_children()[0].configure(text='片头背景音乐（可选）')
         self.preview_controls.pack_forget()
         if hasattr(self.app,'media_labels'):
-            for key,label in [('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）')]:self.app.media_labels[key].configure(text=label)
-        self.segments.configure(text='片头 / 片尾（按需启用）')
+            labels=(('video','完整视频 MP4（含片头、正文、原片尾）'),('audio','整段配音（含片头和正文）'),('source_srt','完整视频时间轴 SRT（含片头和正文）')) if mode==SEGMENT_MODES[2] else (('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）'))
+            for key,label in labels:self.app.media_labels[key].configure(text=label)
+        self.segments.configure(text='完整视频定位与片尾替换' if mode==SEGMENT_MODES[2] else '片头 / 片尾（按需启用）')
         selected=self.v['output_mode'].get()
         for idx,name in enumerate(('landscape','portrait')):
             self.layouts.tab(idx,state='normal' if selected in ('both','auto',name) else 'hidden')
@@ -352,8 +501,6 @@ class SequencePanel:
         self.restoring=True
         try:
             job,missing=load_project(p)
-            if job['sequence'].get('combined') or str(job.get('ui_state',{}).get('segment_mode','')).startswith('整片'):
-                raise ValueError('此项目使用已撤下的完整视频切分模式，未载入。请分别选择片头、正文和片尾素材；原项目和素材均未改动。')
             for key,value in job.items():
                 if key in self.app.v:self.app.v[key].set(value)
             self.app.auto_cut.set(job.get('trim',True))
@@ -372,7 +519,7 @@ class SequencePanel:
                     if not self.v['cover_'+ratio].get():self.v['cover_'+ratio].set(self.v['cover'].get())
                 self.v['cover'].set('')
             ui=job.get('ui_state') or {}
-            derived=SEGMENT_MODES[1] if job['sequence']['intro_enabled'] or job['sequence']['outro_enabled'] else SEGMENT_MODES[0]
+            derived=SEGMENT_MODES[2] if job['sequence'].get('combined') else SEGMENT_MODES[1] if job['sequence']['intro_enabled'] or job['sequence']['outro_enabled'] else SEGMENT_MODES[0]
             saved_mode=ui.get('segment_mode')
             self.segment_mode.set(saved_mode if saved_mode in SEGMENT_MODES else derived)
             for k,value in ui.get('parts_preferences',{}).items():

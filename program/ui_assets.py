@@ -27,3 +27,11 @@ def load_music(data):
 def remember_music(data,path):
     if path and not Path(path).is_file():raise ValueError('片头背景音乐文件不存在，请重新选择。')
     atomic_json(Path(data)/'intro_music_preferences.json',dict(schema=1,path=str(Path(path).resolve()) if path else ''))
+
+def load_outro(data):
+    try:return str(json.loads((Path(data)/'fixed_outro_preferences.json').read_text(encoding='utf8'))['path'])
+    except (OSError,ValueError,KeyError,TypeError):return ''
+
+def remember_outro(data,path):
+    if path and not Path(path).is_file():raise ValueError('固定片尾视频不存在，请重新选择。')
+    atomic_json(Path(data)/'fixed_outro_preferences.json',dict(schema=1,path=str(Path(path).resolve()) if path else ''))

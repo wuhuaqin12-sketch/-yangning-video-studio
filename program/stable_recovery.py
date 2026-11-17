@@ -12,7 +12,7 @@ STABLE_VERSION='0.12.11'
 STABLE_SIZE=25417118
 STABLE_SHA256='ac6b5a09c35d92c88c986334b959c4847540a0175b05d9cc0321235be60f200e'
 STABLE_URL='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/download/v0.12.11/YangNing_VideoStudio_Windows_0.12.11.zip'
-SETTINGS=('last_project_next.json','intro_music_preferences.json','queue_noerase_v055.json','style_no_denoise.json','sound_preferences.json','output_destination.json')
+SETTINGS=('last_project_next.json','intro_music_preferences.json','fixed_outro_preferences.json','queue_noerase_v055.json','style_no_denoise.json','sound_preferences.json','output_destination.json')
 
 def digest(path):
     h=hashlib.sha256()
