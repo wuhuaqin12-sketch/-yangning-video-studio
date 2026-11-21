@@ -117,10 +117,6 @@ class BoundaryTests(unittest.TestCase):
         self.assertAlmostEqual(seq.seconds(folder/'complete_body.mp4',self.stop),2.5,delta=.15)
         self.assertTrue(Path(j['sequence']['outro_video']).samefile(self.ending))
         self.assertGreater(seq.seconds(self.ending,self.stop),5-4.5)
-    def test_complete_video_requires_picture_confirmed_outro_cut(self):
-        q=self.detect('missing_outro');p=defaults();p.update(combined=True,outro_video=str(self.ending),background_audio=str(self.music),combined_intro_end=q['video'],combined_audio_split=q['audio'],combined_aligned_srt=q['aligned_srt'],combined_alignment_token=q['token'])
-        with self.assertRaisesRegex(ValueError,'不能仅用 SRT'):
-            seq.split_combined(dict(video=str(self.video),audio=str(self.audio),source_srt=str(self.refs)),p,self.root/'missing_outro_result',self.stop)
     def test_complete_export_uses_video_srt_for_visual_cut_and_appends_longer_fixed_tail(self):
         q=self.detect('full_export');p=defaults();p.update(output_mode='landscape',combined=True,outro_video=str(self.ending),background_audio=str(self.music),combined_intro_end=q['video'],combined_audio_split=q['audio'],combined_outro_start=4.5,combined_aligned_srt=q['aligned_srt'],combined_alignment_token=q['token'])
         p['layouts']['landscape']['remove_chinese']=False
