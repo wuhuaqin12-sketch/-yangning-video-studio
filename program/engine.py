@@ -31,7 +31,8 @@ def playback_speed(job):
 
 def fingerprint(job):
     result={}
-    for k in ('video','audio','source_srt','target_srt','audio_reference_srt'):
+    for k in ('video','audio','source_srt','target_srt','chinese_srt','audio_reference_srt'):
+        if k=='chinese_srt' and not (job.get('language')=='yue' and job.get('alignment')=='multi' and job.get('cantonese_alignment')=='chinese'):continue
         if not job.get(k):continue
         p=Path(job[k]).resolve();st=p.stat()
         with p.open('rb') as f:
@@ -70,7 +71,15 @@ def prepare(job,cancel,progress=lambda s:None):
         load_reference(job['audio_reference_srt'],duration)
     if job.get('alignment')=='multi':
         from multilingual import align
-        dst=align(dst,audio,folder,cancel,progress,job['language'],duration)
+        if job['language']=='yue' and job.get('cantonese_alignment','chinese')=='chinese':
+            from cantonese_reference import remap
+            chinese=parse_srt(job['chinese_srt'])
+            if chinese[-1][2]>vd+.2:raise ValueError('中文辅助 SRT 超出原视频时长。')
+            progress('使用中文 SRT 辅助定位粤语配音；粤语 SRT 用于字幕输出')
+            aligned_chinese=align(chinese,audio,folder,cancel,progress,'yue',duration)
+            dst=remap(chinese,aligned_chinese,dst,folder)
+        else:
+            dst=align(dst,audio,folder,cancel,progress,job['language'],duration)
     elif dst[-1][2]>duration+.15:raise ValueError('已校对配音SRT超出音频；若只有原视频时间，请选择自动定位。')
     if dst[-1][2]>duration+.1:raise ValueError('定位超出音频时长，停止导出以防截断。')
     silences=detect(raw,rate,channels,cancel);word_rows=json.loads((folder/'words.json').read_text(encoding='utf8'))['words'] if (folder/'words.json').is_file() else None
