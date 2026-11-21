@@ -390,7 +390,7 @@ class App:
         complete=getattr(self,'sequence_panel',None) and self.sequence_panel.segment_mode.get().startswith('完整视频')
         if not complete:self.media_labels['source_srt'].configure(text='粤语输出字幕 SRT' if yue else '正文SRT（外语）')
         for widget in (self.chinese_label,self.chinese_entry,self.chinese_button):
-            if yue and self.v['cantonese_alignment'].get()=='chinese':widget.grid()
+            if yue and not complete and self.v['cantonese_alignment'].get()=='chinese':widget.grid()
             else:widget.grid_remove()
     def pick(self,k):
         from ui_assets import filetypes
