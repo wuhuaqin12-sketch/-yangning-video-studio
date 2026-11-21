@@ -82,6 +82,15 @@ class BoundaryTests(unittest.TestCase):
             preview=ib.preview(q,self.video,self.audio,self.refs,kind,self.root/'previews',self.stop)
             self.assertGreater(float(probe(preview['path'],self.stop)['format']['duration']),1)
         self.assertEqual(before,[file_digest(p) for p in (self.video,self.audio,self.refs)])
+    def test_independent_video_and_audio_boundaries(self):
+        visual=ib.video_only_boundary(self.video,self.refs,12,self.stop)
+        spoken=ib.audio_only_boundary(self.audio,self.refs,12,self.target,self.root/'independent_audio',self.stop)
+        self.assertEqual(visual['video'],2)
+        self.assertAlmostEqual(spoken['audio'],1.88)
+        self.assertEqual((visual['body_id'],spoken['body_id']),(13,13))
+        with self.assertRaisesRegex(ValueError,'编号'):
+            bad=self.root/'independent_bad.srt';ib.write_srt(bad,[(1,.1,1,'A'),(2,2,4,'B')])
+            ib.audio_only_boundary(self.audio,self.refs,12,bad,self.root/'independent_audio',self.stop)
     def test_existing_local_alignment_is_used_without_different_model_fallback(self):
         with patch('multilingual.align',return_value=self.targets) as align:
             q=self.detect('model_path',False)

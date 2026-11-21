@@ -3,7 +3,8 @@ import uuid
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox
-from intro_boundary import detect,verify,preview,video_only_boundary
+from intro_boundary import detect,verify,preview,video_only_boundary,audio_only_boundary,alignment_token
+from media import run,executable
 
 class IntroDialog:
     def __init__(self,panel):
@@ -21,6 +22,7 @@ class IntroDialog:
         ttk.Label(page,text='未提供已对齐SRT时，调用现有本地语音定位。首次可能配置组件/下载约460MB模型，可停止；配音不上传。粤语等未支持语言须提供已对齐SRT。',wraplength=750).pack(anchor='w',pady=6)
         ttk.Button(page,text='自动定位片头与配音分界',command=self.find).pack(anchor='w',pady=6)
         ttk.Button(page,text='仅定位视频片头分界（配音定位失败时使用）',command=self.find_video_only).pack(anchor='w',pady=3)
+        ttk.Button(page,text='仅定位配音分界（使用已对齐配音 SRT）',command=self.find_audio_only).pack(anchor='w',pady=3)
         self.status=tk.StringVar(value='自动结果不直接填写主页面。原视频、SRT或配音变更后需重新定位。')
         ttk.Label(page,textvariable=self.status,wraplength=750).pack(anchor='w',pady=8)
         row=ttk.Frame(page);row.pack(fill='x')
@@ -69,6 +71,31 @@ class IntroDialog:
         except Exception as e:
             self.status.set(f'视频分界定位失败：{e}')
             messagebox.showwarning('视频分界定位失败',str(e),parent=self.win)
+    def find_audio_only(self):
+        if self.app.busy:return
+        try:
+            video,audio,srt=self.inputs();aligned=self.aligned.get()
+            if not aligned:raise ValueError('请先选择已对齐合并配音的 SRT。')
+            last=int(float(self.panel.v['combined_intro_last_cue'].get()))
+            folder=self.panel.autosave.parent/('IntroBoundary_'+uuid.uuid4().hex)
+            candidate=audio_only_boundary(audio,srt,last,aligned,folder,self.app.stop)
+            begin=max(0,candidate['audio']-3);sample=folder/'audio_boundary_preview.wav'
+            run([executable('ffmpeg'),'-nostdin','-v','error','-y','-ss',str(begin),'-i',audio,'-t','6','-vn','-c:a','pcm_s16le',str(sample)],self.app.stop)
+            from app import open_path
+            open_path(sample)
+            if not messagebox.askyesno('试听配音分界',f'配音分界候选：{candidate["audio"]:.3f} 秒（第{candidate["body_id"]}条开始）。\n请试听：{sample}\n确认没有切断片头末句或正文首词后，应用配音分界？',parent=self.win):return
+            # Copy to an owned cache so the project token remains valid after the
+            # user moves or edits the imported alignment file.
+            from intro_boundary import write_srt
+            from media import parse_srt
+            saved=folder/'full_narration_aligned.srt';write_srt(saved,parse_srt(aligned))
+            token=alignment_token(video,audio,srt,saved)
+            for key,value in dict(combined_audio_split=f'{candidate["audio"]:.3f}',combined_aligned_srt=str(saved),combined_alignment_token=token).items():self.panel.v[key].set(value)
+            self.panel.approved_preview='';self.panel.update()
+            self.status.set('已确认配音分界；视频分界仍须单独定位并检查画面。')
+        except Exception as e:
+            self.status.set(f'配音分界定位失败：{e}')
+            messagebox.showwarning('配音分界定位失败',str(e),parent=self.win)
     def listen(self,kind):
         if not self.result:return
         video,audio,srt=self.inputs();candidate=self.result
