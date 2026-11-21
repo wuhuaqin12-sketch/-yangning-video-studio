@@ -1,0 +1,118 @@
+{
+  "actual_browser_exports": [
+    {
+      "mode": "landscape",
+      "resolution": [
+        960,
+        540
+      ],
+      "duration": 27,
+      "frames": 648,
+      "full_decode": true,
+      "cover_first_frame_full": true,
+      "cover_silent": true,
+      "intro_mix_only_550_and_220Hz": true,
+      "original_intro_330Hz_removed": true,
+      "body_dub_660Hz": true,
+      "original_body_440Hz_removed": true,
+      "outro_full_880Hz": true,
+      "captions_burned": true
+    },
+    {
+      "mode": "portrait",
+      "resolution": [
+        540,
+        960
+      ],
+      "duration": 27,
+      "frames": 648,
+      "full_decode": true,
+      "cover_first_frame_full": true,
+      "cover_silent": true,
+      "intro_mix_only_550_and_220Hz": true,
+      "original_intro_330Hz_removed": true,
+      "body_dub_660Hz": true,
+      "original_body_440Hz_removed": true,
+      "outro_full_880Hz": true,
+      "captions_burned": true
+    }
+  ],
+  "separate_intro_body_srt_offsets": true,
+  "physical_iphone_verified": false,
+  "physical_android_verified": false,
+  "mobile_sync_0_2": {
+    "model": "onnx-community/whisper-base_timestamped",
+    "revision": "608c49e61301901684bc36cac8f74b95ff6b5a8e",
+    "language": "Japanese",
+    "sample": "4 public JSUT sentences, source video synthetic color markers",
+    "voiceSeconds": 18.19,
+    "originalVideoSeconds": 14,
+    "retimedBodySeconds": 18.833333333333332,
+    "referenceReadingCoverage": 0.9279279279279279,
+    "controls": [
+      "3s silent cover",
+      "2s original-sound intro",
+      "retimed body, original-speed narration",
+      "2s original-sound outro"
+    ],
+    "checks": {
+      "landscape.mp4": {
+        "duration": 25.834667,
+        "size": [
+          960,
+          540
+        ],
+        "full_decode": true,
+        "voice_sentence_correlations": [
+          0.999457022545805,
+          0.9988118253917427,
+          0.9994909253610373,
+          0.997700004676441
+        ],
+        "body_frames_follow_each_cue": true,
+        "outro_tone_hz": 880,
+        "cover_silent": true
+      },
+      "portrait.mp4": {
+        "duration": 25.834667,
+        "size": [
+          540,
+          960
+        ],
+        "full_decode": true,
+        "voice_sentence_correlations": [
+          0.999457022545805,
+          0.9988118253917427,
+          0.9994909253610373,
+          0.997700004676441
+        ],
+        "body_frames_follow_each_cue": true,
+        "outro_tone_hz": 880,
+        "cover_silent": true
+      },
+      "preview20": {
+        "duration": 20.010667
+      },
+      "physical_phone_verified": false,
+      "actual_user_diamond_sutra_verified": false,
+      "srt": {
+        "all_four_sentences_preserved": true,
+        "cover_intro_offsets_correct": true,
+        "subtitle_times_follow_voice": true
+      }
+    },
+    "limits": [
+      "Cloud Chrome only; no physical iPhone/Android verification",
+      "No real Diamond Sutra or long-video verification",
+      "Other implemented language paths not verified with speech samples",
+      "Reading/character coverage is not a measure of timestamp accuracy"
+    ],
+    "main_ui": {
+      "import_video_voice_source_srt": true,
+      "automatic_sync_checked": true,
+      "burn_checked_manually": true,
+      "both_complete_exports_seconds": 18.833333333333332,
+      "compatibility_sample_preserves_user_settings": true
+    }
+  }
+}
