@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox
-from intro_boundary import detect,verify,preview
+from intro_boundary import detect,verify,preview,video_only_boundary
 
 class IntroDialog:
     def __init__(self,panel):
@@ -20,6 +20,7 @@ class IntroDialog:
         ttk.Entry(row,textvariable=self.aligned).pack(side='left',fill='x',expand=True);ttk.Button(row,text='选择',command=self.pick).pack(side='left',padx=6)
         ttk.Label(page,text='未提供已对齐SRT时，调用现有本地语音定位。首次可能配置组件/下载约460MB模型，可停止；配音不上传。粤语等未支持语言须提供已对齐SRT。',wraplength=750).pack(anchor='w',pady=6)
         ttk.Button(page,text='自动定位片头与配音分界',command=self.find).pack(anchor='w',pady=6)
+        ttk.Button(page,text='仅定位视频片头分界（配音定位失败时使用）',command=self.find_video_only).pack(anchor='w',pady=3)
         self.status=tk.StringVar(value='自动结果不直接填写主页面。原视频、SRT或配音变更后需重新定位。')
         ttk.Label(page,textvariable=self.status,wraplength=750).pack(anchor='w',pady=8)
         row=ttk.Frame(page);row.pack(fill='x')
@@ -55,6 +56,19 @@ class IntroDialog:
                 return detect(video,audio,srt,language,last,chosen,self.folder,self.app.stop,self.app.progress)
             self.launch('found',locate)
         except Exception as e:messagebox.showerror('片头自动定位',str(e),parent=self.win)
+    def find_video_only(self):
+        if self.app.busy:return
+        try:
+            video,_,srt=self.inputs()
+            last=int(float(self.panel.v['combined_intro_last_cue'].get()))
+            candidate=video_only_boundary(video,srt,last,self.app.stop)
+            if not messagebox.askyesno('仅定位视频分界',f'正文画面开始：{candidate["video"]:.3f} 秒（第{candidate["body_id"]}条）。\n只填写视频分界；配音分界仍须单独定位或人工确认。是否应用？',parent=self.win):return
+            self.panel.v['combined_intro_end'].set(f'{candidate["video"]:.3f}')
+            self.panel.approved_preview='';self.panel.update()
+            self.status.set('已填写视频分界；配音分界尚未确认，不能据此认定音画同步完成。')
+        except Exception as e:
+            self.status.set(f'视频分界定位失败：{e}')
+            messagebox.showwarning('视频分界定位失败',str(e),parent=self.win)
     def listen(self,kind):
         if not self.result:return
         video,audio,srt=self.inputs();candidate=self.result

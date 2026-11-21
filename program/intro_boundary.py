@@ -19,6 +19,18 @@ def cue_boundary(cues,last_id,total):
     if not 0<first[1]<total or last[2]>first[1]+.001:raise ValueError('SRT片头与正文分界越界或重叠，请提供对应原视频/配音的正确SRT。')
     return n,first[1],last[2],first[0]
 
+def video_only_boundary(video,source_srt,last_id,cancel):
+    """Locate the original video boundary without requiring narration alignment."""
+    video=Path(video);source_srt=Path(source_srt)
+    if not video.is_file() or not source_srt.is_file():
+        raise ValueError('请先导入完整原视频及对应原视频时间轴 SRT。')
+    refs=parse_srt(source_srt)
+    total=float(probe(video,cancel)['format']['duration'])
+    _,head,_,body_id=cue_boundary(refs,int(last_id),total)
+    if refs[-1][2]>total+.1:
+        raise ValueError('原视频 SRT 超出视频时长，请检查时间轴。')
+    return dict(video=head,body_id=body_id,last_id=int(last_id))
+
 def detect(video,audio,source_srt,language,last_id,aligned_srt,folder,cancel,progress=lambda _:None):
     video=Path(video);audio=Path(audio) if audio else video;source_srt=Path(source_srt)
     for p in (video,audio,source_srt):
