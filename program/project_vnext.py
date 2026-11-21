@@ -121,7 +121,7 @@ def file_digest(path):
 def processing_key(job):
     # Layout, covers and burn-in are deliberately excluded. Use full file hashes,
     # not only beginning/end fingerprints, so interior changes invalidate cache.
-    value={k:job.get(k) for k in ('language','alignment','cantonese_alignment','speed','trim','audio_profile','audio_separate','_pause_override')}
+    value={k:job.get(k) for k in ('language','alignment','cantonese_alignment','sync_burned_subtitles','speed','trim','audio_profile','audio_separate','_pause_override')}
     value['cache_schema']=1
     from engine import VERSION
     value['processing_version']=VERSION

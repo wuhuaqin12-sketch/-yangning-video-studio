@@ -23,6 +23,10 @@ def aligned(job,folder,cancel,progress):
     from engine import prepare,render
     from workflow import normalize as normalize_job
     j=normalize_job({**job,'publish_settings':{},'burn':False})
+    settings=normalize(job.get('sequence'))
+    portrait_keeps_chinese=not settings['layouts']['portrait']['remove_chinese']
+    if j.get('language')=='ja' and portrait_keeps_chinese and settings['output_mode'] in ('portrait','both','auto'):
+        j['sync_burned_subtitles']=True
     key=processing_key(j);cache=folder/'processing_cache'/key;cache.mkdir(parents=True,exist_ok=True)
     index=cache/'index.json'
     if index.is_file():
