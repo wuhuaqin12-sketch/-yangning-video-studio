@@ -19,6 +19,42 @@ def cue_boundary(cues,last_id,total):
     if not 0<first[1]<total or last[2]>first[1]+.001:raise ValueError('SRT片头与正文分界越界或重叠，请提供对应原视频/配音的正确SRT。')
     return n,first[1],last[2],first[0]
 
+def audio_only_boundary(audio,source_srt,last_id,aligned_srt,folder,cancel):
+    """Use the narration clock independently of the source video's duration."""
+    audio=Path(audio);source_srt=Path(source_srt);aligned_srt=Path(aligned_srt)
+    if any(not p.is_file() for p in (audio,source_srt,aligned_srt)):
+        raise ValueError('请导入整段配音、完整视频 SRT 和已对齐配音 SRT。')
+    refs=parse_srt(source_srt);targets=parse_srt(aligned_srt)
+    if [c[0] for c in refs]!=[c[0] for c in targets]:
+        raise ValueError('视频与配音 SRT 编号不一致，请先校对。')
+    total=float(probe(audio,cancel)['format']['duration'])
+    _,next_start,last_end,body_id=cue_boundary(targets,int(last_id),total)
+    if targets[-1][2]>total+.03:raise ValueError('配音 SRT 超出配音时长。')
+    gap=next_start-last_end
+    if gap<.04:raise ValueError('片头与正文配音之间没有可确认的停顿，请校对配音 SRT。')
+    split=next_start-min(.12,gap/2)
+    folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
+    begin=max(0,split-.8);raw=folder/'audio_boundary_check.f32'
+    run([executable('ffmpeg'),'-nostdin','-v','error','-y','-ss',str(begin),'-i',str(audio),'-t',str(min(1.6,total-begin)),'-vn','-ar','8000','-ac','1','-f','f32le',str(raw)],cancel)
+    signal=np.fromfile(raw,np.float32);center=round((split-begin)*8000)
+    rms=lambda a:float(np.sqrt(np.mean(a*a))) if len(a) else 0
+    chunks=[rms(signal[i:i+400]) for i in range(0,len(signal),400)]
+    if rms(signal[max(0,center-120):center+120])>max(.0015,max(chunks or [0])*.18):
+        raise ValueError('配音分界附近仍有明显声音，请核对已对齐 SRT 或手动确认安全停顿。')
+    return dict(audio=split,body_id=body_id,last_id=int(last_id),aligned_srt=str(aligned_srt))
+
+def video_only_boundary(video,source_srt,last_id,cancel):
+    """Locate the original video boundary without requiring narration alignment."""
+    video=Path(video);source_srt=Path(source_srt)
+    if not video.is_file() or not source_srt.is_file():
+        raise ValueError('请先导入完整原视频及对应原视频时间轴 SRT。')
+    refs=parse_srt(source_srt)
+    total=float(probe(video,cancel)['format']['duration'])
+    _,head,_,body_id=cue_boundary(refs,int(last_id),total)
+    if refs[-1][2]>total+.1:
+        raise ValueError('原视频 SRT 超出视频时长，请检查时间轴。')
+    return dict(video=head,body_id=body_id,last_id=int(last_id))
+
 def detect(video,audio,source_srt,language,last_id,aligned_srt,folder,cancel,progress=lambda _:None):
     video=Path(video);audio=Path(audio) if audio else video;source_srt=Path(source_srt)
     for p in (video,audio,source_srt):
