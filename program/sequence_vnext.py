@@ -366,9 +366,11 @@ def split_combined(job,p,folder,cancel,progress=lambda _:None):
     intro_end=float(p['combined_intro_end'] or body_refs[0][1])
     # The video SRT defines the original-video tail cut. Audio duration and its
     # independently aligned SRT never move this visual boundary.
-    # Prefer an explicitly confirmed or old-ending-matched boundary. If none
-    # was supplied, keep a short natural pause after the last spoken subtitle.
-    outro_start=float(p['combined_outro_start'] or refs[-1][2]+2.0)
+    # SRT timestamps can drift from the burned picture. Never infer a visual
+    # cut from the final cue plus a fixed pause: that can remove live speech.
+    if not p['combined_outro_start']:
+        raise ValueError('尚未确认原视频片尾切换点；请按画面定位并预览，不能仅用 SRT 末句加 2 秒截断正文。')
+    outro_start=float(p['combined_outro_start'])
     if not 0<intro_end<outro_start<total+.001:
         raise ValueError('片头正文分界或片尾切换时间超出视频范围，请按完整视频的 SRT 时间轴检查。')
     if refs[-1][2]>total+.1:raise ValueError('完整视频 SRT 超出原视频时长，请使用对应视频时间轴。')

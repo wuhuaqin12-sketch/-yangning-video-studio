@@ -145,7 +145,7 @@ class SequencePanel:
         row=ttk.Frame(outro_row);row.pack(fill='x')
         ttk.Button(row,text='自动定位原片尾并预览',command=self.locate_combined_outro).pack(side='left',padx=5)
         ttk.Button(row,text='没有原片尾参考：按 SRT 生成候选',command=self.set_outro_from_srt).pack(side='left',padx=5)
-        ttk.Label(outro_row,text='优先按原片尾画面匹配并预览确认；找不到时才用 SRT 最后一句结束后2秒。配音变长时，固定片尾顺接在正文配音结束后。',wraplength=820).pack(anchor='w',pady=(4,0))
+        ttk.Label(outro_row,text='优先按原片尾画面匹配并预览确认；SRT 候选仅供检查，不会自动截取正文。配音变长时，固定片尾顺接在正文配音结束后。',wraplength=820).pack(anchor='w',pady=(4,0))
         self.complete_status=tk.StringVar(value='定位状态：片头/正文、旧片尾尚未确认。')
         ttk.Label(self.complete,textvariable=self.complete_status,wraplength=850).pack(anchor='w',pady=4)
         for key in ('combined_intro_end','combined_outro_start','combined_audio_split'):
@@ -386,9 +386,9 @@ class SequencePanel:
             if last_id not in ids or ids.index(last_id)>=len(refs)-1:raise ValueError('片头最后字幕编号之后没有正文字幕。')
             self.v['combined_intro_end'].set(f'{refs[ids.index(last_id)+1][1]:.3f}')
             fallback=refs[-1][2]+2.0
-            self.v['combined_outro_start'].set(f'{fallback:.3f}')
+            self.v['combined_outro_start'].set('0')
             self.v['combined_replace_outro'].set(True)
-            self.app.log_line(f'已按视频时间轴 SRT 填入：正文开始 {refs[ids.index(last_id)+1][1]:.3f} 秒；正文字幕结束 {refs[-1][2]:.3f} 秒；片尾候选 {fallback:.3f} 秒（延后2秒）。如有旧片尾参考，可再自动定位并预览确认。')
+            self.app.log_line(f'已按 SRT 填入正文开始 {refs[ids.index(last_id)+1][1]:.3f} 秒；字幕末句结束 {refs[-1][2]:.3f} 秒。片尾候选 {fallback:.3f} 秒仅供参考，尚未应用；请按画面定位并预览确认片尾切换点。SRT 可能与烧录字幕错位。')
         except Exception as e:messagebox.showerror('读取完整 SRT',str(e),parent=self.app.root)
     def toggle_complete_advanced(self):
         if self.complete_advanced_open.get():self.complete_advanced.pack(fill='x',pady=3)
