@@ -452,7 +452,13 @@ class SequencePanel:
         self.background_row.pack(fill='x',before=self.cover_anchor) if selected!='landscape' else self.background_row.pack_forget()
         for row in ((self.cover_l,self.cover_p) if selected in ('both','auto') else (self.cover_l,) if selected=='landscape' else (self.cover_p,)):row.pack(fill='x',pady=3,before=self.cover_anchor)
         self.cover_options.pack(fill='x',after=self.cover_anchor) if any(self.v[k].get() for k in ('cover','cover_landscape','cover_portrait')) else self.cover_options.pack_forget()
-        if mode!=SEGMENT_MODES[0]:self.segments.pack(fill='x',pady=5)
+        # Remove the entire segment host from the material form in body-only mode.
+        # grid_remove preserves its grid options and all child widget values.
+        if mode==SEGMENT_MODES[0]:
+            self.app.segment_host.grid_remove()
+        else:
+            self.app.segment_host.grid()
+            self.segments.pack(fill='x',pady=5)
         for part in (self.segment_switch,self.intro,self.outro,self.complete,self.music):part.pack_forget()
         if mode==SEGMENT_MODES[1]:self.segment_switch.pack(fill='x',before=self.segment_anchor)
         if mode==SEGMENT_MODES[1] and self.v['intro_enabled'].get():self.intro.pack(fill='x',pady=4,before=self.segment_anchor)
