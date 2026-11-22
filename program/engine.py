@@ -29,26 +29,34 @@ def playback_speed(job):
     if not math.isfinite(speed) or not 0.5<=speed<=2.0:raise ValueError('成片倍速须在0.5–2.0之间。')
     return speed
 
-def visual_timeline(source,target,source_duration,target_duration,keep_cue_ends=False):
-    """Map output speech time to source picture time.
+def visual_timeline(source,target,source_duration,target_duration):
+    """Map every voice cue's start and end to its source-picture cue.
 
-    Burned-in captions need both the start and the end of each source cue
-    anchored. Other workflows retain their historical start-only mapping.
+    The same mapping serves body-only, full-video, landscape, portrait and
+    every language. A zero-length target pause cannot display a source gap;
+    in that case the next cue's start owns the shared instant.
     """
     if [c[0] for c in source]!=[c[0] for c in target]:
         raise ValueError('画面与配音字幕编号不对应。')
     anchors=[(0.,0.)]
     for index,(src,dst) in enumerate(zip(source,target)):
-        if index or keep_cue_ends:anchors.append((dst[1],src[1]))
-        if keep_cue_ends:anchors.append((dst[2],src[2]))
-    anchors.append((float(target_duration),float(source_duration)))
+        if index or dst[1]>.00001:anchors.append((dst[1],src[1]))
+        next_src=source[index+1] if index+1<len(source) else None
+        next_dst=target[index+1] if index+1<len(target) else None
+        if next_src and next_dst and next_dst[1]-dst[2]<=.00001 and next_src[1]-src[2]>.02:
+            continue
+        anchors.append((dst[2],src[2]))
+    # When speech ends at the output boundary, there is no time left to show
+    # any source-video tail. Do not override the final speech/picture anchor.
+    if target_duration-target[-1][2]>.00001 or source_duration-source[-1][2]<=.02:
+        anchors.append((float(target_duration),float(source_duration)))
     tx=[];sx=[]
     for t,s in anchors:
         if not math.isfinite(t) or not math.isfinite(s) or t<0 or s<0:
             raise ValueError('字幕时间存在无效数值，无法同步原中文字幕。')
         if tx and t<=tx[-1]+.00001:
             if abs(t-tx[-1])<=.00001 and abs(s-sx[-1])<=.02:continue
-            raise ValueError('字幕时间重叠或同一时刻对应不同画面；请检查原视频与日语 SRT。')
+            raise ValueError('字幕时间重叠或同一时刻对应不同画面；请检查原视频与配音 SRT。')
         if sx and s<sx[-1]-.01:raise ValueError('原视频 SRT 时间倒退，无法同步中文字幕。')
         tx.append(t);sx.append(s)
     if len(tx)<2:raise ValueError('缺少可用的视频时间锚点。')
@@ -161,7 +169,7 @@ def render_preview(folder,time,cancel):
     total,events=preview_audio(folder,cancel);speed=playback_speed(m['job']);t=float(time)
     if not 0<=t<total:raise ValueError('预览时间超出视频。')
     cues=[(i,mapped(a,events)/speed,mapped(b,events)/speed,text) for i,a,b,text in m['target']]
-    inv,_=visual_timeline(m['source'],cues,m['video_duration'],total,m['job'].get('sync_burned_subtitles',False))
+    inv,_=visual_timeline(m['source'],cues,m['video_duration'],total)
     st=float(inv(t))
     image=folder/'source_preview.png';Image.fromarray(frame_at(m['job']['video'],st,cancel,m['video_stream'])).save(image)
     if not m.get('publish_settings'):return str(image)
@@ -212,7 +220,7 @@ def render(folder,cancel,progress=lambda s:None):
     decoded_frames=int(counts[-1]);decoded_vd=decoded_frames/f
     if abs(decoded_vd-vd)>max(.5,3/f):raise RuntimeError('视频声明时长与实际画面相差过大，请先检查原片。')
     if src[-1][2]>decoded_vd+.15:raise ValueError('原字幕超出实际可解码画面，请检查字幕末尾。')
-    inv,tx=visual_timeline(src,adjusted,decoded_vd,total,job.get('sync_burned_subtitles',False));n=math.ceil(total*f)
+    inv,tx=visual_timeline(src,adjusted,decoded_vd,total);n=math.ceil(total*f)
     # Keep the source bitrate rather than a fixed 480x854 preset. CRF fallback is explicit.
     bitrate=int(v.get('bit_rate') or max(500000,int(m.get('video_bitrate',0))))
     bitrate_known=bool(v.get('bit_rate'))
