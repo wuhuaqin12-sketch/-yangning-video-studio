@@ -122,7 +122,7 @@ def processing_key(job):
     # Layout, covers and burn-in are deliberately excluded. Use full file hashes,
     # not only beginning/end fingerprints, so interior changes invalidate cache.
     value={k:job.get(k) for k in ('language','alignment','cantonese_alignment','speed','trim','audio_profile','audio_separate','_pause_override')}
-    value['cache_schema']=2  # All modes now use cue starts and ends; old video caches are invalid.
+    value['cache_schema']=3  # Rebuild cached video with the restored start-only picture map.
     from engine import VERSION
     value['processing_version']=VERSION
     value['files']={k:file_digest(job[k]) for k in ('video','audio','source_srt','target_srt','audio_reference_srt') if job.get(k)}
