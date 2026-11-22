@@ -20,6 +20,21 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         mapped,_=visual_timeline(source,target,260.,90.)
         for original,spoken in zip(source[1:],target[1:]):
             self.assertAlmostEqual(float(mapped(spoken[1])),original[1],places=6)
+    def test_bilingual_caption_ends_align_when_both_have_real_gaps(self):
+        source=[(1,0.,2.,'中一'),(2,2.5,4.5,'中二')]
+        target=[(1,0.,3.,'外一'),(2,3.8,6.8,'外二')]
+        mapped,_=visual_timeline(source,target,5.,7.5)
+        self.assertAlmostEqual(float(mapped(3.)),2.,places=6)
+        self.assertAlmostEqual(float(mapped(3.8)),2.5,places=6)
+        self.assertAlmostEqual(float(mapped(6.8)),4.5,places=6)
+
+    def test_adjacent_voice_cues_never_add_microsecond_picture_jump(self):
+        source=[(1,0.,1.,'中一'),(2,1.5,2.5,'中二')]
+        target=[(1,0.,1.,'外一'),(2,1.,2.,'外二')]
+        mapped,anchors=visual_timeline(source,target,3.,2.5)
+        self.assertEqual(anchors,[0.,1.,2.5])
+        self.assertAlmostEqual(float(mapped(1.)),1.5,places=6)
+
     def test_touching_voice_cues_use_legacy_sentence_starts(self):
         source=[(1,0.,1.,'first'),(2,1.5,2.,'second')]
         voice=[(1,0.,1.,'first'),(2,1.,2.,'second')]
