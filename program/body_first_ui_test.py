@@ -72,8 +72,19 @@ class BodyFirstUITests(unittest.TestCase):
         self.app.language_name.set('粤语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['language'].get(),'yue');self.assertEqual(self.app.v['alignment'].get(),'auto')
         self.assertFalse(self.app.target_entry.winfo_ismapped())
+        self.assertTrue(self.app.cantonese_mode_row.winfo_ismapped())
+        self.assertTrue(self.app.chinese_entry.winfo_ismapped())
+        # Old projects retain direct alignment, but the main page now shows
+        # that choice and lets users opt in to the Chinese reference.
+        self.app.v['cantonese_alignment'].set('direct');self.app.refresh_language_fields();self.root.update()
+        self.assertTrue(self.app.cantonese_mode_row.winfo_ismapped())
+        self.assertFalse(self.app.chinese_entry.winfo_ismapped())
+        self.app.v['cantonese_alignment'].set('chinese');self.app.refresh_language_fields();self.root.update()
+        self.assertTrue(self.app.chinese_entry.winfo_ismapped())
         self.app.language_name.set('印尼语');self.app.language_changed();self.root.update()
         self.assertEqual(self.app.v['alignment'].get(),'auto');self.assertFalse(self.app.target_entry.winfo_ismapped())
+        self.assertFalse(self.app.cantonese_mode_row.winfo_ismapped())
+        self.assertFalse(self.app.chinese_entry.winfo_ismapped())
 
     def test_saved_ui_preferences_restore_and_old_projects_migrate(self):
         from next_ui import SEGMENT_MODES

@@ -54,7 +54,7 @@ class App:
         form=ttk.LabelFrame(pane,text='① 导入素材',padding=12,style='Section.TLabelframe');form.pack(fill='x',pady=6)
         self.material_form=form
         self.material_mode_row=ttk.Frame(form);self.material_mode_row.grid(row=0,column=0,columnspan=3,sticky='ew',pady=(0,6))
-        self.segment_host=ttk.Frame(form);self.segment_host.grid(row=7,column=0,columnspan=3,sticky='ew')
+        self.segment_host=ttk.Frame(form);self.segment_host.grid(row=9,column=0,columnspan=3,sticky='ew')
         self.media_labels={}
         for i,(k,label) in enumerate([('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）')]):
             self.media_labels[k]=ttk.Label(form,text=label);self.media_labels[k].grid(row=i+1,column=0,sticky='w',padx=(0,10),pady=4)
@@ -67,13 +67,19 @@ class App:
         self.target_label=ttk.Label(form,text='已对齐配音 SRT')
         self.target_entry=ttk.Entry(form,textvariable=self.v['target_srt'])
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
-        self.target_label.grid(row=6,column=0,sticky='w');self.target_entry.grid(row=6,column=1,sticky='ew');self.target_button.grid(row=6,column=2)
+        self.target_label.grid(row=8,column=0,sticky='w');self.target_entry.grid(row=8,column=1,sticky='ew');self.target_button.grid(row=8,column=2)
         for widget in (self.target_label,self.target_entry,self.target_button):widget.grid_remove()
+        self.cantonese_mode_row=ttk.Frame(form)
+        self.cantonese_mode_row.grid(row=6,column=0,columnspan=3,sticky='w',pady=(4,2))
+        ttk.Label(self.cantonese_mode_row,text='粤语定位方式').pack(side='left',padx=(0,10))
+        for value,label in (('chinese','中文 SRT 辅助定位'),('direct','粤语 SRT 直接定位')):
+            ttk.Radiobutton(self.cantonese_mode_row,text=label,variable=self.v['cantonese_alignment'],value=value,command=self.refresh_language_fields).pack(side='left',padx=(0,12))
+        self.cantonese_mode_row.grid_remove()
         self.chinese_label=ttk.Label(form,text='中文辅助定位 SRT')
         self.chinese_entry=ttk.Entry(form,textvariable=self.v['chinese_srt'])
         self.chinese_button=ttk.Button(form,text='选择',command=lambda:self.pick('chinese_srt'))
         for col,widget in enumerate((self.chinese_label,self.chinese_entry,self.chinese_button)):
-            widget.grid(row=6,column=col,sticky='ew' if col==1 else 'w')
+            widget.grid(row=7,column=col,sticky='ew' if col==1 else 'w')
             widget.grid_remove()
         self.refresh_language_fields()
         self.language_name=tk.StringVar(value='按文件名判断')
@@ -390,6 +396,8 @@ class App:
         yue=self.v['language'].get()=='yue'
         complete=getattr(self,'sequence_panel',None) and self.sequence_panel.segment_mode.get().startswith('完整视频')
         if not complete:self.media_labels['source_srt'].configure(text='粤语输出字幕 SRT' if yue else '正文SRT（外语）')
+        if yue and not complete:self.cantonese_mode_row.grid()
+        else:self.cantonese_mode_row.grid_remove()
         for widget in (self.chinese_label,self.chinese_entry,self.chinese_button):
             if yue and not complete and self.v['cantonese_alignment'].get()=='chinese':widget.grid()
             else:widget.grid_remove()
