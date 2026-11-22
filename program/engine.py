@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.14.5'
+VERSION='0.14.6'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -30,37 +30,13 @@ def playback_speed(job):
     return speed
 
 def visual_timeline(source,target,source_duration,target_duration):
-    """Map every voice cue's start and end to its source-picture cue.
-
-    The same mapping serves body-only, full-video, landscape, portrait and
-    every language. If two voice cues touch but the source picture has a gap,
-    hold the first cue through its last frame, then cross that gap at the cut.
-    """
+    """Use the stable v0.14.3 sentence-start picture mapping in every mode."""
     if [c[0] for c in source]!=[c[0] for c in target]:
         raise ValueError('画面与配音字幕编号不对应。')
-    anchors=[(0.,0.)]
-    for index,(src,dst) in enumerate(zip(source,target)):
-        if index or dst[1]>.00001:anchors.append((dst[1],src[1]))
-        next_src=source[index+1] if index+1<len(source) else None
-        next_dst=target[index+1] if index+1<len(target) else None
-        if next_src and next_dst and next_dst[1]-dst[2]<=.00001 and next_src[1]-src[2]>.02:
-            tiny=min(.001,(dst[2]-dst[1])*.25)
-            anchors.append((dst[2]-tiny,src[2]))
-        else:anchors.append((dst[2],src[2]))
-    # When speech ends at the output boundary, there is no time left to show
-    # any source-video tail. Do not override the final speech/picture anchor.
-    if target_duration-target[-1][2]>.00001 or source_duration-source[-1][2]<=.02:
-        anchors.append((float(target_duration),float(source_duration)))
-    tx=[];sx=[]
-    for t,s in anchors:
-        if not math.isfinite(t) or not math.isfinite(s) or t<0 or s<0:
-            raise ValueError('字幕时间存在无效数值，无法同步原中文字幕。')
-        if tx and t<=tx[-1]+.00001:
-            if abs(t-tx[-1])<=.00001 and abs(s-sx[-1])<=.02:continue
-            raise ValueError('字幕时间重叠或同一时刻对应不同画面；请检查原视频与配音 SRT。')
-        if sx and s<sx[-1]-.01:raise ValueError('原视频 SRT 时间倒退，无法同步中文字幕。')
-        tx.append(t);sx.append(s)
-    if len(tx)<2:raise ValueError('缺少可用的视频时间锚点。')
+    tx=[0.]+[a for _,a,_,_ in target[1:]]+[float(target_duration)]
+    sx=[0.]+[a for _,a,_,_ in source[1:]]+[float(source_duration)]
+    if any(b<=a for a,b in zip(tx,tx[1:])) or any(b<=a for a,b in zip(sx,sx[1:])):
+        raise ValueError('逐句对应关系无法形成递增时间轴')
     return PchipInterpolator(tx,sx),tx
 
 def fingerprint(job):
