@@ -19,7 +19,7 @@ def main():
     package_dir=sandbox/'package';package_dir.mkdir(exist_ok=True)
     url='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/download/v'+VERSION+'/YangNing_VideoStudio_Windows_'+VERSION+'.zip'
     feed='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--version',VERSION,'--package-url',url,'--manifest-url',feed,'--output',str(package_dir),'--notes','完整视频按视频SRT定位片头正文和片尾，配音独立定位；固定片尾与片头音乐记忆，片头文字识别翻译及字号字体颜色设置，标题调色盘；手机兼容合成及稳定版恢复。'],check=True)
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--version',VERSION,'--package-url',url,'--manifest-url',feed,'--output',str(package_dir),'--notes','片头视频与配音分界独立定位；只做正文收起无用区域；粤语中文辅助SRT与粤语字幕映射；所有配音视频逐句起止音画对应。旧项目与v12.11稳定备份保留。'],check=True)
     package=package_dir/('YangNing_VideoStudio_Windows_'+VERSION+'.zip')
     info=json.loads((package_dir/'latest.json').read_text())
     with zipfile.ZipFile(package) as z:
