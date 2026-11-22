@@ -1,6 +1,6 @@
 """Regression of restored v0.14.3 sentence-start picture mapping."""
 import unittest
-from engine import visual_timeline
+from engine import visual_timeline,picture_motion_warnings
 
 SOURCE_42_57=[(202.73,205.53),(206.23,209.30),(209.43,212.90),
               (212.90,217.23),(218.33,222.30),(222.37,223.63),
@@ -32,7 +32,7 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         source=[(1,0.,1.,'中一'),(2,1.5,2.5,'中二')]
         target=[(1,0.,1.,'外一'),(2,1.,2.,'外二')]
         mapped,anchors=visual_timeline(source,target,3.,2.5)
-        self.assertEqual(anchors,[0.,1.,2.5])
+        self.assertEqual(anchors,[0.,1.,2.,2.5])
         self.assertAlmostEqual(float(mapped(1.)),1.5,places=6)
 
     def test_touching_voice_cues_use_legacy_sentence_starts(self):
@@ -57,3 +57,28 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         self.assertIn(35.68,anchors)
         self.assertNotIn(35.680 - .001,anchors)
         self.assertEqual(anchors[-1],42.)
+        mapping,_=visual_timeline(source,target,40.,42.)
+        self.assertTrue(any(row['cue']==13 and row['max_picture_speed']>4
+                            for row in picture_motion_warnings(mapping,source,target,40.,42.)))
+
+    def test_long_source_gap_cannot_be_compressed_into_short_voice_gap(self):
+        original=[(1,0.,2.,'一'),(2,5.,7.,'二')]
+        voice=[(1,0.,2.,'一'),(2,2.3,4.3,'二')]
+        mapping,anchors=visual_timeline(original,voice,8.,5.)
+        self.assertNotIn(2.,anchors)
+        self.assertAlmostEqual(float(mapping(2.3)),5.)
+        self.assertTrue(any(row['cue']==1 for row in picture_motion_warnings(mapping,original,voice,8.,5.)))
+
+    def test_disproportionate_sentence_keeps_stable_start_mapping(self):
+        original=[(1,0.,3.33,'一'),(2,4.,6.,'二')]
+        voice=[(1,0.,.28,'一'),(2,.8,2.8,'二')]
+        _,anchors=visual_timeline(original,voice,7.,4.)
+        self.assertNotIn(.28,anchors)
+        self.assertIn(.8,anchors)
+
+    def test_no_gap_does_not_divide_by_zero_or_insert_end(self):
+        original=[(1,0.,1.,'一'),(2,1.5,2.5,'二')]
+        voice=[(1,0.,0.,'一'),(2,1.,2.,'二')]
+        _,anchors=visual_timeline(original,voice,3.,3.)
+        self.assertNotIn(0.,anchors[1:])
+        self.assertNotIn(0.0001,anchors)

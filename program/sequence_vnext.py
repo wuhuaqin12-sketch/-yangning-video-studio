@@ -505,5 +505,7 @@ def process(job,cancel,progress=lambda s:None,preview=False):
     (folder/'成片位置.txt').write_text(('这是制作缓存文件夹，完整成片在以下位置：' if not preview else '以下文件只是指定范围试看：')+'\n'+'\n'.join(r['label']+'：'+r['path'] for r in results),encoding='utf-8-sig')
     # Keep UI-compatible folder entry points without flattening editable originals.
     shutil.copyfile(results[0]['path'],folder/'video.mp4')
-    atomic_json(folder/'report.json',{'status':'completed','body_analysis':str(main),'results':results,'preview':preview,'listening_review':'not_performed','limitations':['低资源字幕区域修复不等于AI背景重建，需预览确认。','人声分离效果需用户试听确认；未默认启用未通过的模型。']})
+    body_report=json.loads((main/'report.json').read_text(encoding='utf-8')) if (main/'report.json').exists() else {}
+    picture_warnings=body_report.get('picture_motion_warnings',[])
+    atomic_json(folder/'report.json',{'status':'completed','body_analysis':str(main),'results':results,'preview':preview,'listening_review':'not_performed','visual_review_required':bool(picture_warnings),'body_picture_motion_warnings':picture_warnings,'limitations':['低资源字幕区域修复不等于AI背景重建，需预览确认。','人声分离效果需用户试听确认；未默认启用未通过的模型。']})
     return str(folder)
