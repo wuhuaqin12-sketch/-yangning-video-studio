@@ -33,8 +33,27 @@ def visual_timeline(source,target,source_duration,target_duration):
     """Use the stable v0.14.3 sentence-start picture mapping in every mode."""
     if [c[0] for c in source]!=[c[0] for c in target]:
         raise ValueError('画面与配音字幕编号不对应。')
-    tx=[0.]+[a for _,a,_,_ in target[1:]]+[float(target_duration)]
-    sx=[0.]+[a for _,a,_,_ in source[1:]]+[float(source_duration)]
+    # Preserve the legacy sentence-start anchors. Add caption-end anchors only
+    # when BOTH timelines have room for a real transition between sentences.
+    # Never create the near-zero-width anchors that caused picture jumps in 14.4.
+    anchors=[(0.,0.)]
+    for index,(src,dst) in enumerate(zip(source,target)):
+        if index:
+            anchors.append((float(dst[1]),float(src[1])))
+        next_src=source[index+1] if index+1<len(source) else None
+        next_dst=target[index+1] if index+1<len(target) else None
+        src_gap=(next_src[1]-src[2]) if next_src else (source_duration-src[2])
+        dst_gap=(next_dst[1]-dst[2]) if next_dst else (target_duration-dst[2])
+        # Preserve both caption ends only with enough space to interpolate
+        # smoothly; adjacent cues retain the stable sentence-start mapping.
+        if (src_gap>=0.20 and dst_gap>=0.20 and
+                src[2]-src[1]>=0.20 and dst[2]-dst[1]>=0.20 and
+                src[2]>anchors[-1][1]+0.02 and dst[2]>anchors[-1][0]+0.02):
+            anchors.append((float(dst[2]),float(src[2])))
+    anchors.append((float(target_duration),float(source_duration)))
+    tx=[t for t,_ in anchors];sx=[v for _,v in anchors]
+    if any(not math.isfinite(v) for v in tx+sx):
+        raise ValueError('字幕时间轴存在无效数值')
     if any(b<=a for a,b in zip(tx,tx[1:])) or any(b<=a for a,b in zip(sx,sx[1:])):
         raise ValueError('逐句对应关系无法形成递增时间轴')
     return PchipInterpolator(tx,sx),tx
