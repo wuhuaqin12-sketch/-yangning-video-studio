@@ -76,6 +76,8 @@ def normalize(value):
 
 def media_paths(job):
     result={k:job.get(k) for k in ('video','audio','source_srt','target_srt') if job.get(k)}
+    if job.get('language')=='yue' and job.get('alignment','auto')!='timed' and job.get('cantonese_alignment','chinese')=='chinese' and job.get('chinese_srt'):
+        result['chinese_srt']=job['chinese_srt']
     p=normalize(job.get('sequence'))
     for k in ('intro_video','intro_audio','intro_srt','intro_target_srt'):
         if p['intro_enabled'] and p.get(k) and (k=='intro_video' or p['intro_mode']=='music_voice'):result[k]=p[k]
@@ -100,7 +102,7 @@ def load_project(path):
         if not value:return value
         if Path(value).is_absolute() or re.match(r'^[A-Za-z]:[\\/]',str(value)) or str(value).startswith('\\\\'):return str(value)
         return str((base/value).resolve())
-    for key in ('video','audio','source_srt','target_srt','audio_reference_srt','output'):
+    for key in ('video','audio','source_srt','target_srt','chinese_srt','audio_reference_srt','output'):
         if job.get(key):job[key]=absolute(job[key])
     for key in ('intro_video','intro_audio','intro_srt','intro_target_srt','outro_video','cover','cover_landscape','cover_portrait','background','background_audio','disclaimer_image','combined_aligned_srt'):
         if job['sequence'].get(key):job['sequence'][key]=absolute(job['sequence'][key])
@@ -119,17 +121,18 @@ def file_digest(path):
 def processing_key(job):
     # Layout, covers and burn-in are deliberately excluded. Use full file hashes,
     # not only beginning/end fingerprints, so interior changes invalidate cache.
-    value={k:job.get(k) for k in ('language','alignment','speed','trim','audio_profile','audio_separate','_pause_override')}
-    value['cache_schema']=1
+    value={k:job.get(k) for k in ('language','alignment','cantonese_alignment','speed','trim','audio_profile','audio_separate','_pause_override')}
+    value['cache_schema']=2  # All modes now use cue starts and ends; old video caches are invalid.
     from engine import VERSION
     value['processing_version']=VERSION
     value['files']={k:file_digest(job[k]) for k in ('video','audio','source_srt','target_srt','audio_reference_srt') if job.get(k)}
+    if job.get('language')=='yue' and job.get('alignment')=='multi' and job.get('cantonese_alignment','chinese')=='chinese':value['files']['chinese_srt']=file_digest(job['chinese_srt'])
     return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
 
 def preview_key(job):
     settings=normalize(job.get('sequence'))
     settings.pop('preview_start',None);settings.pop('preview_seconds',None)
-    value={k:job.get(k) for k in ('language','alignment','speed','trim','audio_profile','audio_separate','burn','publish_settings','_pause_override')}
+    value={k:job.get(k) for k in ('language','alignment','cantonese_alignment','speed','trim','audio_profile','audio_separate','burn','publish_settings','_pause_override')}
     value['sequence']=settings
     value['files']={k:file_digest(v) for k,v in media_paths(job).items()}
     return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()

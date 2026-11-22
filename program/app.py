@@ -19,7 +19,7 @@ class App:
         self.root=root;root.title('杨宁视频工作室 · 成片制作 · '+VERSION)
         root.geometry(f'1000x{max(640,min(780,root.winfo_screenheight()-100))}');root.minsize(880,640)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
-        defaults=dict(video='',audio='',source_srt='',target_srt='',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.0',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
+        defaults=dict(video='',audio='',source_srt='',target_srt='',chinese_srt='',cantonese_alignment='chinese',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.0',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
         defaults['output']=preferred(defaults['output'])
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.sequence_settings={}
@@ -69,6 +69,13 @@ class App:
         self.target_button=ttk.Button(form,text='选择',command=lambda:self.pick('target_srt'))
         self.target_label.grid(row=6,column=0,sticky='w');self.target_entry.grid(row=6,column=1,sticky='ew');self.target_button.grid(row=6,column=2)
         for widget in (self.target_label,self.target_entry,self.target_button):widget.grid_remove()
+        self.chinese_label=ttk.Label(form,text='中文辅助定位 SRT')
+        self.chinese_entry=ttk.Entry(form,textvariable=self.v['chinese_srt'])
+        self.chinese_button=ttk.Button(form,text='选择',command=lambda:self.pick('chinese_srt'))
+        for col,widget in enumerate((self.chinese_label,self.chinese_entry,self.chinese_button)):
+            widget.grid(row=6,column=col,sticky='ew' if col==1 else 'w')
+            widget.grid_remove()
+        self.refresh_language_fields()
         self.language_name=tk.StringVar(value='按文件名判断')
         self.language_manual=False
         options=ttk.Frame(form);options.grid(row=5,column=0,columnspan=3,sticky='w',pady=4)
@@ -380,6 +387,12 @@ class App:
         for widget in (self.target_label,self.target_entry,self.target_button):
             if automatic:widget.grid_remove()
             else:widget.grid()
+        yue=self.v['language'].get()=='yue'
+        complete=getattr(self,'sequence_panel',None) and self.sequence_panel.segment_mode.get().startswith('完整视频')
+        if not complete:self.media_labels['source_srt'].configure(text='粤语输出字幕 SRT' if yue else '正文SRT（外语）')
+        for widget in (self.chinese_label,self.chinese_entry,self.chinese_button):
+            if yue and not complete and self.v['cantonese_alignment'].get()=='chinese':widget.grid()
+            else:widget.grid_remove()
     def pick(self,k):
         from ui_assets import filetypes
         selected=filedialog.askdirectory() if k=='output' else filedialog.askopenfilename(filetypes=filetypes(k))
@@ -521,6 +534,10 @@ class App:
         win=tk.Toplevel(self.root);win.title('更多设置 · 默认无需修改');win.geometry('760x760');box=ttk.Frame(win,padding=15);box.pack(fill='both',expand=True)
         ttk.Radiobutton(box,text='按所选语言参考稿自动定位（默认）',variable=self.v['alignment'],value='auto').pack(anchor='w')
         ttk.Radiobutton(box,text='使用已校对配音SRT时间轴（可选）',variable=self.v['alignment'],value='timed').pack(anchor='w')
+        if self.v['language'].get()=='yue':
+            ttk.Label(box,text='粤语定位方式（中文辅助 SRT 与粤语输出 SRT 可合并或拆分句子）').pack(anchor='w',pady=(8,0))
+            for value,label in (('chinese','中文 SRT 辅助定位（默认）'),('direct','粤语 SRT 直接定位')):
+                ttk.Radiobutton(box,text=label,variable=self.v['cantonese_alignment'],value=value,command=self.refresh_language_fields).pack(anchor='w')
         line=ttk.Frame(box);line.pack(fill='x',pady=8);ttk.Label(line,text='独立配音SRT（可留空）').pack(side='left');ttk.Entry(line,textvariable=self.v['target_srt']).pack(side='left',fill='x',expand=True);ttk.Button(line,text='选择',command=lambda:self.pick('target_srt')).pack(side='left')
         ttk.Checkbutton(box,text='自动剪短长空白（保留自然停顿）',variable=self.auto_cut).pack(anchor='w')
         ttk.Label(box,text='日语字词间多余空白压缩已启用；保留短停顿、换气和句末停顿。日志显示前后时长与删除秒数。',wraplength=660).pack(anchor='w',pady=10)

@@ -5,11 +5,6 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent/'program'))
 from desktop_update import https_url,version_tuple
 
-RETIRED_PREVIEW_FILES={
-    'program/opening_caption.py','program/opening_caption_preview.py','program/adaptive_title.py',
-    'program/intro_boundary.py','program/intro_boundary_ui.py','program/ending_reference.py',
-    'program/ending_reference_ui.py','program/ending_presets.py','program/ending_card.py'}
-
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--version',required=True)
@@ -31,7 +26,7 @@ def main():
         for f in root.rglob('*'):
             if not f.is_file() or any(part in ('.venv','__pycache__','.git') or part.startswith('.venv.failed_') for part in f.parts) or f.suffix=='.pyc':continue
             name=f.relative_to(root).as_posix()
-            if name in RETIRED_PREVIEW_FILES or f.name.endswith('_test.py') or (f.suffix=='.md' and f.name not in ('README.md','RELEASE_'+args.version.replace('.','_')+'_ZH.md')):continue
+            if f.name.endswith('_test.py') or (f.suffix=='.md' and f.name not in ('README.md','RELEASE_'+args.version.replace('.','_')+'_ZH.md')):continue
             body=f.read_bytes()
             if name=='release.json':
                 body=json.dumps(dict(app='YangNingStudio',schema=1,version=args.version,update_manifest_url='' if args.test_package else args.manifest_url,**({'channel':'test'} if args.test_package else {}))).encode()

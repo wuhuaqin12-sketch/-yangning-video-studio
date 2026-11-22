@@ -15,8 +15,15 @@ def normalize(job):
     if not job.get('audio') and job.get('video'):
         job['audio']=job['video']  # Reuse the source video's audio when no replacement is selected.
     job.setdefault('language','en');job.setdefault('alignment','auto')
+    # Old Cantonese projects had direct alignment and no Chinese reference.
+    job.setdefault('cantonese_alignment','direct')
     if job['alignment'] in ('auto','english'):
         job['alignment']='multi' if job['language'] in LANGUAGES else 'timed'
+    if job.get('cantonese_alignment','chinese') not in ('chinese','direct'):
+        raise ValueError('粤语定位方式无效。')
+    if job['language']=='yue' and job['alignment']=='multi' and job.get('cantonese_alignment','chinese')=='chinese':
+        if not job.get('chinese_srt') or not Path(job['chinese_srt']).is_file():
+            raise ValueError('粤语中文辅助定位需要导入中文参考 SRT；也可在更多设置中选择粤语直接定位。')
     if not job.get('target_srt'):
         if job['alignment'] in ('english','multi'):job['target_srt']=job.get('source_srt','')
         else:raise ValueError('已校对时间轴模式或未列出的语言，请在更多设置中选择匹配配音的SRT。')

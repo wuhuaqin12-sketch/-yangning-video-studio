@@ -8,7 +8,8 @@ class MultiTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.p=Path(self.temp.name);self.f=self.p/'file';self.f.touch()
     def test_languages_reuse_original_srt(self):
         for lang in m.LANGUAGES:
-            job=workflow.normalize(dict(language=lang,alignment='auto',source_srt=str(self.f),video=str(self.f),audio=str(self.f),output=str(self.p)))
+            options={'cantonese_alignment':'direct'} if lang=='yue' else {}
+            job=workflow.normalize(dict(language=lang,alignment='auto',source_srt=str(self.f),video=str(self.f),audio=str(self.f),output=str(self.p),**options))
             self.assertEqual(job['alignment'],'multi');self.assertEqual(job['target_srt'],str(self.f))
     def test_words_and_reference_times(self):
         for text in ('目を覚ましてください。','Réveillez-vous maintenant.','Bitte wachen Sie auf.'):

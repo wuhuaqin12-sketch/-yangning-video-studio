@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.14.3'
+VERSION='0.14.4'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -29,9 +29,44 @@ def playback_speed(job):
     if not math.isfinite(speed) or not 0.5<=speed<=2.0:raise ValueError('成片倍速须在0.5–2.0之间。')
     return speed
 
+def visual_timeline(source,target,source_duration,target_duration):
+    """Map every voice cue's start and end to its source-picture cue.
+
+    The same mapping serves body-only, full-video, landscape, portrait and
+    every language. If two voice cues touch but the source picture has a gap,
+    hold the first cue through its last frame, then cross that gap at the cut.
+    """
+    if [c[0] for c in source]!=[c[0] for c in target]:
+        raise ValueError('画面与配音字幕编号不对应。')
+    anchors=[(0.,0.)]
+    for index,(src,dst) in enumerate(zip(source,target)):
+        if index or dst[1]>.00001:anchors.append((dst[1],src[1]))
+        next_src=source[index+1] if index+1<len(source) else None
+        next_dst=target[index+1] if index+1<len(target) else None
+        if next_src and next_dst and next_dst[1]-dst[2]<=.00001 and next_src[1]-src[2]>.02:
+            tiny=min(.001,(dst[2]-dst[1])*.25)
+            anchors.append((dst[2]-tiny,src[2]))
+        else:anchors.append((dst[2],src[2]))
+    # When speech ends at the output boundary, there is no time left to show
+    # any source-video tail. Do not override the final speech/picture anchor.
+    if target_duration-target[-1][2]>.00001 or source_duration-source[-1][2]<=.02:
+        anchors.append((float(target_duration),float(source_duration)))
+    tx=[];sx=[]
+    for t,s in anchors:
+        if not math.isfinite(t) or not math.isfinite(s) or t<0 or s<0:
+            raise ValueError('字幕时间存在无效数值，无法同步原中文字幕。')
+        if tx and t<=tx[-1]+.00001:
+            if abs(t-tx[-1])<=.00001 and abs(s-sx[-1])<=.02:continue
+            raise ValueError('字幕时间重叠或同一时刻对应不同画面；请检查原视频与配音 SRT。')
+        if sx and s<sx[-1]-.01:raise ValueError('原视频 SRT 时间倒退，无法同步中文字幕。')
+        tx.append(t);sx.append(s)
+    if len(tx)<2:raise ValueError('缺少可用的视频时间锚点。')
+    return PchipInterpolator(tx,sx),tx
+
 def fingerprint(job):
     result={}
-    for k in ('video','audio','source_srt','target_srt','audio_reference_srt'):
+    for k in ('video','audio','source_srt','target_srt','chinese_srt','audio_reference_srt'):
+        if k=='chinese_srt' and not (job.get('language')=='yue' and job.get('alignment')=='multi' and job.get('cantonese_alignment')=='chinese'):continue
         if not job.get(k):continue
         p=Path(job[k]).resolve();st=p.stat()
         with p.open('rb') as f:
@@ -70,7 +105,15 @@ def prepare(job,cancel,progress=lambda s:None):
         load_reference(job['audio_reference_srt'],duration)
     if job.get('alignment')=='multi':
         from multilingual import align
-        dst=align(dst,audio,folder,cancel,progress,job['language'],duration)
+        if job['language']=='yue' and job.get('cantonese_alignment','chinese')=='chinese':
+            from cantonese_reference import remap
+            chinese=parse_srt(job['chinese_srt'])
+            if chinese[-1][2]>vd+.2:raise ValueError('中文辅助 SRT 超出原视频时长。')
+            progress('使用中文 SRT 辅助定位粤语配音；粤语 SRT 用于字幕输出')
+            aligned_chinese=align(chinese,audio,folder,cancel,progress,'yue',duration)
+            dst=remap(chinese,aligned_chinese,dst,folder)
+        else:
+            dst=align(dst,audio,folder,cancel,progress,job['language'],duration)
     elif dst[-1][2]>duration+.15:raise ValueError('已校对配音SRT超出音频；若只有原视频时间，请选择自动定位。')
     if dst[-1][2]>duration+.1:raise ValueError('定位超出音频时长，停止导出以防截断。')
     silences=detect(raw,rate,channels,cancel);word_rows=json.loads((folder/'words.json').read_text(encoding='utf8'))['words'] if (folder/'words.json').is_file() else None
@@ -127,8 +170,8 @@ def render_preview(folder,time,cancel):
     total,events=preview_audio(folder,cancel);speed=playback_speed(m['job']);t=float(time)
     if not 0<=t<total:raise ValueError('预览时间超出视频。')
     cues=[(i,mapped(a,events)/speed,mapped(b,events)/speed,text) for i,a,b,text in m['target']]
-    tx=[0]+[a for i,a,b,text in cues[1:]]+[total];sx=[0]+[a for i,a,b,text in m['source'][1:]]+[m['video_duration']]
-    st=float(PchipInterpolator(tx,sx)(t))
+    inv,_=visual_timeline(m['source'],cues,m['video_duration'],total)
+    st=float(inv(t))
     image=folder/'source_preview.png';Image.fromarray(frame_at(m['job']['video'],st,cancel,m['video_stream'])).save(image)
     if not m.get('publish_settings'):return str(image)
     from publish import make_ass,canvas_style
@@ -178,9 +221,7 @@ def render(folder,cancel,progress=lambda s:None):
     decoded_frames=int(counts[-1]);decoded_vd=decoded_frames/f
     if abs(decoded_vd-vd)>max(.5,3/f):raise RuntimeError('视频声明时长与实际画面相差过大，请先检查原片。')
     if src[-1][2]>decoded_vd+.15:raise ValueError('原字幕超出实际可解码画面，请检查字幕末尾。')
-    tx=[0]+[a for i,a,b,txt in adjusted[1:]]+[total];sx=[0]+[a for i,a,b,txt in src[1:]]+[decoded_vd]
-    if any(b<=a for a,b in zip(tx,tx[1:])) or any(b<=a for a,b in zip(sx,sx[1:])):raise ValueError('逐句对应关系无法形成递增时间轴')
-    inv=PchipInterpolator(tx,sx);n=math.ceil(total*f)
+    inv,tx=visual_timeline(src,adjusted,decoded_vd,total);n=math.ceil(total*f)
     # Keep the source bitrate rather than a fixed 480x854 preset. CRF fallback is explicit.
     bitrate=int(v.get('bit_rate') or max(500000,int(m.get('video_bitrate',0))))
     bitrate_known=bool(v.get('bit_rate'))

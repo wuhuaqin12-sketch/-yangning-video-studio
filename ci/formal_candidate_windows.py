@@ -19,12 +19,15 @@ def main():
     package_dir=sandbox/'package';package_dir.mkdir(exist_ok=True)
     url='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/download/v'+VERSION+'/YangNing_VideoStudio_Windows_'+VERSION+'.zip'
     feed='https://github.com/wuhuaqin12-sketch/-yangning-video-studio/releases/latest/download/latest.json'
-    subprocess.run([sys.executable,str(repo/'make_release.py'),'--version',VERSION,'--package-url',url,'--manifest-url',feed,'--output',str(package_dir),'--notes','完整视频按视频SRT定位片头正文和片尾，配音独立定位；固定片尾与片头音乐记忆，片头文字识别翻译及字号字体颜色设置，标题调色盘；手机兼容合成及稳定版恢复。'],check=True)
+    subprocess.run([sys.executable,str(repo/'make_release.py'),'--version',VERSION,'--package-url',url,'--manifest-url',feed,'--output',str(package_dir),'--notes','片头视频与配音分界独立定位；只做正文收起无用区域；粤语中文辅助SRT与粤语字幕映射；所有配音视频逐句起止音画对应。旧项目与v12.11稳定备份保留。'],check=True)
     package=package_dir/('YangNing_VideoStudio_Windows_'+VERSION+'.zip')
     info=json.loads((package_dir/'latest.json').read_text())
     with zipfile.ZipFile(package) as z:
         meta=json.loads(z.read('release.json'));assert meta['version']==VERSION and meta.get('channel')!='test' and meta['update_manifest_url']==feed
         for name in ('ffmpeg.exe','ffprobe.exe'):assert z.getinfo('program/tools/'+name).file_size>1000000
+        for name in ('intro_boundary','intro_boundary_ui','ending_reference','ending_reference_ui',
+                     'ending_presets','ending_card','opening_caption','opening_caption_preview','adaptive_title'):
+            assert z.getinfo('program/'+name+'.py').file_size>0,name
     updater=sandbox/'old_update.py'
     updater.write_text('import sys,json,shutil\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(stable/'program'))+')\nfrom desktop_update import download_update,activate,save_config,check_update\nroot=Path('+repr(str(root))+')\ninfo='+repr(info)+'\nsave_config('+repr(feed)+',root)\nassert check_update(root,lambda *_:json.dumps(info).encode())["version"]=='+repr(VERSION)+'\nversion,target=download_update(info,root,lambda u,l,p:shutil.copyfile('+repr(str(package))+',p))\nimport subprocess\nsubprocess.run(['+repr(str(old_python))+',str(target/"program/bootstrap.py"),"--setup-only"],check=True)\nassert json.loads((root/"current.json").read_text())["version"]=="0.12.11"\nactivate(root,version)\n',encoding='utf8')
     subprocess.run([sys.executable,str(updater)],env=env,check=True)
@@ -34,7 +37,7 @@ def main():
     assert list((root/'backups').glob('*/manifest.json'))
     assert json.loads((settings/'style_no_denoise.json').read_text())['title']=='保留原设置'
     smoke=sandbox/'gui.py'
-    smoke.write_text('import sys,tkinter as tk\nsys.path.insert(0,'+repr(str(root/'versions'/VERSION/'program'))+')\nfrom app import App\nfrom PIL import ImageGrab\nr=tk.Tk();a=App(r);r.update();assert a.sequence_panel.value()["output_mode"]=="portrait"\nassert not a.sequence_panel.controls.winfo_ismapped()\na.sequence_panel.appearance_open.set(True);a.sequence_panel.update();r.update();assert a.sequence_panel.layouts.tab(0,"state")=="hidden"\nImageGrab.grab().save('+repr(str(sandbox/'formal-settings.png'))+')\na.sequence_panel.appearance_open.set(False);a.sequence_panel.update();r.update();ImageGrab.grab().save('+repr(str(sandbox/'formal-main.png'))+')\nr.after(300,r.destroy);r.mainloop()\nprint("FORMAL_INSTALLED_GUI_PASS")\n',encoding='utf8')
+    smoke.write_text('import sys,tkinter as tk\nsys.path.insert(0,'+repr(str(root/'versions'/VERSION/'program'))+')\nfrom app import App\nimport intro_boundary_ui, ending_reference_ui, opening_caption, opening_caption_preview\nfrom PIL import ImageGrab\nr=tk.Tk();a=App(r);r.update();assert a.sequence_panel.value()["output_mode"]=="portrait"\nassert not a.sequence_panel.controls.winfo_ismapped()\na.sequence_panel.appearance_open.set(True);a.sequence_panel.update();r.update();assert a.sequence_panel.layouts.tab(0,"state")=="hidden"\nImageGrab.grab().save('+repr(str(sandbox/'formal-settings.png'))+')\na.sequence_panel.appearance_open.set(False);a.sequence_panel.update();r.update();ImageGrab.grab().save('+repr(str(sandbox/'formal-main.png'))+')\nr.after(300,r.destroy);r.mainloop()\nprint("FORMAL_INSTALLED_GUI_PASS")\n',encoding='utf8')
     subprocess.run([str(python),str(smoke)],env=env,check=True)
     # Recovery must act on this formal install, never redirect to Preview.
     restore=sandbox/'restore.py';restore.write_text('import sys,threading\nsys.path.insert(0,'+repr(str(root/'versions'/VERSION/'program'))+')\nfrom recovery_ui_backend import restore_isolated\nrestore_isolated(threading.Event(),print)\n',encoding='utf8')
