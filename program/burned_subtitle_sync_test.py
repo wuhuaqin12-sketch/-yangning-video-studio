@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 from media import executable,run,parse_srt
 from engine import prepare,render,render_preview
-from engine import visual_timeline,trimmed_visual_timeline,picture_motion_warnings
+from engine import visual_timeline,trimmed_visual_timeline,picture_motion_warnings,subtitle_gap_sound
 
 SOURCE_42_57=[(202.73,205.53),(206.23,209.30),(209.43,212.90),
               (212.90,217.23),(218.33,222.30),(222.37,223.63),
@@ -157,3 +157,16 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
             trim={**shared,'picture_fit':'trim'}
             self.assertNotEqual(processing_key(smooth),processing_key(trim))
             self.assertNotEqual(preview_key(smooth),preview_key(trim))
+
+    def test_audio_activity_in_subtitle_gap_is_reported_without_retiming(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'voice.f32'
+            voice=np.zeros(30000,dtype=np.float32)
+            voice[15000:23000]=.2
+            voice.tofile(path)
+            cues=[(1,0.,1.,'one'),(2,2.5,3.,'two')]
+            warnings=subtitle_gap_sound(path,10000,1,cues,3.)
+            self.assertEqual(len(warnings),1)
+            self.assertEqual(warnings[0]['output_start'],1.)
+            self.assertEqual(warnings[0]['output_end'],2.5)
+            self.assertEqual(cues[1][1],2.5)

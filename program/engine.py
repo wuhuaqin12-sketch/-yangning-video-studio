@@ -162,6 +162,31 @@ def picture_motion_warnings(mapping,source,target,source_duration,target_duratio
                          'reason':'按句截短画面，此处跳过原画面；请检查人物动作是否自然'})
     return warnings
 
+def subtitle_gap_sound(raw,rate,channels,cues,duration,speed=1.):
+    """Flag sustained audio energy outside SRT cues for listening review.
+
+    Energy alone cannot prove speech; never rewrite voice or subtitles from it.
+    """
+    samples=np.memmap(raw,dtype=np.float32,mode='r')
+    count=len(samples)//channels
+    audio=samples[:count*channels].reshape(-1,channels)
+    spans=[(0.,cues[0][1])]+[(left[2],right[1]) for left,right in zip(cues,cues[1:])]+[(cues[-1][2],duration)]
+    result=[]
+    for start,end in spans:
+        if end-start<.35:continue
+        loud=0.;peak=0.
+        for t in np.arange(start,end-.05,.1):
+            a=max(0,int(t*speed*rate));b=min(count,int(min(t+.1,end)*speed*rate))
+            if b<=a:continue
+            chunk=audio[a:b]
+            rms=float(np.sqrt(np.mean(np.square(chunk,dtype=np.float64))))
+            if rms>.05:loud+=min(.1,end-t);peak=max(peak,rms)
+        if loud>=.4:
+            result.append({'output_start':round(float(start),3),'output_end':round(float(end),3),
+                           'audible_seconds':round(float(loud),2),'peak_rms':round(float(peak),3),
+                           'reason':'字幕空白处有明显音轨声音；请试听确认是否遗漏讲话，不能仅凭响度认定为语音'})
+    return result
+
 def decoded_picture_duration(job,fps,declared,cancel):
     """Use the same actual source-picture endpoint in preview and export."""
     count_log=run([executable('ffmpeg'),'-v','error','-xerror','-i',job['video'],
@@ -239,6 +264,10 @@ def prepare(job,cancel,progress=lambda s:None):
     if preliminary:
         save_json(folder/'画面时间轴警告.json',preliminary)
         progress(f'画面时间轴发现{len(preliminary)}处速度或剪切提醒；请查看画面时间轴警告.json并检查人物动作。')
+    gaps=subtitle_gap_sound(folder/'edited.f32',rate,channels,adjusted,total,speed)
+    save_json(folder/'字幕覆盖警告.json',gaps)
+    for gap in gaps:
+        progress(f"字幕覆盖提示：成片{gap['output_start']:.2f}–{gap['output_end']:.2f}秒字幕空白，但音轨有明显声音；请试听确认")
     if job.get('trim',True) and not active:progress('提示：未剪除空白。未检测到符合安全条件的长静音；静音阈值或配音底噪可能影响检测，请试听核查。')
     progress('分析完成，可编辑停顿表并进行原声/优化A-B试听：'+str(folder))
     return str(folder)
@@ -324,6 +353,8 @@ def render(folder,cancel,progress=lambda s:None):
     speed=playback_speed(job)
     adjusted=[(i,mapped(a,events)/speed,mapped(b,events)/speed,txt) for i,a,b,txt in dst]
     if any(b<=a or a<0 or b>total+.15 for i,a,b,txt in adjusted):raise ValueError('停顿调整后字幕无效，未导出')
+    caption_gaps=subtitle_gap_sound(folder/'edited.f32',m['rate'],m['channels'],adjusted,total,speed)
+    save_json(folder/'字幕覆盖警告.json',caption_gaps)
     font=job.get('font') or ('Noto Serif CJK JP' if job.get('language')=='ja' else 'Arial')
     if ',' in font or '\n' in font:raise ValueError('字体名不能包含逗号或换行')
     size=float(job.get('font_percent',5.6))
@@ -425,7 +456,7 @@ def render(folder,cancel,progress=lambda s:None):
         write_cover({**COVER_DEFAULTS,**opts},folder,cancel,final)
     shutil.copyfile(folder/json.loads((folder/'audio_versions.json').read_text(encoding='utf8'))['B'],folder/'voice.m4a')
     durations={'original_video_seconds':vd,'original_audio_seconds':m['audio_duration'],'output_seconds':float(pi['format']['duration']),'pause_reductions':sum(e['kind']=='cut' and '结尾' not in e['reason'] for e in events),'pause_additions':sum(e['kind']=='add' for e in events),'removed_seconds':sum(e['end']-e['start'] for e in events if e['kind']=='cut'),'added_seconds':sum(e['seconds'] for e in events if e['kind']=='add')}
-    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':bool(motion_warnings),'picture_fit':job.get('picture_fit','smooth'),'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'picture_motion_warnings':motion_warnings,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。']+([f'发现{len(motion_warnings)}处画面速度或剪切异常，请查看画面时间轴警告.json并核对人物动作。'] if motion_warnings else []),'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
+    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':bool(motion_warnings or caption_gaps),'picture_fit':job.get('picture_fit','smooth'),'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'picture_motion_warnings':motion_warnings,'subtitle_gap_sound_warnings':caption_gaps,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。']+([f'发现{len(motion_warnings)}处画面速度或剪切异常，请查看画面时间轴警告.json并核对人物动作。'] if motion_warnings else [])+([f'发现{len(caption_gaps)}处无字幕但音轨有明显声音，请查看字幕覆盖警告.json并试听确认。'] if caption_gaps else []),'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
     save_json(folder/'report.json',report)
     (folder/'停顿压缩结果.txt').write_text(pause_summary(m['audio_duration'],total,events,playback_speed(job))+f'\n输出倍速{speed:g}倍，保持音调；请试听并检查同步。\n',encoding='utf-8-sig')
     progress('完成并通过解码检查：'+str(final)+'；'+pause_summary(m['audio_duration'],total,events,playback_speed(job)));return str(folder)
