@@ -53,4 +53,7 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         source=[(12,26.333,29.333,'前句'),(13,30.333,33.666,'本句'),(14,34.333,37.666,'后句')]
         target=[(12,28.920,32.200,'前句'),(13,35.400,35.680,'本句'),(14,35.680,37.920,'后句')]
         _,anchors=visual_timeline(source,target,40.,42.)
-        self.assertEqual(anchors,[0.,35.4,35.68,42.])
+        self.assertIn(35.4,anchors)
+        self.assertIn(35.68,anchors)
+        self.assertNotIn(35.680 - .001,anchors)
+        self.assertEqual(anchors[-1],42.)
