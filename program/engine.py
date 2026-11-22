@@ -33,8 +33,8 @@ def visual_timeline(source,target,source_duration,target_duration):
     """Map every voice cue's start and end to its source-picture cue.
 
     The same mapping serves body-only, full-video, landscape, portrait and
-    every language. A zero-length target pause cannot display a source gap;
-    in that case the next cue's start owns the shared instant.
+    every language. If two voice cues touch but the source picture has a gap,
+    hold the first cue through its last frame, then cross that gap at the cut.
     """
     if [c[0] for c in source]!=[c[0] for c in target]:
         raise ValueError('画面与配音字幕编号不对应。')
@@ -44,8 +44,9 @@ def visual_timeline(source,target,source_duration,target_duration):
         next_src=source[index+1] if index+1<len(source) else None
         next_dst=target[index+1] if index+1<len(target) else None
         if next_src and next_dst and next_dst[1]-dst[2]<=.00001 and next_src[1]-src[2]>.02:
-            continue
-        anchors.append((dst[2],src[2]))
+            tiny=min(.001,(dst[2]-dst[1])*.25)
+            anchors.append((dst[2]-tiny,src[2]))
+        else:anchors.append((dst[2],src[2]))
     # When speech ends at the output boundary, there is no time left to show
     # any source-video tail. Do not override the final speech/picture anchor.
     if target_duration-target[-1][2]>.00001 or source_duration-source[-1][2]<=.02:

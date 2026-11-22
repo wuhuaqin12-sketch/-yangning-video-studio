@@ -25,6 +25,7 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         source=[(1,0.,1.,'first'),(2,1.5,2.,'second')]
         voice=[(1,0.,1.,'first'),(2,1.,2.,'second')]
         mapped,_=visual_timeline(source,voice,2.5,2.5)
+        self.assertAlmostEqual(float(mapped(.999)),1.)
         self.assertAlmostEqual(float(mapped(1.)),1.5)
         self.assertAlmostEqual(float(mapped(2.)),2.)
     def test_no_output_tail_preserves_last_spoken_picture(self):
