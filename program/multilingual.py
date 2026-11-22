@@ -48,6 +48,11 @@ def validate(cues,result,duration,join_subwords=False):
             if not all(map(math.isfinite,(a,b))) or a<last-.001 or a<0 or b<=a or b>duration+.03:raise ValueError(f'第{ident}句的模型定位出现零时长、重叠或越界；旧SRT时间不需要匹配配音，须核查这一句的定位结果。')
             last=b;rows.append(dict(word=w['word'],start=a,end=b));ids.append(ident)
         aligned.append((ident,float(words[0]['start']),float(words[-1]['end']),text))
+        # A long sentence compressed into a fraction of a second is a model
+        # alignment failure, even when all returned word timestamps are valid.
+        if len(text_key(text))>=10 and aligned[-1][2]-aligned[-1][1]<.5:
+            raise ValueError(f'第{ident}句定位仅{aligned[-1][2]-aligned[-1][1]:.2f}秒，长句不可能完整显示或朗读；'
+                             '请核对配音与参考 SRT，必要时导入已校对的配音 SRT。')
     return aligned,rows,ids
 
 def _worker_run(request,folder,cancel,progress):

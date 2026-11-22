@@ -41,3 +41,13 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         spoken=[(42,1.,2.2,'一'),(43,2.,3.,'二')]
         with self.assertRaisesRegex(ValueError,'重叠'):
             visual_timeline(source,spoken,4.,4.)
+    def test_cantonese_clip_rejects_accidental_fast_forward(self):
+        source=[(13,30.333,33.666,'一尊佛證到最高，就係眾生本來都係佛')]
+        spoken=[(13,35.40,35.68,source[0][3])]
+        with self.assertRaisesRegex(ValueError,'第13条画面需要以11.9倍速度'):
+            visual_timeline(source,spoken,40.,40.)
+    def test_cantonese_clip_rejects_prolonged_slow_motion(self):
+        source=[(29,66.666,68.666,'其他唔清楚，但已經足夠')]
+        spoken=[(29,71.48,76.92,source[0][3])]
+        with self.assertRaisesRegex(ValueError,'第29条画面需要以0.4倍速度'):
+            visual_timeline(source,spoken,80.,80.)

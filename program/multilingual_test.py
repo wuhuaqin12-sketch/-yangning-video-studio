@@ -26,6 +26,11 @@ class MultiTests(unittest.TestCase):
         cue=[(1,10,20,'Bonjour')]
         for result in ({'segments':[]},{'segments':[{'words':[]}]},{'segments':[{'words':[dict(word='Bonjour',start=0,end=0)]}]},{'segments':[{'words':[dict(word='Bonjour',start=0,end=5)]}]},{'segments':[{'words':[dict(word='wrong',start=0,end=1)]}]},{'segments':[{'words':[dict(word='Bonjour',start=float('nan'),end=1)]}]}):
             with self.assertRaises(ValueError):m.validate(cue,result,3)
+    def test_long_cantonese_sentence_cannot_collapse_to_fraction_of_second(self):
+        text='一尊佛證到最高，就係眾生本來都係佛'
+        with self.assertRaisesRegex(ValueError,'第13句定位仅0.28秒'):
+            m.validate([(13,30.333,33.666,text)],
+                       {'segments':[{'words':[dict(word=text,start=35.40,end=35.68)]}]},40)
     def test_overlap_rejected(self):
         with self.assertRaises(ValueError):m.validate([(1,0,1,'bon jour')],{'segments':[{'words':[dict(word='bon',start=0,end=1),dict(word=' jour',start=.8,end=2)]}]},3)
     def test_wrapper_keeps_japanese_and_ignores_old_times(self):

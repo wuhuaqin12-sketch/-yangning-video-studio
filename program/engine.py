@@ -6,7 +6,7 @@ from scipy.interpolate import PchipInterpolator
 from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,import_plan,export_plan,validate_events,pause_summary
-VERSION='0.14.5'
+VERSION='0.14.6'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
@@ -38,6 +38,14 @@ def visual_timeline(source,target,source_duration,target_duration):
     """
     if [c[0] for c in source]!=[c[0] for c in target]:
         raise ValueError('画面与配音字幕编号不对应。')
+    for src,dst in zip(source,target):
+        source_span=src[2]-src[1];voice_span=dst[2]-dst[1]
+        if source_span<=0 or voice_span<=0:
+            raise ValueError(f'第{src[0]}条字幕时长无效，请校对原片及配音 SRT。')
+        picture_rate=source_span/voice_span
+        if picture_rate>2.0 or picture_rate<.5:
+            raise ValueError(f'第{src[0]}条画面需要以{picture_rate:.1f}倍速度播放，动作会异常；'
+                             '请校对该句配音定位及原片 SRT，修正后重新导出。')
     anchors=[(0.,0.)]
     for index,(src,dst) in enumerate(zip(source,target)):
         if index or dst[1]>.00001:anchors.append((dst[1],src[1]))
