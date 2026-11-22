@@ -6,6 +6,8 @@ from multilingual import LANGUAGES
 def normalize(job):
     job=dict(job)
     job['speed']=playback_speed(job)
+    if job.get('picture_fit','smooth') not in ('smooth','trim'):
+        raise ValueError('未知的画面时长匹配方式。')
     # Removed features cannot be re-enabled by old queues or imported jobs.
     job.update(denoise=False,separate=False,mute=False)
     job.pop('clean_mode',None)

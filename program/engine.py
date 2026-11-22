@@ -64,6 +64,77 @@ def visual_timeline(source,target,source_duration,target_duration):
         raise ValueError('逐句对应关系无法形成递增时间轴')
     return PchipInterpolator(tx,sx),tx
 
+class CutPictureTimeline:
+    """Right-continuous, forward-only picture map with explicit edit points."""
+    def __init__(self,segments,cuts):
+        self.segments=segments
+        self.starts=[row[0] for row in segments]
+        self.cut_events=cuts
+
+    def __call__(self,time):
+        def at(t):
+            index=max(0,min(len(self.segments)-1,bisect.bisect_right(self.starts,t)-1))
+            a,b,start,end=self.segments[index]
+            return start+(min(max(t,a),b)-a)*(end-start)/(b-a)
+        if np.ndim(time):return np.asarray([at(float(t)) for t in np.asarray(time).flat]).reshape(np.shape(time))
+        return at(float(time))
+
+    def derivative(self):
+        def rate(time):
+            def at(t):
+                index=max(0,min(len(self.segments)-1,bisect.bisect_right(self.starts,t)-1))
+                a,b,start,end=self.segments[index]
+                return (end-start)/(b-a)
+            if np.ndim(time):return np.asarray([at(float(t)) for t in np.asarray(time).flat]).reshape(np.shape(time))
+            return at(float(time))
+        return rate
+
+def trimmed_visual_timeline(source,target,source_duration,target_duration):
+    """Trial: play exceptionally short voice cues from equal-length source clips.
+
+    A source-video skip is a visible cut, never hidden as extreme playback speed.
+    Keep the original voice, output SRT and source-burned Chinese in their frames.
+    """
+    base,_=visual_timeline(source,target,source_duration,target_duration)
+    if not source:return base,[0.,target_duration]
+    windows=[]
+    for src,dst in zip(source,target):
+        length=dst[2]-dst[1]
+        if length<=0:raise ValueError('配音字幕含零时长句子，无法截取对应画面。')
+        if src[2]-src[1]>2*length:
+            windows.append((float(src[2]-length),float(src[2])))
+        else:
+            windows.append((float(base(dst[1])),float(base(dst[2]))))
+    segments=[];cuts=[]
+    def add(a,b,start,end):
+        if b<=a:return
+        if end<start-1e-6:raise ValueError('原画面句子时间倒退，无法按句截取。')
+        segments.append((float(a),float(b),float(start),float(end)))
+    def gap(a,b,prev,next_start,cue):
+        if next_start<prev-1e-5:raise ValueError('相邻原画面句子时间重叠，无法保持画面顺序。')
+        duration=b-a;distance=max(0.,next_start-prev)
+        shown=min(distance,max(0.,duration)*2.)
+        add(a,b,prev,prev+shown)
+        skip=distance-shown
+        if skip>0.02:
+            cuts.append({'cue':cue,'output_time':round(float(b),3),
+                         'source_from':round(float(prev+shown),3),
+                         'source_to':round(float(next_start),3),
+                         'skipped_source_seconds':round(float(skip),3)})
+    gap(0.,target[0][1],0.,windows[0][0],source[0][0])
+    for index,((src,dst),(start,end)) in enumerate(zip(zip(source,target),windows)):
+        add(dst[1],dst[2],start,end)
+        if index+1<len(source):
+            gap(dst[2],target[index+1][1],end,windows[index+1][0],source[index+1][0])
+    gap(target[-1][2],target_duration,windows[-1][1],source_duration,source[-1][0])
+    if not segments:raise ValueError('缺少可用于画面截取的时间区间。')
+    return CutPictureTimeline(segments,cuts),[row[0] for row in segments]+[float(target_duration)]
+
+def selected_visual_timeline(source,target,source_duration,target_duration,job):
+    if job.get('picture_fit','smooth')=='trim':
+        return trimmed_visual_timeline(source,target,source_duration,target_duration)
+    return visual_timeline(source,target,source_duration,target_duration)
+
 def picture_motion_warnings(mapping,source,target,source_duration,target_duration):
     """List risky output intervals without changing the legacy start mapping."""
     warnings=[]
@@ -83,6 +154,12 @@ def picture_motion_warnings(mapping,source,target,source_duration,target_duratio
                              'source_end':round(float(mapping(right)),3),
                              'min_picture_speed':round(low,3),'max_picture_speed':round(high,3),
                              'reason':'画面可能明显变慢或加速；请核对该句的定位与原字幕'})
+    for cut in getattr(mapping,'cut_events',[]):
+        warnings.append({'cue':cut['cue'],'output_start':cut['output_time'],
+                         'output_end':cut['output_time'],'source_start':cut['source_from'],
+                         'source_end':cut['source_to'],'min_picture_speed':0.,
+                         'max_picture_speed':0.,'cut_source_seconds':cut['skipped_source_seconds'],
+                         'reason':'按句截短画面，此处跳过原画面；请检查人物动作是否自然'})
     return warnings
 
 def decoded_picture_duration(job,fps,declared,cancel):
@@ -157,11 +234,11 @@ def prepare(job,cancel,progress=lambda s:None):
     total,active=preview_audio(folder,cancel);progress(pause_summary(duration,total,active,playback_speed(job)))
     speed=playback_speed(job)
     adjusted=[(i,mapped(a,active)/speed,mapped(b,active)/speed,txt) for i,a,b,txt in dst]
-    picture,_=visual_timeline(src,adjusted,vd,total)
+    picture,_=selected_visual_timeline(src,adjusted,vd,total,job)
     preliminary=picture_motion_warnings(picture,src,adjusted,vd,total)
     if preliminary:
         save_json(folder/'画面时间轴警告.json',preliminary)
-        progress(f'画面时间轴发现{len(preliminary)}处速度异常；请查看画面时间轴警告.json并核对相应句子的定位。')
+        progress(f'画面时间轴发现{len(preliminary)}处速度或剪切提醒；请查看画面时间轴警告.json并检查人物动作。')
     if job.get('trim',True) and not active:progress('提示：未剪除空白。未检测到符合安全条件的长静音；静音阈值或配音底噪可能影响检测，请试听核查。')
     progress('分析完成，可编辑停顿表并进行原声/优化A-B试听：'+str(folder))
     return str(folder)
@@ -211,7 +288,7 @@ def render_preview(folder,time,cancel):
     if not 0<=t<total:raise ValueError('预览时间超出视频。')
     cues=[(i,mapped(a,events)/speed,mapped(b,events)/speed,text) for i,a,b,text in m['target']]
     _,actual=decoded_picture_duration(m['job'],Fraction(m['fps']),m['video_duration'],cancel)
-    inv,_=visual_timeline(m['source'],cues,actual,total)
+    inv,_=selected_visual_timeline(m['source'],cues,actual,total,m['job'])
     st=float(inv(t))
     image=folder/'source_preview.png';Image.fromarray(frame_at(m['job']['video'],st,cancel,m['video_stream'])).save(image)
     if not m.get('publish_settings'):return str(image)
@@ -258,7 +335,7 @@ def render(folder,cancel,progress=lambda s:None):
     progress('核对实际可解码画面，避免手机剪辑的尾部时间戳误差')
     decoded_frames,decoded_vd=decoded_picture_duration(job,fps,vd,cancel)
     if src[-1][2]>decoded_vd+.15:raise ValueError('原字幕超出实际可解码画面，请检查字幕末尾。')
-    inv,tx=visual_timeline(src,adjusted,decoded_vd,total);n=math.ceil(total*f)
+    inv,tx=selected_visual_timeline(src,adjusted,decoded_vd,total,job);n=math.ceil(total*f)
     motion_warnings=picture_motion_warnings(inv,src,adjusted,decoded_vd,total)
     save_json(folder/'画面时间轴警告.json',motion_warnings)
     severe=[row for row in motion_warnings if row['max_picture_speed']>4.0]
@@ -266,7 +343,10 @@ def render(folder,cancel,progress=lambda s:None):
         row=severe[0]
         raise ValueError(f"第{row['cue']}句成片{row['output_start']:.2f}–{row['output_end']:.2f}秒需要原画面最高{row['max_picture_speed']:.1f}倍速；无法自然同步，请核对配音定位和对应原字幕。详情见画面时间轴警告.json；未导出错误视频。")
     for warning in motion_warnings:
-        progress(f"画面速度提示：第{warning['cue']}句，成片{warning['output_start']:.2f}–{warning['output_end']:.2f}秒，原片{warning['source_start']:.2f}–{warning['source_end']:.2f}秒；请核对定位")
+        if warning.get('cut_source_seconds'):
+            progress(f"画面剪切提示：接第{warning['cue']}句，成片{warning['output_start']:.2f}秒跳过原片{warning['cut_source_seconds']:.2f}秒；请预览人物动作")
+        else:
+            progress(f"画面速度提示：第{warning['cue']}句，成片{warning['output_start']:.2f}–{warning['output_end']:.2f}秒，原片{warning['source_start']:.2f}–{warning['source_end']:.2f}秒；请核对定位")
     # Keep the source bitrate rather than a fixed 480x854 preset. CRF fallback is explicit.
     bitrate=int(v.get('bit_rate') or max(500000,int(m.get('video_bitrate',0))))
     bitrate_known=bool(v.get('bit_rate'))
@@ -345,7 +425,7 @@ def render(folder,cancel,progress=lambda s:None):
         write_cover({**COVER_DEFAULTS,**opts},folder,cancel,final)
     shutil.copyfile(folder/json.loads((folder/'audio_versions.json').read_text(encoding='utf8'))['B'],folder/'voice.m4a')
     durations={'original_video_seconds':vd,'original_audio_seconds':m['audio_duration'],'output_seconds':float(pi['format']['duration']),'pause_reductions':sum(e['kind']=='cut' and '结尾' not in e['reason'] for e in events),'pause_additions':sum(e['kind']=='add' for e in events),'removed_seconds':sum(e['end']-e['start'] for e in events if e['kind']=='cut'),'added_seconds':sum(e['seconds'] for e in events if e['kind']=='add')}
-    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':bool(motion_warnings),'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'picture_motion_warnings':motion_warnings,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。']+([f'发现{len(motion_warnings)}处画面速度异常，请查看画面时间轴警告.json并核对原字幕定位。'] if motion_warnings else []),'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
+    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':bool(motion_warnings),'picture_fit':job.get('picture_fit','smooth'),'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'picture_motion_warnings':motion_warnings,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。']+([f'发现{len(motion_warnings)}处画面速度或剪切异常，请查看画面时间轴警告.json并核对人物动作。'] if motion_warnings else []),'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
     save_json(folder/'report.json',report)
     (folder/'停顿压缩结果.txt').write_text(pause_summary(m['audio_duration'],total,events,playback_speed(job))+f'\n输出倍速{speed:g}倍，保持音调；请试听并检查同步。\n',encoding='utf-8-sig')
     progress('完成并通过解码检查：'+str(final)+'；'+pause_summary(m['audio_duration'],total,events,playback_speed(job)));return str(folder)
