@@ -481,7 +481,9 @@ class SequencePanel:
             labels=(('video','完整视频 MP4（含片头、正文、原片尾）'),('audio','整段配音（含片头和正文）'),('source_srt','完整视频时间轴 SRT（含片头和正文）')) if mode==SEGMENT_MODES[2] else (('video','正文视频 MP4'),('audio','正文配音（留空用原声）'),('source_srt','正文SRT（外语）'))
             for key,label in labels:self.app.media_labels[key].configure(text=label)
             if mode!=SEGMENT_MODES[2] and self.app.v['language'].get()=='yue':self.app.media_labels['source_srt'].configure(text='粤语输出字幕 SRT')
-            self.app.refresh_language_fields()
+            # SequencePanel is created before App builds the optional SRT widgets.
+            if hasattr(self.app,'target_label') and hasattr(self.app,'chinese_label'):
+                self.app.refresh_language_fields()
         self.segments.configure(text='完整视频定位与片尾替换' if mode==SEGMENT_MODES[2] else '片头 / 片尾（按需启用）')
         selected=self.v['output_mode'].get()
         for idx,name in enumerate(('landscape','portrait')):

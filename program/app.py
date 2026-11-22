@@ -75,6 +75,7 @@ class App:
         for col,widget in enumerate((self.chinese_label,self.chinese_entry,self.chinese_button)):
             widget.grid(row=6,column=col,sticky='ew' if col==1 else 'w')
             widget.grid_remove()
+        self.refresh_language_fields()
         self.language_name=tk.StringVar(value='按文件名判断')
         self.language_manual=False
         options=ttk.Frame(form);options.grid(row=5,column=0,columnspan=3,sticky='w',pady=4)
