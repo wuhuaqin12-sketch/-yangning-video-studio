@@ -7,7 +7,7 @@ from PIL import Image,ImageDraw
 from media import executable,run,probe,parse_srt,write_subs,Cancelled
 from audio_edit import detect,propose,apply,mapped,mapped_cue_start,extend_short_sentences,import_plan,export_plan,validate_events,pause_summary
 from picture_cuts import quiet_picture_cuts,picture_clock
-VERSION='0.14.6'
+VERSION='0.14.7'
 
 def square_pixel_stream(stream):
     """Preserve display geometry when decoding to raw RGB, which has no SAR."""
