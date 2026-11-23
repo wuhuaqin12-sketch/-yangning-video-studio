@@ -543,8 +543,7 @@ class App:
         ttk.Radiobutton(box,text='按所选语言参考稿自动定位（默认）',variable=self.v['alignment'],value='auto').pack(anchor='w')
         ttk.Radiobutton(box,text='使用已校对配音SRT时间轴（可选）',variable=self.v['alignment'],value='timed').pack(anchor='w')
         ttk.Label(box,text='原画面与配音时长匹配',wraplength=660).pack(anchor='w',pady=(8,0))
-        ttk.Radiobutton(box,text='平滑画面定位（默认）',variable=self.v['picture_fit'],value='smooth').pack(anchor='w')
-        ttk.Radiobutton(box,text='短句截取对应原画面（试验；可能出现画面剪切，须预览检查）',variable=self.v['picture_fit'],value='trim').pack(anchor='w')
+        ttk.Label(box,text='画面定位：按原版逐句句首平滑匹配').pack(anchor='w')
         if self.v['language'].get()=='yue':
             ttk.Label(box,text='粤语定位方式（中文辅助 SRT 与粤语输出 SRT 可合并或拆分句子）').pack(anchor='w',pady=(8,0))
             for value,label in (('chinese','中文 SRT 辅助定位（默认）'),('direct','粤语 SRT 直接定位')):

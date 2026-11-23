@@ -1,4 +1,4 @@
-import os,json,math,tempfile,threading,hashlib,sys,shutil,subprocess,bisect,re
+import os,json,math,tempfile,threading,hashlib,sys,shutil,subprocess,re
 from pathlib import Path
 from fractions import Fraction
 import numpy as np
@@ -30,109 +30,18 @@ def playback_speed(job):
     return speed
 
 def visual_timeline(source,target,source_duration,target_duration):
-    """Keep sentence starts; add ends only when speech and gaps can play naturally."""
+    """v0.12.5 picture mapping: anchor sentence starts and both video endpoints."""
     if [c[0] for c in source]!=[c[0] for c in target]:
         raise ValueError('画面与配音字幕编号不对应。')
-    # Preserve the legacy sentence-start anchors. Add caption-end anchors only
-    # when BOTH timelines have room for a real transition between sentences.
-    # Never create the near-zero-width anchors that caused picture jumps in 14.4.
-    anchors=[(0.,0.)]
-    for index,(src,dst) in enumerate(zip(source,target)):
-        if index:
-            anchors.append((float(dst[1]),float(src[1])))
-        next_src=source[index+1] if index+1<len(source) else None
-        next_dst=target[index+1] if index+1<len(target) else None
-        src_gap=(next_src[1]-src[2]) if next_src else (source_duration-src[2])
-        dst_gap=(next_dst[1]-dst[2]) if next_dst else (target_duration-dst[2])
-        # Preserve both caption ends only with enough space to interpolate
-        # smoothly; adjacent cues retain the stable sentence-start mapping.
-        src_span=src[2]-src[1];dst_span=dst[2]-dst[1]
-        # A real gap alone does not make an end anchor safe: squeezing a long
-        # sentence or transition into a short one recreates the 0.14.4 rush.
-        if (src_gap>=0.20 and dst_gap>=0.20 and
-                src_span>=0.20 and dst_span>=0.20 and
-                0.5<=src_span/dst_span<=2.0 and
-                0.5<=src_gap/dst_gap<=2.0 and
-                src[2]>anchors[-1][1]+0.02 and dst[2]>anchors[-1][0]+0.02 and
-                (not next_src or (src[2]<next_src[1] and dst[2]<next_dst[1]))):
-            anchors.append((float(dst[2]),float(src[2])))
-    anchors.append((float(target_duration),float(source_duration)))
-    tx=[t for t,_ in anchors];sx=[v for _,v in anchors]
+    tx=[0.]+[float(c[1]) for c in target[1:]]+[float(target_duration)]
+    sx=[0.]+[float(c[1]) for c in source[1:]]+[float(source_duration)]
     if any(not math.isfinite(v) for v in tx+sx):
         raise ValueError('字幕时间轴存在无效数值')
     if any(b<=a for a,b in zip(tx,tx[1:])) or any(b<=a for a,b in zip(sx,sx[1:])):
         raise ValueError('逐句对应关系无法形成递增时间轴')
     return PchipInterpolator(tx,sx),tx
 
-class CutPictureTimeline:
-    """Right-continuous, forward-only picture map with explicit edit points."""
-    def __init__(self,segments,cuts):
-        self.segments=segments
-        self.starts=[row[0] for row in segments]
-        self.cut_events=cuts
-
-    def __call__(self,time):
-        def at(t):
-            index=max(0,min(len(self.segments)-1,bisect.bisect_right(self.starts,t)-1))
-            a,b,start,end=self.segments[index]
-            return start+(min(max(t,a),b)-a)*(end-start)/(b-a)
-        if np.ndim(time):return np.asarray([at(float(t)) for t in np.asarray(time).flat]).reshape(np.shape(time))
-        return at(float(time))
-
-    def derivative(self):
-        def rate(time):
-            def at(t):
-                index=max(0,min(len(self.segments)-1,bisect.bisect_right(self.starts,t)-1))
-                a,b,start,end=self.segments[index]
-                return (end-start)/(b-a)
-            if np.ndim(time):return np.asarray([at(float(t)) for t in np.asarray(time).flat]).reshape(np.shape(time))
-            return at(float(time))
-        return rate
-
-def trimmed_visual_timeline(source,target,source_duration,target_duration):
-    """Trial: play exceptionally short voice cues from equal-length source clips.
-
-    A source-video skip is a visible cut, never hidden as extreme playback speed.
-    Keep the original voice, output SRT and source-burned Chinese in their frames.
-    """
-    base,_=visual_timeline(source,target,source_duration,target_duration)
-    if not source:return base,[0.,target_duration]
-    windows=[]
-    for src,dst in zip(source,target):
-        length=dst[2]-dst[1]
-        if length<=0:raise ValueError('配音字幕含零时长句子，无法截取对应画面。')
-        if src[2]-src[1]>2*length:
-            windows.append((float(src[2]-length),float(src[2])))
-        else:
-            windows.append((float(base(dst[1])),float(base(dst[2]))))
-    segments=[];cuts=[]
-    def add(a,b,start,end):
-        if b<=a:return
-        if end<start-1e-6:raise ValueError('原画面句子时间倒退，无法按句截取。')
-        segments.append((float(a),float(b),float(start),float(end)))
-    def gap(a,b,prev,next_start,cue):
-        if next_start<prev-1e-5:raise ValueError('相邻原画面句子时间重叠，无法保持画面顺序。')
-        duration=b-a;distance=max(0.,next_start-prev)
-        shown=min(distance,max(0.,duration)*2.)
-        add(a,b,prev,prev+shown)
-        skip=distance-shown
-        if skip>0.02:
-            cuts.append({'cue':cue,'output_time':round(float(b),3),
-                         'source_from':round(float(prev+shown),3),
-                         'source_to':round(float(next_start),3),
-                         'skipped_source_seconds':round(float(skip),3)})
-    gap(0.,target[0][1],0.,windows[0][0],source[0][0])
-    for index,((src,dst),(start,end)) in enumerate(zip(zip(source,target),windows)):
-        add(dst[1],dst[2],start,end)
-        if index+1<len(source):
-            gap(dst[2],target[index+1][1],end,windows[index+1][0],source[index+1][0])
-    gap(target[-1][2],target_duration,windows[-1][1],source_duration,source[-1][0])
-    if not segments:raise ValueError('缺少可用于画面截取的时间区间。')
-    return CutPictureTimeline(segments,cuts),[row[0] for row in segments]+[float(target_duration)]
-
 def selected_visual_timeline(source,target,source_duration,target_duration,job):
-    if job.get('picture_fit','smooth')=='trim':
-        return trimmed_visual_timeline(source,target,source_duration,target_duration)
     return visual_timeline(source,target,source_duration,target_duration)
 
 def picture_motion_warnings(mapping,source,target,source_duration,target_duration):
@@ -456,7 +365,7 @@ def render(folder,cancel,progress=lambda s:None):
         write_cover({**COVER_DEFAULTS,**opts},folder,cancel,final)
     shutil.copyfile(folder/json.loads((folder/'audio_versions.json').read_text(encoding='utf8'))['B'],folder/'voice.m4a')
     durations={'original_video_seconds':vd,'original_audio_seconds':m['audio_duration'],'output_seconds':float(pi['format']['duration']),'pause_reductions':sum(e['kind']=='cut' and '结尾' not in e['reason'] for e in events),'pause_additions':sum(e['kind']=='add' for e in events),'removed_seconds':sum(e['end']-e['start'] for e in events if e['kind']=='cut'),'added_seconds':sum(e['seconds'] for e in events if e['kind']=='add')}
-    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':bool(motion_warnings or caption_gaps),'picture_fit':job.get('picture_fit','smooth'),'subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'picture_motion_warnings':motion_warnings,'subtitle_gap_sound_warnings':caption_gaps,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。']+([f'发现{len(motion_warnings)}处画面速度或剪切异常，请查看画面时间轴警告.json并核对人物动作。'] if motion_warnings else [])+([f'发现{len(caption_gaps)}处无字幕但音轨有明显声音，请查看字幕覆盖警告.json并试听确认。'] if caption_gaps else []),'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
+    report={'version':VERSION,**durations,'decoded_source_frames':decoded_frames,'decoded_source_seconds':decoded_vd,'resolution':[ow,oh],'fps':str(fps),'video_bitrate':pv.get('bit_rate'),'audio_bitrate':pa.get('bit_rate'),'audio_target_bitrate':192000,'full_decode_passed':True,'timeline_checked':True,'cue_count':len(adjusted),'reference_guided_alignment':job.get('alignment') in ('english','multi'),'visual_review_required':bool(motion_warnings or caption_gaps),'picture_fit':'smooth','subtitle_removal':False,'max_identical_source_frames':max_repeats,'sample_frames':checks,'picture_motion_warnings':motion_warnings,'subtitle_gap_sound_warnings':caption_gaps,'warnings':['自动检查不认证译稿与听感，请试听并抽查音画同步。','时间轴同步不等于口型合成。']+([f'发现{len(motion_warnings)}处画面速度或剪切异常，请查看画面时间轴警告.json并核对人物动作。'] if motion_warnings else [])+([f'发现{len(caption_gaps)}处无字幕但音轨有明显声音，请查看字幕覆盖警告.json并试听确认。'] if caption_gaps else []),'speech_speed':speed,'pause_adjusted_audio_seconds':total*speed,'pitch_preserved':True}
     save_json(folder/'report.json',report)
     (folder/'停顿压缩结果.txt').write_text(pause_summary(m['audio_duration'],total,events,playback_speed(job))+f'\n输出倍速{speed:g}倍，保持音调；请试听并检查同步。\n',encoding='utf-8-sig')
     progress('完成并通过解码检查：'+str(final)+'；'+pause_summary(m['audio_duration'],total,events,playback_speed(job)));return str(folder)

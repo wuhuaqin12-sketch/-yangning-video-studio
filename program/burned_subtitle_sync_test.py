@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 from media import executable,run,parse_srt
 from engine import prepare,render,render_preview
-from engine import visual_timeline,trimmed_visual_timeline,picture_motion_warnings,subtitle_gap_sound
+from engine import visual_timeline,selected_visual_timeline,picture_motion_warnings,subtitle_gap_sound
 
 SOURCE_42_57=[(202.73,205.53),(206.23,209.30),(209.43,212.90),
               (212.90,217.23),(218.33,222.30),(222.37,223.63),
@@ -26,19 +26,19 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         mapped,_=visual_timeline(source,target,260.,90.)
         for original,spoken in zip(source[1:],target[1:]):
             self.assertAlmostEqual(float(mapped(spoken[1])),original[1],places=6)
-    def test_bilingual_caption_ends_align_when_both_have_real_gaps(self):
-        source=[(1,0.,2.,'中一'),(2,2.5,4.5,'中二')]
-        target=[(1,0.,3.,'外一'),(2,3.8,6.8,'外二')]
-        mapped,_=visual_timeline(source,target,5.,7.5)
-        self.assertAlmostEqual(float(mapped(3.)),2.,places=6)
-        self.assertAlmostEqual(float(mapped(3.8)),2.5,places=6)
-        self.assertAlmostEqual(float(mapped(6.8)),4.5,places=6)
+    def test_legacy_mapping_uses_sentence_starts_even_with_generous_gaps(self):
+        source=[(1,0.,2.,'一'),(2,2.5,4.5,'二')]
+        voice=[(1,0.,3.,'one'),(2,3.8,6.8,'two')]
+        mapping,anchors=visual_timeline(source,voice,5.,7.5)
+        self.assertEqual(anchors,[0.,3.8,7.5])
+        self.assertAlmostEqual(float(mapping(3.8)),2.5)
+        self.assertNotAlmostEqual(float(mapping(3.)),2.)
 
     def test_adjacent_voice_cues_never_add_microsecond_picture_jump(self):
         source=[(1,0.,1.,'中一'),(2,1.5,2.5,'中二')]
         target=[(1,0.,1.,'外一'),(2,1.,2.,'外二')]
         mapped,anchors=visual_timeline(source,target,3.,2.5)
-        self.assertEqual(anchors,[0.,1.,2.,2.5])
+        self.assertEqual(anchors,[0.,1.,2.5])
         self.assertAlmostEqual(float(mapped(1.)),1.5,places=6)
 
     def test_touching_voice_cues_use_legacy_sentence_starts(self):
@@ -89,45 +89,37 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
         self.assertNotIn(0.,anchors[1:])
         self.assertNotIn(0.0001,anchors)
 
-    def test_trial_shortens_cue_thirteen_without_touching_voice_or_subtitles(self):
-        original=[(12,26.333,29.333,'前句'),(13,30.333,33.666,'本句'),
-                  (14,34.333,37.666,'后句')]
-        voice=[(12,28.920,32.200,'前句'),(13,35.400,35.680,'本句'),
-               (14,35.680,37.920,'后句')]
-        picture,_=trimmed_visual_timeline(original,voice,40.,42.)
-        self.assertAlmostEqual(picture(35.4),33.386,places=3)
-        self.assertAlmostEqual(picture(35.67),33.656,places=3)
-        self.assertAlmostEqual(picture.derivative()(35.5),1.,places=3)
-        self.assertTrue(any(row['cue']==14 and abs(row['skipped_source_seconds']-.667)<.002
-                            for row in picture.cut_events))
-        self.assertEqual(voice[1][1:3],(35.4,35.68))
+    def test_legacy_mode_ignores_saved_picture_cut_setting(self):
+        from workflow import normalize
+        source=[(1,0.,1.,'一'),(2,1.2,4.2,'二'),(3,4.5,6.,'三')]
+        voice=[(1,0.,1.,'one'),(2,1.5,1.8,'two'),(3,1.8,3.,'three')]
+        with tempfile.TemporaryDirectory() as directory:
+            p=Path(directory)/'input';p.write_text('sample')
+            job=normalize(dict(picture_fit='trim',video=str(p),audio=str(p),
+                               source_srt=str(p),target_srt=str(p),output=directory,
+                               language='en',alignment='timed'))
+        self.assertEqual(job['picture_fit'],'smooth')
+        picture,anchors=selected_visual_timeline(source,voice,6.5,3.5,job)
+        self.assertEqual(anchors,[0.,1.5,1.8,3.5])
+        self.assertAlmostEqual(float(picture(1.5)),1.2)
+        self.assertAlmostEqual(float(picture(1.8)),4.5)
+        self.assertFalse(hasattr(picture,'cut_events'))
 
-    def test_trial_keeps_forward_only_picture_with_reported_hard_cuts(self):
-        original=[(1,0.,1.,'一'),(2,1.2,4.2,'二'),(3,4.5,6.,'三')]
-        voice=[(1,0.,1.,'一'),(2,1.5,1.8,'二'),(3,1.8,3.,'三')]
-        picture,anchors=trimmed_visual_timeline(original,voice,6.5,3.5)
-        self.assertEqual(anchors[0],0.)
-        self.assertAlmostEqual(picture(1.65),4.05)
-        self.assertAlmostEqual(picture.derivative()(1.65),1.)
-        self.assertGreater(float(picture(1.8))-float(picture(1.8-1e-6)),.2)
-        self.assertTrue(any('cut_source_seconds' in w for w in
-                            picture_motion_warnings(picture,original,voice,6.5,3.5)))
-
-    def test_trial_preview_and_export_share_source_frame_and_keep_voice_srt(self):
+    def test_legacy_preview_and_export_use_same_source_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
             p=Path(directory);cancel=threading.Event();ff=executable('ffmpeg')
             run([ff,'-v','error','-y','-f','lavfi','-i',
-                 'testsrc2=size=96x64:rate=10:duration=6.5',
+                 'testsrc2=size=96x64:rate=10:duration=3.5',
                  '-c:v','libx264',str(p/'original.mp4')],cancel)
             run([ff,'-v','error','-y','-f','lavfi','-i',
                  'sine=frequency=440:sample_rate=16000:duration=3.5',
                  str(p/'voice.wav')],cancel)
             (p/'source.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\n一\n\n'
-                '2\n00:00:01,200 --> 00:00:04,200\n二\n\n'
-                '3\n00:00:04,500 --> 00:00:06,000\n三\n',encoding='utf8')
+                 '2\n00:00:01,200 --> 00:00:02,200\n二\n\n'
+                '3\n00:00:02,500 --> 00:00:03,200\n三\n',encoding='utf8')
             (p/'voice.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\none\n\n'
-                '2\n00:00:01,500 --> 00:00:01,800\ntwo\n\n'
-                '3\n00:00:01,800 --> 00:00:03,000\nthree\n',encoding='utf8')
+                 '2\n00:00:01,500 --> 00:00:02,300\ntwo\n\n'
+                '3\n00:00:02,400 --> 00:00:03,000\nthree\n',encoding='utf8')
             job=dict(video=str(p/'original.mp4'),audio=str(p/'voice.wav'),
                      source_srt=str(p/'source.srt'),target_srt=str(p/'voice.srt'),
                      output=str(p/'out'),language='en',alignment='timed',
@@ -144,19 +136,8 @@ class BurnedSubtitleSyncTests(unittest.TestCase):
             self.assertEqual([c[3] for c in parse_srt(folder/'subtitles.srt')],
                              ['one','two','three'])
             report=json.loads((folder/'report.json').read_text(encoding='utf8'))
-            self.assertEqual(report['picture_fit'],'trim')
-            self.assertTrue(report['visual_review_required'])
-            self.assertTrue(any(w.get('cut_source_seconds') for w in report['picture_motion_warnings']))
-
-    def test_trial_uses_separate_video_and_preview_cache(self):
-        from project_vnext import processing_key,preview_key
-        with tempfile.TemporaryDirectory() as directory:
-            p=Path(directory)/'input';p.write_text('sample')
-            shared=dict(video=str(p),audio=str(p),source_srt=str(p),target_srt=str(p))
-            smooth={**shared,'picture_fit':'smooth'}
-            trim={**shared,'picture_fit':'trim'}
-            self.assertNotEqual(processing_key(smooth),processing_key(trim))
-            self.assertNotEqual(preview_key(smooth),preview_key(trim))
+            self.assertEqual(report['picture_fit'],'smooth')
+            self.assertFalse(any(w.get('cut_source_seconds') for w in report['picture_motion_warnings']))
 
     def test_audio_activity_in_subtitle_gap_is_reported_without_retiming(self):
         with tempfile.TemporaryDirectory() as directory:
