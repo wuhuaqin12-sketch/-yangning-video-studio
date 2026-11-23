@@ -7,6 +7,8 @@ from PIL import Image
 from media import executable,run,parse_srt
 from engine import prepare,render,render_preview
 from engine import visual_timeline,selected_visual_timeline,picture_motion_warnings,subtitle_gap_sound
+from audio_edit import extend_short_sentences,mapped_cue_start,mapped,apply
+from picture_cuts import picture_clock,quiet_picture_cuts
 
 SOURCE_42_57=[(202.73,205.53),(206.23,209.30),(209.43,212.90),
               (212.90,217.23),(218.33,222.30),(222.37,223.63),
@@ -16,6 +18,63 @@ SOURCE_42_57=[(202.73,205.53),(206.23,209.30),(209.43,212.90),
               (253.63,255.60)]
 
 class BurnedSubtitleSyncTests(unittest.TestCase):
+    def test_short_voice_fills_sentence_end_without_touching_speech_or_frames(self):
+        source=[(1,0.,3.8,'一'),(2,3.8,6.8,'二')]
+        voice=[(1,0.,1.5,'one'),(2,1.5,5.8,'two')]
+        with tempfile.TemporaryDirectory() as directory:
+            raw=Path(directory)/'voice.f32';edited=Path(directory)/'edited.f32'
+            signal=np.ones(58000,dtype=np.float32)*.2;signal.tofile(raw)
+            events,additions=extend_short_sentences(source,voice,[],6.8,5.8,1.)
+            self.assertAlmostEqual(sum(e['seconds'] for e in additions),.8)
+            total=apply(raw,edited,10000,1,events,threading.Event())
+            self.assertAlmostEqual(total,6.6,places=3)
+            pcm=np.fromfile(edited,np.float32)
+            self.assertTrue(np.all(pcm[:14950]==signal[:14950]))
+            self.assertTrue(np.all(pcm[15000:23000]==0.))
+            self.assertTrue(np.all(pcm[23050:]==signal[15050:]))
+            self.assertAlmostEqual(mapped(voice[0][2],events),1.5)
+            second=mapped_cue_start(voice[1][1],events)
+            self.assertAlmostEqual(second,2.3)
+            adjusted=[(1,0.,1.5,'one'),(2,second,mapped(voice[1][2],events),'two')]
+            picture,_=selected_visual_timeline(source,adjusted,6.8,total,{'picture_fit':'adaptive'})
+            self.assertAlmostEqual(float(picture(second)),3.8)
+            self.assertGreater(max(float(picture.derivative()(t)) for t in np.linspace(0,second,10)),1.)
+    def test_only_subtitle_gap_can_be_cut_and_preview_has_same_jump(self):
+        source=[(1,0.,1.,'中一'),(2,2.,3.,'中二')]
+        cuts=[dict(cue=1,start=1.2,end=1.7)]
+        virtual,duration,restore,_=picture_clock(source,cuts,3.5)
+        self.assertAlmostEqual(virtual[1][1],1.5)
+        target=[(1,0.,1.,'one'),(2,1.5,2.5,'two')]
+        picture,_=selected_visual_timeline(source,target,3.5,3.,{'picture_fit':'adaptive','_picture_cuts':cuts})
+        self.assertAlmostEqual(float(picture(1.5)),2.)
+        self.assertEqual(len(picture.cut_events),1)
+        with self.assertRaisesRegex(ValueError,'不能跨句或剪切句首句尾'):
+            picture_clock(source,[dict(cue=1,start=.8,end=1.2)],3.5)
+    def test_quiet_original_audio_and_still_gap_permit_small_picture_cut(self):
+        with tempfile.TemporaryDirectory() as directory:
+            movie=Path(directory)/'original.mp4'
+            run([executable('ffmpeg'),'-v','error','-y','-f','lavfi','-i','color=c=gray:s=160x90:r=15:d=3',
+                 '-f','lavfi','-i','anullsrc=r=44100:cl=mono','-t','3',
+                 '-c:v','libx264','-c:a','aac',str(movie)],threading.Event())
+            source=[(1,0.,.6,'one'),(2,2.,2.5,'two')]
+            cuts=quiet_picture_cuts(movie,source,3.,True,threading.Event(),{1:1.})
+            self.assertEqual(len(cuts),1)
+            self.assertEqual(cuts[0]['cue'],1)
+            self.assertGreaterEqual(cuts[0]['start'],.6)
+            self.assertLessEqual(cuts[0]['end'],2.)
+            self.assertEqual(quiet_picture_cuts(movie,source,3.,False,threading.Event(),{1:1.}),[])
+            inside=quiet_picture_cuts(movie,[(1,0.,1.7,'one'),(2,2.5,2.8,'two')],3.,False,
+                                      threading.Event(),{1:1.})
+            self.assertTrue(any(.3<=c['start']<c['end']<1.7 for c in inside))
+    def test_sentence_pause_waits_until_existing_audio_cut_finishes(self):
+        src=[(1,0.,1.,'一'),(2,2.,3.,'二')]
+        dst=[(1,0.,.8,'one'),(2,1.5,2.5,'two')]
+        existing=[dict(enabled=True,kind='cut',start=.75,end=1.,seconds=.25,
+                       safe_start=.7,safe_end=1.05,reason='静音')]
+        events,adds=extend_short_sentences(src,dst,existing,3.5,3.,1.)
+        self.assertEqual(len(adds),1)
+        self.assertAlmostEqual(adds[0]['start'],1.)
+        self.assertGreater(mapped_cue_start(dst[1][1],events),1.25)
     def test_sutra_cues_42_to_57_preserve_original_picture_starts(self):
         source=[(41,200.,202.,'41')];target=[(41,8.,9.,'41')];clock=10.
         for index,(a,b) in enumerate(SOURCE_42_57):

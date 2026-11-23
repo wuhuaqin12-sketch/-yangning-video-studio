@@ -19,7 +19,7 @@ class App:
         self.root=root;root.title('杨宁视频工作室 · 成片制作 · '+VERSION)
         root.geometry(f'1000x{max(640,min(780,root.winfo_screenheight()-100))}');root.minsize(880,640)
         self.jobs=[];self.busy=False;self.stop=threading.Event();self.events=queue.Queue();self.started=0
-        defaults=dict(video='',audio='',source_srt='',target_srt='',chinese_srt='',cantonese_alignment='chinese',picture_fit='smooth',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.0',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
+        defaults=dict(video='',audio='',source_srt='',target_srt='',chinese_srt='',cantonese_alignment='chinese',picture_fit='adaptive',output=str(Path.home()/'Videos'/'YangNingOutputs'),name='',language='ja',speed='1.0',alignment='auto',audio_profile='off',audio_reference_srt='',font='',font_percent='5.6')
         defaults['output']=preferred(defaults['output'])
         self.v={k:tk.StringVar(value=v) for k,v in defaults.items()}
         self.sequence_settings={}
@@ -543,7 +543,9 @@ class App:
         ttk.Radiobutton(box,text='按所选语言参考稿自动定位（默认）',variable=self.v['alignment'],value='auto').pack(anchor='w')
         ttk.Radiobutton(box,text='使用已校对配音SRT时间轴（可选）',variable=self.v['alignment'],value='timed').pack(anchor='w')
         ttk.Label(box,text='原画面与配音时长匹配',wraplength=660).pack(anchor='w',pady=(8,0))
-        ttk.Label(box,text='画面定位：按原版逐句句首平滑匹配').pack(anchor='w')
+        ttk.Label(box,text='画面定位',wraplength=660).pack(anchor='w',pady=(8,0))
+        ttk.Radiobutton(box,text='长配音延长画面；短配音只剪原片确认空白并补少量停顿（默认）',variable=self.v['picture_fit'],value='adaptive').pack(anchor='w')
+        ttk.Radiobutton(box,text='旧版句首定位（已有项目可继续使用）',variable=self.v['picture_fit'],value='smooth').pack(anchor='w')
         if self.v['language'].get()=='yue':
             ttk.Label(box,text='粤语定位方式（中文辅助 SRT 与粤语输出 SRT 可合并或拆分句子）').pack(anchor='w',pady=(8,0))
             for value,label in (('chinese','中文 SRT 辅助定位（默认）'),('direct','粤语 SRT 直接定位')):
