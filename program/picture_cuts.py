@@ -63,7 +63,8 @@ def quiet_picture_cuts(video,source,duration,has_audio,cancel,needed=None):
                     full=float(np.mean(cv2.absdiff(first,last)))
                     center=float(np.mean(cv2.absdiff(first[15:75,40:120],last[15:75,40:120])))
                     middle_change=float(np.mean(cv2.absdiff(first[15:75,40:120],middle[15:75,40:120])))
-                    if full>5. or center>7. or middle_change>9.:continue
+                    changed=float(np.mean(cv2.absdiff(first[17:90,30:130],last[17:90,30:130])>20))
+                    if full>4. or center>5.5 or middle_change>7. or changed>.04:continue
                     ranked.append((full+center+middle_change,a,b))
             selected=[]
             for _,a,b in sorted(ranked):
