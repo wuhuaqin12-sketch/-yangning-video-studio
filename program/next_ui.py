@@ -511,7 +511,7 @@ class SequencePanel:
         self.restoring=True
         try:
             job,missing=load_project(p)
-            for key,value in (('chinese_srt',''),('cantonese_alignment','direct')):
+            for key,value in (('chinese_srt',''),('cantonese_alignment','direct'),('picture_fit','smooth')):
                 self.app.v[key].set(job.get(key,value))
             for key,value in job.items():
                 if key in self.app.v:self.app.v[key].set(value)

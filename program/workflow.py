@@ -6,6 +6,12 @@ from multilingual import LANGUAGES
 def normalize(job):
     job=dict(job)
     job['speed']=playback_speed(job)
+    # Existing projects retain their saved stable mode. New work selects
+    # conservative source-gap cuts and caps new sentence-end pauses.
+    if job.get('picture_fit')=='trim':job['picture_fit']='smooth'
+    job.setdefault('picture_fit','smooth')
+    if job['picture_fit'] not in ('smooth','adaptive'):
+        raise ValueError('未知的画面时长匹配方式。')
     # Removed features cannot be re-enabled by old queues or imported jobs.
     job.update(denoise=False,separate=False,mute=False)
     job.pop('clean_mode',None)

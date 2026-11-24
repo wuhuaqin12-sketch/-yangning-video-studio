@@ -78,11 +78,13 @@ def propose(cues,silences,duration,rate,channels,raw,trim=True,words=None,langua
 
 def pause_summary(original,total,events,speed=1.0):
     cuts=[e for e in events if e['kind']=='cut']
+    adds=[e for e in events if e['kind']=='add']
     removed=sum(e['end']-e['start'] for e in cuts)
+    added=sum(e['seconds'] for e in adds)
     def clock(t):
         mins,sec=divmod(t,60)
         return f'{int(mins)}分{sec:04.1f}秒'
-    text=f'停顿压缩：{clock(original)} → {clock(total*speed)}；剪短{len(cuts)}处，共删除{removed:.2f}秒'
+    text=f'配音时长：{clock(original)} → {clock(total*speed)}；声音剪短{len(cuts)}处，共删除{removed:.2f}秒；句尾补{len(adds)}处，共增加{added:.2f}秒'
     if speed!=1.0:text+=f'；再以{speed:g}倍速输出：{clock(total)}（保持音调）'
     return text
 
@@ -104,6 +106,33 @@ def validate_events(events,duration):
 
 def mapped(t,events):
     return t-sum(max(0,min(t,e['end'])-e['start']) for e in events if e['kind']=='cut' and t>e['start'])+sum(e['seconds'] for e in events if e['kind']=='add' and e['start']<t)
+
+def mapped_cue_start(t,events):
+    """A pause at a shared cue boundary belongs before the following cue."""
+    return mapped(t,events)+sum(e['seconds'] for e in events if e['kind']=='add' and abs(e['start']-t)<1e-6)
+
+def extend_short_sentences(source,cues,events,video_duration,audio_duration,speed,picture_cuts=(),max_pause=.8):
+    """Use a small natural sentence pause; leave residual mismatch to picture mapping."""
+    if [c[0] for c in source]!=[c[0] for c in cues]:
+        raise ValueError('原视频与配音字幕编号不对应，不能补句尾停顿。')
+    additions=[]
+    for index,(picture,voice) in enumerate(zip(source,cues)):
+        picture_end=source[index+1][1] if index+1<len(source) else video_duration
+        voice_end=cues[index+1][1] if index+1<len(cues) else audio_duration
+        video_span=picture_end-picture[1]-sum(c['end']-c['start'] for c in picture_cuts if c['cue']==picture[0])
+        audio_span=(mapped(voice_end,events)-mapped(voice[1],events))/speed
+        missing=video_span-audio_span
+        if missing<=.05:continue
+        anchor=voice[2]
+        for ev in events:
+            if ev.get('enabled',True) and ev['kind']=='cut' and ev['start']<=anchor<ev['end']:
+                anchor=ev['end']
+        if anchor>voice_end+.001:continue
+        amount=min(max_pause,missing)*speed
+        additions.append(dict(enabled=True,kind='add',start=anchor,end=anchor,
+                              seconds=amount,reason=f'第{picture[0]}句句尾自然停顿（上限{max_pause:.2f}秒）',
+                              safe_start=anchor,safe_end=anchor))
+    return validate_events([*events,*additions],audio_duration),additions
 
 def apply(raw,dest,rate,channels,events,cancel):
     pcm=np.memmap(raw,np.float32,'r').reshape(-1,channels);duration=len(pcm)/rate;events=validate_events(events,duration);pos=0;written=0
