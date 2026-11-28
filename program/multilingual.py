@@ -95,7 +95,29 @@ def align(cues,audio,folder,cancel,progress,language,duration):
     _worker_run(request,folder,cancel,progress)
     result=json.loads((folder/'multilingual_result.json').read_text(encoding='utf8'))
     try:
-        aligned,rows,ids=validate(cues,result,duration,join_subwords=True)
+        try:
+            aligned,rows,ids=validate(cues,result,duration,join_subwords=True)
+        except ValueError as first:
+            match=re.search(r'第(\d+)句没有有效定位时长',str(first))
+            if not match or len(cues)<2:raise
+            index=next((i for i,c in enumerate(cues) if str(c[0])==match.group(1)),None)
+            if index is None:raise
+            # Retry once with the failed cue and its neighbours in one reference line.
+            # Keep the complete audio and reference context; never invent timestamps.
+            left=max(0,index-1);right=min(len(cues),index+2)
+            lines=text.split('\n')
+            retry_text='\n'.join(lines[:left]+[' '.join(lines[left:right])]+lines[right:])
+            retry_folder=folder/'alignment_retry';retry_folder.mkdir(exist_ok=True)
+            retry_request=retry_folder/'alignment_request.json'
+            data=json.loads(request.read_text(encoding='utf8'));data['text']=retry_text
+            retry_request.write_text(json.dumps(data,ensure_ascii=False),encoding='utf8')
+            progress(f'第{cues[index][0]}句定位异常，正在联合相邻句重新定位（可停止）')
+            _worker_run(retry_request,retry_folder,cancel,progress)
+            result=json.loads((retry_folder/'multilingual_result.json').read_text(encoding='utf8'))
+            # Force text-based repartition even if the model returns the original count.
+            retry_words=[w for seg in result.get('segments',[]) for w in seg.get('words',[])]
+            result=dict(result,segments=[{'words':retry_words}])
+            aligned,rows,ids=validate(cues,result,duration,join_subwords=True)
     except ValueError as exc:
         (folder/'alignment_diagnostics.json').write_text(json.dumps(dict(status='failed',language=language,error=str(exc),reference_times_ignored=True),ensure_ascii=False,indent=2),encoding='utf8')
         raise ValueError(str(exc)+' 定位诊断：'+str(folder/'alignment_diagnostics.json')) from exc
