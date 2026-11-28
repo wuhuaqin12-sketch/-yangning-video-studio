@@ -72,6 +72,30 @@ class MultiTests(unittest.TestCase):
         self.assertEqual(len(aligned),2)
         self.assertEqual(aligned[1][1:3],(2.0,3.1))
 
+    def test_zero_duration_retries_neighbours_without_source_times(self):
+        cues=[(1,40,41,'Bonjour.'),(2,41,42,'Vous êtes ici.'),(3,42,43,'Merci.')]
+        requests=[]
+        def worker(req,folder,cancel,progress):
+            data=json.loads(req.read_text(encoding='utf8'));requests.append(data)
+            if len(requests)==1:
+                segments=[{'words':[dict(word='Bonjour.',start=.2,end=.8)]},
+                          {'words':[dict(word='Vous êtes ici.',start=1.,end=1.)]},
+                          {'words':[dict(word='Merci.',start=2.,end=2.5)]}]
+            else:
+                self.assertEqual(data['text'],'Bonjour. Vous êtes ici. Merci.')
+                segments=[{'words':[dict(word='Bonjour.',start=.2,end=.8),
+                                    dict(word=' Vous',start=1.,end=1.3),
+                                    dict(word=' êtes',start=1.3,end=1.6),
+                                    dict(word=' ici.',start=1.6,end=1.9),
+                                    dict(word=' Merci.',start=2.,end=2.5)]}]
+            (folder/'multilingual_result.json').write_text(json.dumps({'segments':segments}),encoding='utf8')
+        with patch.object(m,'_worker_run',side_effect=worker):
+            aligned=m.align(cues,self.f,self.p,threading.Event(),lambda s:None,'fr',3.)
+        self.assertEqual(len(requests),2)
+        self.assertEqual(requests[0]['audio'],requests[1]['audio'])
+        self.assertEqual(aligned[1][1:3],(1.,1.9))
+        self.assertTrue((self.p/'alignment_retry/multilingual_result.json').exists())
+
     def test_stop_worker(self):
         stop=threading.Event();stop.set()
         with self.assertRaises(m.Cancelled):m._worker_run(self.f,self.p,stop,lambda s:None)
