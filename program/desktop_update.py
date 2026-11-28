@@ -2,7 +2,7 @@
 import hashlib,json,os,re,shutil,stat,tempfile,time,urllib.parse,urllib.request,uuid,zipfile
 from pathlib import Path
 
-APP_VERSION='0.14.7'
+APP_VERSION='0.14.8'
 MAX_PACKAGE=200*1024*1024
 MAX_EXTRACTED=600*1024*1024
 
